@@ -23,29 +23,37 @@ streamlit run src\web_app.py
 
 ## 🐳 Docker 部署说明
 
-本项目已配置 GitHub Actions 自动构建。
+本项目已配置 GitHub Actions 自动构建，推荐使用 Docker Compose 部署。
 
-1. **自动构建**: 只要你 `git push` 到 `main` 分支，GitHub 就会自动构建镜像并发布到 ghcr.io。
-2. **镜像地址**: `ghcr.io/10000ge10000/clash-config-gen:latest`
+### 1. 准备 docker-compose.yml
 
-### 在服务器上运行
+在服务器创建 `docker-compose.yml` 文件：
 
-复制以下命令到你的 VPS 或本地 Docker 环境运行：
-
-```bash
-docker run -d \
-  --name clash-gen \
-  --restart always \
-  -p 8501:8501 \
-  -p 8000:8000 \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/ruleset:/app/ruleset \
-  ghcr.io/10000ge10000/clash-config-gen:latest
+```yaml
+version: '3'
+services:
+  clash-gen:
+    image: ghcr.io/10000ge10000/clash-config-gen:latest
+    container_name: clash-gen
+    restart: always
+    ports:
+      - "8501:8501" # Web UI 面板
+      - "8000:8000" # 订阅链接 API
+    volumes:
+      - ./ruleset:/app/ruleset # 自定义规则集目录 (确保本地目录存在)
 ```
 
-> **注意**: 首次拉取 GitHub 镜像可能需要登录：
-> `echo $CR_PAT | docker login ghcr.io -u 10000ge10000 --password-stdin`
-> (其中 `$CR_PAT` 是你的 GitHub Personal Access Token)
+### 2. 启动服务
+
+```bash
+# 登录 GitHub Container Registry (如果镜像是私有的)
+# echo $CR_PAT | docker login ghcr.io -u 10000ge10000 --password-stdin
+
+# 启动容器
+docker-compose up -d
+```
+
+> **提示**: 镜像由 GitHub Actions 自动构建，地址为: `ghcr.io/10000ge10000/clash-config-gen:latest`
 
 ## ⬆️ 如何上传/更新代码
 
