@@ -30,7 +30,6 @@ streamlit run src\web_app.py
 在服务器创建 `docker-compose.yml` 文件：
 
 ```yaml
-version: '3'
 services:
   clash-gen:
     image: ghcr.io/10000ge10000/clash-config-gen:latest
