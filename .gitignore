@@ -1,0 +1,24 @@
+# 忽略编译产生的文件
+__pycache__/
+*.pyc
+
+# 忽略虚拟环境
+.venv/
+venv/
+env/
+
+# 忽略数据库文件
+*.db
+*.sqlite3
+data/
+
+# 忽略生成的敏感配置文件
+# *.yaml
+# *.yml
+# 只忽略生成的 clash 配置文件，如果它们有特定的命名模式，最好指定。
+# 暂时注释掉 *.yml 以免误伤 docker-compose.yml
+output/
+
+# 忽略系统文件
+.DS_Store
+.env

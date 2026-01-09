@@ -1,0 +1,12 @@
+services:
+  clash-gen:
+    build: .
+    container_name: clash-gen
+    restart: always
+    ports:
+      - "8501:8501" # Streamlit Web UI
+      - "8000:8000" # Subscription API
+    environment:
+      - HOST_URL=http://localhost:8000 # 如果部署在服务器，请修改为 http://your-ip:8000
+    volumes:
+      - ./ruleset:/app/ruleset # 持久化自定义规则集 (可选)
