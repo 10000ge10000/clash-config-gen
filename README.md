@@ -32,7 +32,7 @@ streamlit run src\web_app.py
 ```yaml
 services:
   clash-gen:
-    image: ghcr.io/10000ge10000/clash-config-gen:latest
+    image: ghcr.io/10000ge10000/clash-config-gen:main
     container_name: clash-gen
     restart: always
     ports:
@@ -52,7 +52,7 @@ services:
 docker-compose up -d
 ```
 
-> **提示**: 镜像由 GitHub Actions 自动构建，地址为: `ghcr.io/10000ge10000/clash-config-gen:latest`
+> **提示**: 镜像由 GitHub Actions 自动构建，地址为: `ghcr.io/10000ge10000/clash-config-gen:main`
 
 ## ⬆️ 如何上传/更新代码
 
