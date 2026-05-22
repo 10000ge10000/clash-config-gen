@@ -4,25 +4,6 @@
 
 项目当前已经支持用户注册、登录、SQLite 持久化、管理员初始化、Docker 部署、GHCR 镜像发布和动态订阅接口。配置不再只存在浏览器会话里，容器重启后用户、节点、规则和订阅 Token 都会保留。
 
-## 项目架构
-
-```mermaid
-flowchart LR
-    user[用户浏览器] --> ui[Streamlit Web UI<br/>账号登录 / 节点导入 / 配置生成]
-    openclash[OpenClash 客户端] --> sub[FastAPI 订阅接口<br/>/sub/{token}]
-
-    ui --> importer[导入解析器<br/>OpenClash YAML / onekey 片段 / 分享链接]
-    ui --> builder[配置生成器<br/>Clash YAML / 策略组 / 规则]
-    sub --> db[(SQLite 数据库<br/>用户 / Token / 最终订阅 YAML)]
-    ui --> db
-    builder --> db
-
-    actions[GitHub Actions] --> image[GHCR 镜像<br/>ghcr.io/10000ge10000/clash-config-gen:main]
-    image --> docker[Docker Compose 部署]
-    docker --> ui
-    docker --> sub
-```
-
 ## 核心能力
 
 | 能力 | 说明 |
