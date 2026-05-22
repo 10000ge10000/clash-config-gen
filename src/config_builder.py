@@ -121,6 +121,14 @@ def text_to_list(text: str) -> list[str]:
     return [line.strip() for line in (text or "").splitlines() if line.strip()]
 
 
+def first_non_empty_list(*values: str, fallback: str = "") -> list[str]:
+    for value in values:
+        items = text_to_list(value)
+        if items:
+            return items
+    return text_to_list(fallback)
+
+
 def build_config(
     proxies: list[dict[str, Any]],
     global_config: dict[str, Any],
@@ -134,48 +142,48 @@ def build_config(
     final_proxy_groups = generate_proxy_groups(proxies)
 
     final_config: dict[str, Any] = {
-        "global": {
-            "port": global_config.get("port", 7890),
-            "socks-port": global_config.get("socks_port", 7891),
-            "mixed-port": global_config.get("mixed_port", 7893),
-            "allow-lan": global_config.get("allow_lan", True),
-            "bind-address": global_config.get("bind_address", "*"),
-            "mode": global_config.get("mode", "rule"),
-            "log-level": global_config.get("log_level", "info"),
-            "ipv6": global_config.get("ipv6_support", True),
-            "external-controller": global_config.get("external_controller", "0.0.0.0:9090"),
-            "find-process-mode": global_config.get("find_process_mode", "strict"),
-        },
-        "port": global_config.get("port", 7890),
-        "socks-port": global_config.get("socks_port", 7891),
-        "mixed-port": global_config.get("mixed_port", 7893),
-        "allow-lan": global_config.get("allow_lan", True),
-        "bind-address": global_config.get("bind_address", "*"),
-        "mode": global_config.get("mode", "rule"),
-        "log-level": global_config.get("log_level", "info"),
-        "ipv6": global_config.get("ipv6_support", True),
-        "external-controller": global_config.get("external_controller", "0.0.0.0:9090"),
-        "find-process-mode": global_config.get("find_process_mode", "strict"),
         "proxies": proxies,
         "proxy-groups": final_proxy_groups,
     }
 
-    for key, default in {
-        "redir-port": global_config.get("redir_port"),
-        "tproxy-port": global_config.get("tproxy_port"),
-        "interface-name": global_config.get("interface_name"),
-        "keep-alive-interval": global_config.get("keep_alive_interval"),
-        "keep-alive-idle": global_config.get("keep_alive_idle"),
-    }.items():
-        if default not in (None, ""):
-            final_config[key] = default
+    base_options = {
+        "port": global_config.get("port", 7890),
+        "socks-port": global_config.get("socks_port", 7891),
+        "mixed-port": global_config.get("mixed_port", 7893),
+        "allow-lan": global_config.get("allow_lan", False),
+        "bind-address": global_config.get("bind_address", "*"),
+        "mode": global_config.get("mode", "rule"),
+        "log-level": global_config.get("log_level", "info"),
+        "ipv6": global_config.get("ipv6_support", False),
+        "find-process-mode": global_config.get("find_process_mode", "strict"),
+    }
+    if global_config.get("include_global_compat", False):
+        final_config["global"] = dict(base_options)
+    if global_config.get("include_inbound_ports", False):
+        final_config.update(base_options)
 
-    if global_config.get("external_ui"):
-        final_config["external-ui"] = global_config["external_ui"]
-    if global_config.get("external_ui_name"):
-        final_config["external-ui-name"] = global_config["external_ui_name"]
-    if global_config.get("external_ui_url"):
-        final_config["external-ui-url"] = global_config["external_ui_url"]
+    if global_config.get("include_controller", False):
+        if global_config.get("external_controller"):
+            final_config["external-controller"] = global_config["external_controller"]
+        if global_config.get("secret"):
+            final_config["secret"] = global_config["secret"]
+        if global_config.get("external_ui"):
+            final_config["external-ui"] = global_config["external_ui"]
+        if global_config.get("external_ui_name"):
+            final_config["external-ui-name"] = global_config["external_ui_name"]
+        if global_config.get("external_ui_url"):
+            final_config["external-ui-url"] = global_config["external_ui_url"]
+
+    if global_config.get("include_router_options", False):
+        for key, default in {
+            "redir-port": global_config.get("redir_port"),
+            "tproxy-port": global_config.get("tproxy_port"),
+            "interface-name": global_config.get("interface_name"),
+            "keep-alive-interval": global_config.get("keep_alive_interval"),
+            "keep-alive-idle": global_config.get("keep_alive_idle"),
+        }.items():
+            if default not in (None, ""):
+                final_config[key] = default
 
     if global_config.get("enable_tun", False):
         final_config["tun"] = {
@@ -190,11 +198,11 @@ def build_config(
             "strict-route": global_config.get("tun_strict_route", False),
         }
 
-    if global_config.get("enable_dns", True):
+    if global_config.get("enable_dns", False):
         is_desktop = global_config.get("is_desktop", True)
         final_config["dns"] = {
             "enable": True,
-            "fake-ip-filter": SOFT_ROUTER_FAKE_IP_FILTER_LIST if global_config.get("openclash_preset", True) else FAKE_IP_FILTER_LIST,
+            "fake-ip-filter": SOFT_ROUTER_FAKE_IP_FILTER_LIST if global_config.get("openclash_preset", False) else FAKE_IP_FILTER_LIST,
         }
         # OpenClash 模式下仅生成精简 DNS 配置，其他字段由插件管理
         if is_desktop:
@@ -208,12 +216,21 @@ def build_config(
             })
             if global_config.get("fake_ip_range6"):
                 final_config["dns"]["fake-ip-range6"] = global_config["fake_ip_range6"]
-            final_config["dns"]["respect-rules"] = global_config.get("dns_respect_rules", False)
+            dns_respect_rules = global_config.get("dns_respect_rules", False)
+            final_config["dns"]["respect-rules"] = dns_respect_rules
             if global_config.get("fake_ip_filter_mode"):
                 final_config["dns"]["fake-ip-filter-mode"] = global_config["fake_ip_filter_mode"]
             direct_nameserver = text_to_list(global_config.get("direct_nameserver", ""))
             if direct_nameserver:
                 final_config["dns"]["direct-nameserver"] = direct_nameserver
+            if dns_respect_rules:
+                final_config["dns"]["proxy-server-nameserver"] = first_non_empty_list(
+                    global_config.get("proxy_server_nameserver", ""),
+                    global_config.get("direct_nameserver", ""),
+                    global_config.get("default_nameserver", ""),
+                    global_config.get("nameserver", ""),
+                    fallback="223.5.5.5",
+                )
             fallback = text_to_list(global_config.get("fallback", ""))
             if fallback:
                 final_config["dns"]["fallback"] = fallback
@@ -223,17 +240,24 @@ def build_config(
                 final_config["dns"]["nameserver-policy"] = policy
         else:
             # OpenClash 模式下仅保留必要的 DNS 字段
-            final_config["dns"]["respect-rules"] = global_config.get("dns_respect_rules", True)
+            dns_respect_rules = global_config.get("dns_respect_rules", False)
+            final_config["dns"]["respect-rules"] = dns_respect_rules
+            if dns_respect_rules:
+                final_config["dns"]["proxy-server-nameserver"] = first_non_empty_list(
+                    global_config.get("proxy_server_nameserver", ""),
+                    global_config.get("direct_nameserver", ""),
+                    global_config.get("default_nameserver", ""),
+                    global_config.get("nameserver", ""),
+                    fallback="223.5.5.5",
+                )
 
-    if global_config.get("secret"):
-        final_config["secret"] = global_config["secret"]
+    if global_config.get("enable_core_options", False):
+        final_config["tcp-concurrent"] = global_config.get("tcp_concurrent", False)
+        final_config["unified-delay"] = global_config.get("unified_delay", False)
+        final_config["geodata-mode"] = global_config.get("geodata_mode", False)
+        final_config["geodata-loader"] = global_config.get("geodata_loader", "standard")
 
-    final_config["tcp-concurrent"] = global_config.get("tcp_concurrent", True)
-    final_config["unified-delay"] = global_config.get("unified_delay", True)
-    final_config["geodata-mode"] = global_config.get("geodata_mode", True)
-    final_config["geodata-loader"] = global_config.get("geodata_loader", "standard")
-
-    if global_config.get("enable_sniffer", True):
+    if global_config.get("enable_sniffer", False):
         final_config["sniffer"] = {
             "enable": True,
             "sniff": {
@@ -249,10 +273,10 @@ def build_config(
             "skip-dst-address": SNIFFER_SKIP_DST_ADDRESS,
         }
 
-    if global_config.get("profile_store_selected", True) or global_config.get("profile_store_fake_ip", True):
+    if global_config.get("profile_store_selected", False) or global_config.get("profile_store_fake_ip", False):
         final_config["profile"] = {
-            "store-selected": global_config.get("profile_store_selected", True),
-            "store-fake-ip": global_config.get("profile_store_fake_ip", True),
+            "store-selected": global_config.get("profile_store_selected", False),
+            "store-fake-ip": global_config.get("profile_store_fake_ip", False),
         }
 
     if global_config.get("ntp_enable", False):
@@ -312,6 +336,10 @@ def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
             target = parts[-1]
             if target not in valid_targets and target != "no-resolve":
                 warnings.append(f"规则 '{rule}' 指向了不存在的策略组: '{target}'")
+
+    dns_config = config.get("dns") or {}
+    if dns_config.get("respect-rules") and not dns_config.get("proxy-server-nameserver"):
+        errors.append("dns.respect-rules 已启用，但 dns.proxy-server-nameserver 为空")
 
     try:
         yaml.safe_load(build_yaml(config))

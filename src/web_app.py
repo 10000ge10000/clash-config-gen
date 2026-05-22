@@ -64,21 +64,69 @@ st.markdown("""
         padding-bottom: 2rem !important;
     }
     
-    /* 调整主标题字体大小并确保完整显示 */
-    h1 {
-        font-size: 2.5rem !important;
-        line-height: 1.3 !important;
-        margin-bottom: 0.8rem !important;
-        white-space: normal !important;
-        overflow: visible !important;
-        height: auto !important;
-        word-break: normal !important;
+    .app-hero {
+        padding: 1.15rem 1.25rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #f8fafc 0%, #ffffff 55%, #eef6ff 100%);
+        margin-bottom: 1rem;
+    }
+    .app-hero-title {
+        font-size: clamp(1.65rem, 4vw, 2.55rem);
+        line-height: 1.18;
+        font-weight: 800;
+        color: #1f2937;
+        margin: 0 0 .45rem 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .app-hero-subtitle {
+        color: #4b5563;
+        font-size: 1rem;
+        line-height: 1.65;
+        margin: 0 0 .85rem 0;
+    }
+    .app-hero-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: .6rem;
+    }
+    .app-hero-chip {
+        display: flex;
+        align-items: center;
+        gap: .55rem;
+        padding: .62rem .72rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: rgba(255,255,255,.78);
+        color: #374151;
+        font-weight: 650;
+        min-width: 0;
+    }
+    .app-hero-chip span:first-child {
+        font-size: 1.25rem;
+        flex: 0 0 auto;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("OpenClash 配置文件生成器")
-st.markdown("不用手写 YAML，输入节点信息，自动生成符合 Meta 规范的配置文件。")
+st.markdown(
+    """
+<section class="app-hero">
+  <div class="app-hero-title">OpenClash 配置文件生成器</div>
+  <p class="app-hero-subtitle">
+    面向 Docker 自部署、OpenClash 软路由和 mihomo 客户端的订阅生成工具。
+    导入节点、编辑规则、生成订阅、校验 YAML，一套流程直接闭环。
+  </p>
+  <div class="app-hero-grid">
+    <div class="app-hero-chip"><span>🧩</span><span>智能导入 YAML / 订阅 / 分享链接</span></div>
+    <div class="app-hero-chip"><span>🛡️</span><span>用户隔离 Token 订阅</span></div>
+    <div class="app-hero-chip"><span>🧪</span><span>生成前自动检查配置</span></div>
+  </div>
+</section>
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ==========================================
@@ -209,6 +257,85 @@ GEOIP,CN,DIRECT,no-resolve
 MATCH,Proxy
 """
 
+
+def reset_global_widget_keys() -> None:
+    """应用预设时清理侧边栏控件缓存，避免旧 widget 值覆盖新的 global_config。"""
+    for key in list(st.session_state.keys()):
+        if key.startswith("gc_"):
+            del st.session_state[key]
+
+
+def apply_full_client_dns_leak_preset() -> None:
+    """完整客户端预设：由生成的 YAML 接管 DNS/TUN，重点防止本机 DNS 绕过代理。"""
+    st.session_state.global_config.update({
+        "include_global_compat": False,
+        "include_inbound_ports": False,
+        "include_controller": False,
+        "include_router_options": False,
+        "enable_core_options": True,
+        "tcp_concurrent": True,
+        "unified_delay": True,
+        "geodata_mode": True,
+        "enable_dns": True,
+        "dns_listen": "0.0.0.0:7874",
+        "dns_ipv6": False,
+        "enhanced_mode": "fake-ip",
+        "fake_ip_range": "198.18.0.1/16",
+        "fake_ip_range6": "fc00::/18",
+        "fake_ip_filter_mode": "blacklist",
+        "default_nameserver": "223.5.5.5\n119.29.29.29",
+        "nameserver": "https://dns.alidns.com/dns-query\nhttps://doh.pub/dns-query",
+        "direct_nameserver": "223.5.5.5\n119.29.29.29",
+        "proxy_server_nameserver": "223.5.5.5",
+        "fallback": "",
+        "dns_respect_rules": True,
+        "openclash_preset": False,
+        "enable_tun": True,
+        "tun_stack": "mixed",
+        "tun_auto_route": True,
+        "tun_auto_detect_interface": True,
+        "tun_dns_hijack": True,
+        "tun_dns_hijack_value": "127.0.0.1:53",
+        "tun_endpoint_independent_nat": True,
+        "tun_auto_redirect": False,
+        "tun_strict_route": True,
+        "enable_sniffer": True,
+        "sniff_override_dest": True,
+        "sniffer_parse_pure_ip": True,
+        "sniffer_force_dns_mapping": True,
+        "profile_store_selected": True,
+        "profile_store_fake_ip": True,
+    })
+    reset_global_widget_keys()
+    st.session_state["target_mode"] = "全平台客户端 (PC/移动端)"
+
+
+def apply_openclash_router_safe_preset() -> None:
+    """软路由预设：订阅只负责节点和规则，DNS/TUN 留给 OpenClash 插件统一接管。"""
+    st.session_state.global_config.update({
+        "include_global_compat": False,
+        "include_inbound_ports": False,
+        "include_controller": False,
+        "include_router_options": False,
+        "enable_core_options": False,
+        "enable_dns": False,
+        "dns_respect_rules": False,
+        "direct_nameserver": "",
+        "proxy_server_nameserver": "",
+        "enable_tun": False,
+        "tun_dns_hijack": False,
+        "tun_strict_route": False,
+        "enable_sniffer": False,
+        "sniff_override_dest": False,
+        "sniffer_parse_pure_ip": False,
+        "sniffer_force_dns_mapping": False,
+        "openclash_preset": False,
+        "profile_store_selected": False,
+        "profile_store_fake_ip": False,
+    })
+    reset_global_widget_keys()
+    st.session_state["target_mode"] = "OpenClash / 软路由"
+
 # 2. Fake-IP 过滤列表 (防止国内应用卡顿)
 FAKE_IP_FILTER_LIST = [
     "+.services.googleapis.cn", "+.googleapis.cn", "*.lan", "*.localdomain", "*.example", "*.invalid",
@@ -243,17 +370,23 @@ if 'custom_rule_providers' not in st.session_state:
 if 'global_config' not in st.session_state:
     st.session_state.global_config = {
         # 基础
+        "include_global_compat": False,
+        "include_inbound_ports": False,
+        "include_controller": False,
+        "include_router_options": False,
+        "enable_core_options": False,
+        "optional_globals_v2": True,
         "port": 7890,
 
         "socks_port": 7891,
         "mixed_port": 7893,
-        "allow_lan": True,
+        "allow_lan": False,
         "bind_address": "*",
         "mode": "rule",
         "log_level": "info",
-        "ipv6_support": True,
+        "ipv6_support": False,
         "external_controller": "0.0.0.0:9090",
-        "secret": "password",  # 设置默认密码为"password"
+        "secret": "",
         "redir_port": 7892,
         "tproxy_port": 7895,
         "interface_name": "",
@@ -263,49 +396,50 @@ if 'global_config' not in st.session_state:
         # 性能与网络
         "keep_alive_interval": 15,
         "keep_alive_idle": 600,
-        "tcp_concurrent": True,
-        "unified_delay": True,
+        "tcp_concurrent": False,
+        "unified_delay": False,
         "find_process_mode": "strict",
-        "geodata_mode": True,
+        "geodata_mode": False,
         "geodata_loader": "standard",
         # TUN
         "enable_tun": False,
         "tun_stack": "mixed", # 修改为 mixed
         "tun_device": "utun",
-        "tun_auto_route": True,
-        "tun_auto_detect_interface": True,
-        "tun_dns_hijack": True,
+        "tun_auto_route": False,
+        "tun_auto_detect_interface": False,
+        "tun_dns_hijack": False,
         "tun_dns_hijack_value": "127.0.0.1:53",
-        "tun_endpoint_independent_nat": True,
+        "tun_endpoint_independent_nat": False,
         "tun_auto_redirect": False,
         "tun_strict_route": False,
         # DNS (参考 Config)
-        "enable_dns": True,
+        "enable_dns": False,
         "dns_listen": "0.0.0.0:7874", # 修改为 7874
-        "dns_ipv6": True,
+        "dns_ipv6": False,
         "enhanced_mode": "fake-ip",
         "fake_ip_range": "198.18.0.1/16",
         "fake_ip_range6": "fc00::/18",
         "fake_ip_filter_mode": "blacklist",
-        "dns_respect_rules": True,
-        "direct_nameserver": "223.5.5.5\n119.29.29.29",
+        "dns_respect_rules": False,
+        "direct_nameserver": "",
+        "proxy_server_nameserver": "",
         "default_nameserver": "223.5.5.5\n119.29.29.29",
         "nameserver": "https://dns.alidns.com/dns-query\nhttps://doh.pub/dns-query",
         "fallback": "https://1.1.1.1/dns-query\ntcp://8.8.8.8",
-        # 嗅探 (默认开启)
-        "enable_sniffer": True, 
-        "sniff_override_dest": True,
-        "sniffer_parse_pure_ip": True,
-        "sniffer_force_dns_mapping": True,
+        # 嗅探 (默认关闭，只有用户勾选或应用预设后才写入 YAML)
+        "enable_sniffer": False,
+        "sniff_override_dest": False,
+        "sniffer_parse_pure_ip": False,
+        "sniffer_force_dns_mapping": False,
         # OpenClash / 软路由
-        "openclash_preset": True,
-        "profile_store_selected": True,
-        "profile_store_fake_ip": True,
+        "openclash_preset": False,
+        "profile_store_selected": False,
+        "profile_store_fake_ip": False,
         "ntp_enable": False,
         "ntp_server": "time.apple.com",
         "ntp_port": 123,
         "ntp_interval": 30,
-        "ntp_write_to_system": True,
+        "ntp_write_to_system": False,
         "authentication": "",
         # 规则
         "custom_rules": DEFAULT_DIRECT_RULES # 注入默认规则
@@ -319,6 +453,21 @@ if st.session_state.get("session_loaded_user_id") != current_user["id"]:
         st.session_state.proxies_data = saved_config["proxies"]
     if saved_config.get("global_config"):
         st.session_state.global_config.update(saved_config["global_config"])
+        if not st.session_state.global_config.get("optional_globals_v2"):
+            st.session_state.global_config.update({
+                "include_global_compat": False,
+                "include_inbound_ports": False,
+                "include_controller": False,
+                "include_router_options": False,
+                "enable_core_options": False,
+                "enable_dns": False,
+                "enable_sniffer": False,
+                "openclash_preset": False,
+                "dns_respect_rules": False,
+                "profile_store_selected": False,
+                "profile_store_fake_ip": False,
+                "optional_globals_v2": True,
+            })
     if saved_config.get("custom_rules"):
         st.session_state.custom_rules = saved_config["custom_rules"]
     if saved_config.get("custom_rule_providers"):
@@ -383,21 +532,55 @@ with st.sidebar:
 
     st.divider()
     st.header("全局设置")
+    if "target_mode" not in st.session_state:
+        st.session_state["target_mode"] = "全平台客户端 (PC/移动端)"
     
     # 目标环境选择
     st.info("💡 **请根据您的使用场景选择模式**")
     target_mode = st.radio(
         "生成模式", 
         ("全平台客户端 (PC/移动端)", "OpenClash / 软路由"),
-        index=0,
         horizontal=True,
+        key="target_mode",
         help="全平台客户端：适用于 Windows, macOS, Android, iOS 等独立运行的客户端，生成包含 TUN、DNS 的完整配置。\nOpenClash：精简配置，仅生成节点和策略，基础设置由插件接管。"
     )
     is_desktop = target_mode == "全平台客户端 (PC/移动端)"
 
+    with st.expander("DNS 防泄露预设", expanded=True):
+        st.caption("优先使用预设，再按需微调。预设会自动处理 respect-rules 与 proxy-server-nameserver 的依赖关系。")
+        preset_col1, preset_col2 = st.columns(2)
+        with preset_col1:
+            if st.button(
+                "完整客户端防泄露",
+                use_container_width=True,
+                help="适合 Clash Verge / mihomo 桌面客户端，由 YAML 接管 DNS 与 TUN。",
+                on_click=apply_full_client_dns_leak_preset,
+            ):
+                st.success("已应用完整客户端防泄露预设。")
+        with preset_col2:
+            if st.button(
+                "OpenClash 软路由安全",
+                use_container_width=True,
+                help="适合 OpenClash 订阅，默认不输出 DNS/TUN，避免和插件全局设置冲突。",
+                on_click=apply_openclash_router_safe_preset,
+            ):
+                st.success("已应用 OpenClash 软路由安全预设。")
+
     # --- 基础入站设置 ---
     if is_desktop:
         with st.expander("📡 端口与基础设置", expanded=False):
+            include_inbound_ports = st.checkbox(
+                "写入端口与基础入站字段",
+                value=st.session_state.global_config.get("include_inbound_ports", False),
+                help="未勾选时不向 YAML 写入 port、socks-port、mixed-port、allow-lan、bind-address、mode、log-level、ipv6 等全局字段。",
+                key="gc_include_inbound_ports",
+            )
+            include_global_compat = st.checkbox(
+                "兼容旧版 global: 包装字段",
+                value=st.session_state.global_config.get("include_global_compat", False),
+                help="仅当你的目标内核需要旧版 global: 结构时开启。",
+                key="gc_include_global_compat",
+            )
             col_p1, col_p2 = st.columns(2)
             with col_p1:
                 mixed_port = st.number_input("混合端口 (Mixed)", value=st.session_state.global_config["mixed_port"], 
@@ -418,6 +601,8 @@ with st.sidebar:
                                          help="监听绑定的 IP 地址，'*' 代表绑定所有接口。", key="gc_bind_addr")
     else:
         # 非桌面模式，保持默认值或当前Session值，不显示UI
+        include_inbound_ports = st.session_state.global_config.get("include_inbound_ports", False)
+        include_global_compat = st.session_state.global_config.get("include_global_compat", False)
         mixed_port = st.session_state.global_config["mixed_port"]
         port = st.session_state.global_config["port"]
         socks_port = st.session_state.global_config["socks_port"]
@@ -431,6 +616,12 @@ with st.sidebar:
     # --- 模式与控制 ---
     if is_desktop:
         with st.expander("🎮 模式与控制", expanded=False):
+            include_controller = st.checkbox(
+                "写入控制器与 Dashboard 字段",
+                value=st.session_state.global_config.get("include_controller", False),
+                help="未勾选时不写入 external-controller、secret、external-ui 等控制器字段。",
+                key="gc_include_controller",
+            )
             mode = st.selectbox("运行模式", ["rule", "global", "direct"], 
                                 index=["rule", "global", "direct"].index(st.session_state.global_config["mode"]),
                                 help="Rule: 规则分流 (推荐)\nGlobal: 全局代理\nDirect: 直接连接", key="gc_mode")
@@ -450,6 +641,7 @@ with st.sidebar:
                                              help="控制是否匹配发起请求的进程名。\nStrict (推荐): 严格模式，精准匹配，性能好。\nAlways: 总是匹配，可能误判。\nOff: 关闭此功能。", key="gc_find_proc")
     else:
         # 非桌面模式，隐藏模式与控制设置
+        include_controller = st.session_state.global_config.get("include_controller", False)
         mode = st.session_state.global_config["mode"]
         log_level = st.session_state.global_config["log_level"]
         external_controller = st.session_state.global_config["external_controller"]
@@ -574,12 +766,19 @@ with st.sidebar:
         nameserver = st.session_state.global_config["nameserver"]
         fallback = st.session_state.global_config["fallback"]
         nameserver_policy = st.session_state.global_config.get("nameserver_policy", "")
+        st.info("OpenClash / 软路由模式推荐让 OpenClash 插件统一接管 DNS。订阅 YAML 默认只生成节点、策略组和规则，避免和插件全局设置冲突。")
 
     # --- 核心特性 ---
     # 在非桌面模式(软路由)下直接平铺，去掉折叠框
     core_container = st.expander("⚡ Meta 核心特性", expanded=False) if is_desktop else st.container()
     
     with core_container:
+        enable_core_options = st.checkbox(
+            "写入 Meta 核心特性字段",
+            value=st.session_state.global_config.get("enable_core_options", False),
+            help="未勾选时不写入 tcp-concurrent、unified-delay、geodata-mode、geodata-loader。",
+            key="gc_enable_core_options",
+        )
         tcp_concurrent = st.checkbox("TCP 并发 (Concurrent)", value=st.session_state.global_config["tcp_concurrent"], 
                                      help="向所有目标 IP 并发连接，使用最快的握手连接。", key="gc_tcp_conc")
         
@@ -596,10 +795,16 @@ with st.sidebar:
                                      help="使用嗅探到的域名覆盖目标 IP，主要用于 Fake-IP 模式。", key="gc_sniff_override")
 
     with st.expander("OpenClash / 软路由增强设置", expanded=not is_desktop):
-        st.caption("这些字段参考你现有软路由 OpenClash 配置，适合旁路由、主路由、透明代理和 Fake-IP 场景。")
+        st.caption("这些字段参考软路由 OpenClash 配置。默认不写入；只有开启对应开关或应用预设后，才会进入最终 YAML。")
+        include_router_options = st.checkbox(
+            "写入软路由增强字段",
+            value=st.session_state.global_config.get("include_router_options", False),
+            help="未勾选时不写入 redir-port、tproxy-port、interface-name、keep-alive 等软路由增强字段。",
+            key="gc_include_router_options",
+        )
         openclash_preset = st.checkbox(
             "启用软路由友好预设",
-            value=st.session_state.global_config.get("openclash_preset", True),
+            value=st.session_state.global_config.get("openclash_preset", False),
             help="启用后会使用更完整的 Fake-IP 过滤列表、respect-rules、direct-nameserver、profile 等 OpenClash 常用字段。",
             key="gc_openclash_preset",
         )
@@ -627,21 +832,28 @@ with st.sidebar:
                 key="gc_fake_ip_filter_mode",
             )
         with col_dns_b:
-            dns_respect_rules = st.checkbox("respect-rules", value=st.session_state.global_config.get("dns_respect_rules", True), key="gc_dns_respect_rules")
-            direct_nameserver = st.text_area("direct-nameserver", value=st.session_state.global_config.get("direct_nameserver", ""), height=88, key="gc_direct_nameserver")
+            dns_respect_rules = st.checkbox("respect-rules", value=st.session_state.global_config.get("dns_respect_rules", False), key="gc_dns_respect_rules", help="让 DNS 请求也遵守分流规则。开启后必须有 proxy-server-nameserver，否则 mihomo/Clash Verge 会启动失败。")
+            direct_nameserver = st.text_area("direct-nameserver", value=st.session_state.global_config.get("direct_nameserver", ""), height=88, key="gc_direct_nameserver", help="直连出口使用的 DNS。通常填国内纯 IP DNS，例如 223.5.5.5、119.29.29.29。")
+            proxy_server_nameserver = st.text_area(
+                "proxy-server-nameserver",
+                value=st.session_state.global_config.get("proxy_server_nameserver", ""),
+                height=68,
+                help="代理节点域名解析专用 DNS。开启 respect-rules 时必填；留空时生成器会自动使用 direct/default/nameserver 兜底。",
+                key="gc_proxy_server_nameserver",
+            )
 
         st.markdown("##### TUN / Sniffer / Profile")
         col_adv1, col_adv2 = st.columns(2)
         with col_adv1:
             tun_dns_hijack_value = st.text_input("tun.dns-hijack", value=st.session_state.global_config.get("tun_dns_hijack_value", "127.0.0.1:53"), key="gc_tun_dns_hijack_value")
-            tun_endpoint_independent_nat = st.checkbox("endpoint-independent-nat", value=st.session_state.global_config.get("tun_endpoint_independent_nat", True), key="gc_tun_endpoint_nat")
+            tun_endpoint_independent_nat = st.checkbox("endpoint-independent-nat", value=st.session_state.global_config.get("tun_endpoint_independent_nat", False), key="gc_tun_endpoint_nat")
             tun_auto_redirect = st.checkbox("auto-redirect", value=st.session_state.global_config.get("tun_auto_redirect", False), key="gc_tun_auto_redirect")
             tun_strict_route = st.checkbox("strict-route", value=st.session_state.global_config.get("tun_strict_route", False), key="gc_tun_strict_route")
         with col_adv2:
-            sniffer_parse_pure_ip = st.checkbox("sniffer.parse-pure-ip", value=st.session_state.global_config.get("sniffer_parse_pure_ip", True), key="gc_sniffer_parse_pure_ip")
-            sniffer_force_dns_mapping = st.checkbox("sniffer.force-dns-mapping", value=st.session_state.global_config.get("sniffer_force_dns_mapping", True), key="gc_sniffer_force_dns_mapping")
-            profile_store_selected = st.checkbox("profile.store-selected", value=st.session_state.global_config.get("profile_store_selected", True), key="gc_profile_store_selected")
-            profile_store_fake_ip = st.checkbox("profile.store-fake-ip", value=st.session_state.global_config.get("profile_store_fake_ip", True), key="gc_profile_store_fake_ip")
+            sniffer_parse_pure_ip = st.checkbox("sniffer.parse-pure-ip", value=st.session_state.global_config.get("sniffer_parse_pure_ip", False), key="gc_sniffer_parse_pure_ip")
+            sniffer_force_dns_mapping = st.checkbox("sniffer.force-dns-mapping", value=st.session_state.global_config.get("sniffer_force_dns_mapping", False), key="gc_sniffer_force_dns_mapping")
+            profile_store_selected = st.checkbox("profile.store-selected", value=st.session_state.global_config.get("profile_store_selected", False), key="gc_profile_store_selected")
+            profile_store_fake_ip = st.checkbox("profile.store-fake-ip", value=st.session_state.global_config.get("profile_store_fake_ip", False), key="gc_profile_store_fake_ip")
 
         st.markdown("##### NTP")
         ntp_enable = st.checkbox("启用 ntp", value=st.session_state.global_config.get("ntp_enable", False), key="gc_ntp_enable")
@@ -651,13 +863,18 @@ with st.sidebar:
             ntp_interval = st.number_input("ntp.interval", value=st.session_state.global_config.get("ntp_interval", 30), min_value=1, key="gc_ntp_interval")
         with col_ntp2:
             ntp_port = st.number_input("ntp.port", value=st.session_state.global_config.get("ntp_port", 123), min_value=1, max_value=65535, key="gc_ntp_port")
-            ntp_write_to_system = st.checkbox("ntp.write-to-system", value=st.session_state.global_config.get("ntp_write_to_system", True), key="gc_ntp_write_to_system")
+            ntp_write_to_system = st.checkbox("ntp.write-to-system", value=st.session_state.global_config.get("ntp_write_to_system", False), key="gc_ntp_write_to_system")
 
 # 更新 Session State
 effective_mixed_port = mixed_port_oc if not is_desktop else mixed_port
 effective_external_controller = external_controller_oc if not is_desktop else external_controller
 updated_secret = secret_oc if not is_desktop else st.session_state.get('gc_secret', st.session_state.global_config["secret"])
 st.session_state.global_config.update({
+    "include_global_compat": include_global_compat,
+    "include_inbound_ports": include_inbound_ports,
+    "include_controller": include_controller,
+    "include_router_options": include_router_options,
+    "enable_core_options": enable_core_options,
     "port": port, "socks_port": socks_port, "mixed_port": effective_mixed_port,
     "allow_lan": allow_lan, "bind_address": bind_address, "mode": mode,
     "log_level": log_level, "ipv6_support": ipv6_support,
@@ -675,6 +892,7 @@ st.session_state.global_config.update({
     "fake_ip_filter_mode": fake_ip_filter_mode,
     "dns_respect_rules": dns_respect_rules,
     "direct_nameserver": direct_nameserver,
+    "proxy_server_nameserver": proxy_server_nameserver,
     "tun_dns_hijack_value": tun_dns_hijack_value,
     "tun_endpoint_independent_nat": tun_endpoint_independent_nat,
     "tun_auto_redirect": tun_auto_redirect,
@@ -1372,89 +1590,30 @@ with tab3:
         # ==========================
         # 1. 准备配置上下文
         # ==========================
-        try:
-            proxy_groups = generate_proxy_groups(st.session_state.proxies_data)
-        except Exception:
-            proxy_groups = []
-
-        # 构建基础预览配置
-        preview_config = {
-            "global": {
-                "port": st.session_state.global_config["port"],
-                "socks-port": st.session_state.global_config["socks_port"],
-                "mixed-port": st.session_state.global_config["mixed_port"],
-                "allow-lan": st.session_state.global_config["allow_lan"],
-                "bind-address": st.session_state.global_config["bind_address"],
-                "mode": st.session_state.global_config["mode"],
-                "log-level": st.session_state.global_config["log_level"],
-                "ipv6": st.session_state.global_config["ipv6_support"]
-            },
-            "proxies": st.session_state.proxies_data,
-            "proxy-groups": proxy_groups,
-            "rules": [
-                "DOMAIN-SUFFIX,google.com,Proxy",
-                "GEOIP,CN,Domestic",
-                "MATCH,Others"
-            ]
-        }
-        
-        # 添加 TUN 设置
-        if st.session_state.global_config["enable_tun"]:
-            preview_config["tun"] = {
-                "enable": True,
-                "stack": st.session_state.global_config["tun_stack"],
-                "device": st.session_state.global_config["tun_device"],
-                "auto-route": st.session_state.global_config["tun_auto_route"],
-                "auto-detect-interface": st.session_state.global_config["tun_auto_detect_interface"],
-                "dns-hijack": ["any:53"] if st.session_state.global_config["tun_dns_hijack"] else []
-            }
-        
-        # 添加 DNS 设置
-        if st.session_state.global_config["enable_dns"]:
-            def text_to_list(text):
-                return [x.strip() for x in text.split('\n') if x.strip()]
-                
-            preview_config["dns"] = {
-                "enable": True,
-                "listen": st.session_state.global_config["dns_listen"],
-                "ipv6": st.session_state.global_config["dns_ipv6"],
-                "enhanced-mode": st.session_state.global_config["enhanced_mode"],
-                "fake-ip-range": st.session_state.global_config["fake_ip_range"],
-                "fake-ip-filter": ["*.lan", "*.local", "time.windows.com"] + FAKE_IP_FILTER_LIST,
-                "default-nameserver": text_to_list(st.session_state.global_config["default_nameserver"]),
-                "nameserver": text_to_list(st.session_state.global_config["nameserver"]),
-                "fallback": text_to_list(st.session_state.global_config["fallback"]),
-                "fallback-filter": {"geoip": True, "geoip-code": "CN", "ipcidr": ["240.0.0.0/4"]}
-            }
-            
-            # 处理 Nameserver Policy
-            if "nameserver_policy" in st.session_state.global_config and st.session_state.global_config["nameserver_policy"]:
-                try:
-                    policy_dict = {}
-                    lines = st.session_state.global_config["nameserver_policy"].split('\n')
-                    for line in lines:
-                        if ':' in line:
-                            # 简单处理：key: value
-                            k, v = line.split(':', 1)
-                            policy_dict[k.strip()] = v.strip()
-                    if policy_dict:
-                        preview_config["dns"]["nameserver-policy"] = policy_dict
-                except:
-                    pass
-        
-        if st.session_state.global_config["secret"]:
-            preview_config["secret"] = st.session_state.global_config["secret"]
-        
-        # ==========================
-        # 1. 规则集选择 (仅保留 lhie1)
-        # ==========================
-        # 默认选中 lhie1 且不展示下拉框 (或者展示但不可选)
         rule_type = "lhie1规则"
         st.session_state.selected_rule_type = rule_type
+        try:
+            preview_config = build_subscription_config(
+                st.session_state.proxies_data,
+                st.session_state.global_config,
+                st.session_state.custom_rules,
+                st.session_state.custom_rule_providers,
+                rule_type,
+            )
+            proxy_groups = preview_config.get("proxy-groups", [])
+        except Exception as exc:
+            preview_config = {}
+            proxy_groups = []
+            st.error(f"预览配置生成失败：{exc}")
+
+        # ==========================
+        # 2. 规则集选择 (仅保留 lhie1)
+        # ==========================
+        # 默认选中 lhie1 且不展示下拉框 (或者展示但不可选)
         st.info("💡 默认使用 lhie1 规则集进行基础分流。您可以在下方添加自定义规则或规则集。")
 
         # ==========================
-        # 2. 可视化规则编辑 
+        # 3. 可视化规则编辑
         # ==========================
         st.subheader("可视化规则编辑")
         
