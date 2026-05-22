@@ -6,8 +6,12 @@ import uuid
 import os
 
 from auth import get_bool_env
-from config_builder import build_yaml as build_subscription_yaml
-from importers import parse_proxy_yaml, parse_share_link
+from config_builder import (
+    build_config as build_subscription_config,
+    build_yaml as build_subscription_yaml,
+    validate_config as validate_subscription_config,
+)
+from importers import normalize_subscription_content, parse_proxy_yaml, parse_share_link
 from storage import (
     authenticate_user,
     create_user,
@@ -250,8 +254,15 @@ if 'global_config' not in st.session_state:
         "ipv6_support": True,
         "external_controller": "0.0.0.0:9090",
         "secret": "password",  # 设置默认密码为"password"
+        "redir_port": 7892,
+        "tproxy_port": 7895,
+        "interface_name": "",
+        "external_ui": "",
+        "external_ui_name": "",
+        "external_ui_url": "",
         # 性能与网络
         "keep_alive_interval": 15,
+        "keep_alive_idle": 600,
         "tcp_concurrent": True,
         "unified_delay": True,
         "find_process_mode": "strict",
@@ -264,18 +275,38 @@ if 'global_config' not in st.session_state:
         "tun_auto_route": True,
         "tun_auto_detect_interface": True,
         "tun_dns_hijack": True,
+        "tun_dns_hijack_value": "127.0.0.1:53",
+        "tun_endpoint_independent_nat": True,
+        "tun_auto_redirect": False,
+        "tun_strict_route": False,
         # DNS (参考 Config)
         "enable_dns": True,
         "dns_listen": "0.0.0.0:7874", # 修改为 7874
         "dns_ipv6": True,
         "enhanced_mode": "fake-ip",
         "fake_ip_range": "198.18.0.1/16",
+        "fake_ip_range6": "fc00::/18",
+        "fake_ip_filter_mode": "blacklist",
+        "dns_respect_rules": True,
+        "direct_nameserver": "223.5.5.5\n119.29.29.29",
         "default_nameserver": "223.5.5.5\n119.29.29.29",
         "nameserver": "https://dns.alidns.com/dns-query\nhttps://doh.pub/dns-query",
         "fallback": "https://1.1.1.1/dns-query\ntcp://8.8.8.8",
         # 嗅探 (默认开启)
         "enable_sniffer": True, 
         "sniff_override_dest": True,
+        "sniffer_parse_pure_ip": True,
+        "sniffer_force_dns_mapping": True,
+        # OpenClash / 软路由
+        "openclash_preset": True,
+        "profile_store_selected": True,
+        "profile_store_fake_ip": True,
+        "ntp_enable": False,
+        "ntp_server": "time.apple.com",
+        "ntp_port": 123,
+        "ntp_interval": 30,
+        "ntp_write_to_system": True,
+        "authentication": "",
         # 规则
         "custom_rules": DEFAULT_DIRECT_RULES # 注入默认规则
     }
@@ -546,16 +577,99 @@ with st.sidebar:
         sniff_override = st.checkbox("嗅探覆盖目标", value=st.session_state.global_config["sniff_override_dest"], 
                                      help="使用嗅探到的域名覆盖目标 IP，主要用于 Fake-IP 模式。", key="gc_sniff_override")
 
+    with st.expander("OpenClash / 软路由增强设置", expanded=not is_desktop):
+        st.caption("这些字段参考你现有软路由 OpenClash 配置，适合旁路由、主路由、透明代理和 Fake-IP 场景。")
+        openclash_preset = st.checkbox(
+            "启用软路由友好预设",
+            value=st.session_state.global_config.get("openclash_preset", True),
+            help="启用后会使用更完整的 Fake-IP 过滤列表、respect-rules、direct-nameserver、profile 等 OpenClash 常用字段。",
+            key="gc_openclash_preset",
+        )
+
+        col_oc1, col_oc2 = st.columns(2)
+        with col_oc1:
+            redir_port = st.number_input("redir-port", value=st.session_state.global_config.get("redir_port", 7892), min_value=0, max_value=65535, key="gc_redir_port")
+            mixed_port_oc = st.number_input("mixed-port", value=st.session_state.global_config.get("mixed_port", 7893), min_value=1, max_value=65535, key="gc_mixed_port_oc")
+            external_controller_oc = st.text_input("external-controller", value=st.session_state.global_config.get("external_controller", "0.0.0.0:9090"), key="gc_external_controller_oc")
+            interface_name = st.text_input("interface-name", value=st.session_state.global_config.get("interface_name", ""), placeholder="例如 pppoe-wan，留空则不写入", key="gc_interface_name")
+        with col_oc2:
+            tproxy_port = st.number_input("tproxy-port", value=st.session_state.global_config.get("tproxy_port", 7895), min_value=0, max_value=65535, key="gc_tproxy_port")
+            keep_alive_idle = st.number_input("keep-alive-idle", value=st.session_state.global_config.get("keep_alive_idle", 600), min_value=0, key="gc_keep_alive_idle")
+            secret_oc = st.text_input("secret", value=st.session_state.global_config.get("secret", ""), type="password", key="gc_secret_oc")
+            authentication = st.text_area("authentication", value=st.session_state.global_config.get("authentication", ""), height=68, placeholder="user1:pass1\nuser2:pass2", key="gc_authentication")
+
+        st.markdown("##### DNS 增强")
+        col_dns_a, col_dns_b = st.columns(2)
+        with col_dns_a:
+            fake_ip_range6 = st.text_input("fake-ip-range6", value=st.session_state.global_config.get("fake_ip_range6", "fc00::/18"), key="gc_fake_ip_range6")
+            fake_ip_filter_mode = st.selectbox(
+                "fake-ip-filter-mode",
+                ["blacklist", "whitelist"],
+                index=["blacklist", "whitelist"].index(st.session_state.global_config.get("fake_ip_filter_mode", "blacklist")),
+                key="gc_fake_ip_filter_mode",
+            )
+        with col_dns_b:
+            dns_respect_rules = st.checkbox("respect-rules", value=st.session_state.global_config.get("dns_respect_rules", True), key="gc_dns_respect_rules")
+            direct_nameserver = st.text_area("direct-nameserver", value=st.session_state.global_config.get("direct_nameserver", ""), height=88, key="gc_direct_nameserver")
+
+        st.markdown("##### TUN / Sniffer / Profile")
+        col_adv1, col_adv2 = st.columns(2)
+        with col_adv1:
+            tun_dns_hijack_value = st.text_input("tun.dns-hijack", value=st.session_state.global_config.get("tun_dns_hijack_value", "127.0.0.1:53"), key="gc_tun_dns_hijack_value")
+            tun_endpoint_independent_nat = st.checkbox("endpoint-independent-nat", value=st.session_state.global_config.get("tun_endpoint_independent_nat", True), key="gc_tun_endpoint_nat")
+            tun_auto_redirect = st.checkbox("auto-redirect", value=st.session_state.global_config.get("tun_auto_redirect", False), key="gc_tun_auto_redirect")
+            tun_strict_route = st.checkbox("strict-route", value=st.session_state.global_config.get("tun_strict_route", False), key="gc_tun_strict_route")
+        with col_adv2:
+            sniffer_parse_pure_ip = st.checkbox("sniffer.parse-pure-ip", value=st.session_state.global_config.get("sniffer_parse_pure_ip", True), key="gc_sniffer_parse_pure_ip")
+            sniffer_force_dns_mapping = st.checkbox("sniffer.force-dns-mapping", value=st.session_state.global_config.get("sniffer_force_dns_mapping", True), key="gc_sniffer_force_dns_mapping")
+            profile_store_selected = st.checkbox("profile.store-selected", value=st.session_state.global_config.get("profile_store_selected", True), key="gc_profile_store_selected")
+            profile_store_fake_ip = st.checkbox("profile.store-fake-ip", value=st.session_state.global_config.get("profile_store_fake_ip", True), key="gc_profile_store_fake_ip")
+
+        st.markdown("##### NTP")
+        ntp_enable = st.checkbox("启用 ntp", value=st.session_state.global_config.get("ntp_enable", False), key="gc_ntp_enable")
+        col_ntp1, col_ntp2 = st.columns(2)
+        with col_ntp1:
+            ntp_server = st.text_input("ntp.server", value=st.session_state.global_config.get("ntp_server", "time.apple.com"), key="gc_ntp_server")
+            ntp_interval = st.number_input("ntp.interval", value=st.session_state.global_config.get("ntp_interval", 30), min_value=1, key="gc_ntp_interval")
+        with col_ntp2:
+            ntp_port = st.number_input("ntp.port", value=st.session_state.global_config.get("ntp_port", 123), min_value=1, max_value=65535, key="gc_ntp_port")
+            ntp_write_to_system = st.checkbox("ntp.write-to-system", value=st.session_state.global_config.get("ntp_write_to_system", True), key="gc_ntp_write_to_system")
+
 # 更新 Session State
-updated_secret = st.session_state.get('gc_secret', st.session_state.global_config["secret"])
+effective_mixed_port = mixed_port_oc if not is_desktop else mixed_port
+effective_external_controller = external_controller_oc if not is_desktop else external_controller
+updated_secret = secret_oc if not is_desktop else st.session_state.get('gc_secret', st.session_state.global_config["secret"])
 st.session_state.global_config.update({
-    "port": port, "socks_port": socks_port, "mixed_port": mixed_port,
+    "port": port, "socks_port": socks_port, "mixed_port": effective_mixed_port,
     "allow_lan": allow_lan, "bind_address": bind_address, "mode": mode,
     "log_level": log_level, "ipv6_support": ipv6_support,
-    "external_controller": external_controller, "secret": updated_secret,
+    "external_controller": effective_external_controller, "secret": updated_secret,
     "keep_alive_interval": keep_alive, "tcp_concurrent": tcp_concurrent,
     "enable_tun": enable_tun, "unified_delay": unified_delay, "find_process_mode": find_process_mode,
-    "geodata_mode": geodata_mode, "enable_sniffer": enable_sniffer, "sniff_override_dest": sniff_override
+    "geodata_mode": geodata_mode, "enable_sniffer": enable_sniffer, "sniff_override_dest": sniff_override,
+    "openclash_preset": openclash_preset,
+    "redir_port": redir_port,
+    "tproxy_port": tproxy_port,
+    "interface_name": interface_name,
+    "keep_alive_idle": keep_alive_idle,
+    "authentication": authentication,
+    "fake_ip_range6": fake_ip_range6,
+    "fake_ip_filter_mode": fake_ip_filter_mode,
+    "dns_respect_rules": dns_respect_rules,
+    "direct_nameserver": direct_nameserver,
+    "tun_dns_hijack_value": tun_dns_hijack_value,
+    "tun_endpoint_independent_nat": tun_endpoint_independent_nat,
+    "tun_auto_redirect": tun_auto_redirect,
+    "tun_strict_route": tun_strict_route,
+    "sniffer_parse_pure_ip": sniffer_parse_pure_ip,
+    "sniffer_force_dns_mapping": sniffer_force_dns_mapping,
+    "profile_store_selected": profile_store_selected,
+    "profile_store_fake_ip": profile_store_fake_ip,
+    "ntp_enable": ntp_enable,
+    "ntp_server": ntp_server,
+    "ntp_port": ntp_port,
+    "ntp_interval": ntp_interval,
+    "ntp_write_to_system": ntp_write_to_system,
 })
 
 if enable_dns:
@@ -600,182 +714,69 @@ if enable_dns:
 tab1, tab2, tab3, tab4 = st.tabs(["快速填入 (YAML/链接)", "节点管理", "分流规则", "生成与检查"])
 
 with tab1:
-    st.info("直接将你的机场或自建节点的 `proxies:` 部分粘贴在下面，或通过订阅链接/分享链接导入。")
+    st.info(
+        "这里统一处理完整 config.yaml、proxies: 片段、纯节点列表、onekey 输出片段、"
+        "Base64 订阅内容和 URI 链接列表。订阅链接和分享链接保留独立入口，避免把远程拉取和本地粘贴混在一起。"
+    )
     default_yaml = """
 - name: "示例节点-SS"
   type: ss
   server: "1.2.3.4"
   port: 8888
-  cipher: "aes-128-gcm"
+  cipher: "2022-blake3-aes-128-gcm"
   password: "your_password"
   udp: true
 """
 
-    # 添加通过链接导入的功能
     import_method = st.radio(
         "选择导入方式",
-        ("OpenClash/onekey YAML", "分享链接", "订阅链接", "粘贴YAML"),
-        help="onekey 脚本输出的 OpenClash YAML 片段、完整配置、纯节点列表都可以直接导入。",
+        ("智能 YAML 导入", "订阅链接", "分享链接"),
+        help="智能 YAML 导入负责本地粘贴内容；订阅链接负责远程拉取；分享链接负责单条 URI。三者最终都会进入同一套校验流程。",
     )
-    
-    if import_method in ("粘贴YAML", "OpenClash/onekey YAML"):
+
+    raw_yaml_input = ""
+    if import_method == "智能 YAML 导入":
         raw_yaml_input = st.text_area(
-            "粘贴 YAML / OpenClash 节点片段",
+            "粘贴 YAML / OpenClash / onekey 输出片段",
             value=default_yaml.strip(),
-            height=300,
-            help="支持完整 config.yaml、proxies: 段、纯 - name 节点列表，以及 onekey.sh 打印出的 OpenClash YAML 配置。",
+            height=340,
+            help="支持完整 Clash/OpenClash 配置、proxies: 块、纯 - name: 节点列表、onekey.sh 打印的多个 OpenClash YAML 配置片段，以及常见缩进错误的自动修复。",
         )
     elif import_method == "订阅链接":
-        subscription_url = st.text_input("输入订阅链接", placeholder="https://example.com/subscribe/...", help="输入Base64编码的订阅链接")
-        raw_yaml_input = ""
+        subscription_url = st.text_input(
+            "输入订阅链接",
+            placeholder="https://example.com/sub/xxxxx",
+            help="如果这里返回的是 Streamlit/HTML 页面，说明 /sub/ 被反代到了 Web UI，而不是 FastAPI API 端口。",
+        )
         if subscription_url:
             try:
-                response = requests.get(subscription_url)
-                if response.status_code == 200:
-                    # 尝试解析响应为YAML/JSON格式
-                    try:
-                        import base64
-                        # 尝试作为Base64编码的订阅链接处理
-                        decoded_content = base64.b64decode(response.text).decode('utf-8')
-                        raw_yaml_input = decoded_content
-                    except:
-                        # 如果不是Base64，则直接使用响应内容
-                        raw_yaml_input = response.text
-                    st.success("订阅链接获取成功！")
-                else:
-                    st.error(f"获取订阅链接失败: 状态码 {response.status_code}")
+                response = requests.get(subscription_url, timeout=15)
+                response.raise_for_status()
+                raw_yaml_input = normalize_subscription_content(
+                    response.text,
+                    response.headers.get("content-type", ""),
+                )
+                st.success("订阅内容获取成功，已进入统一解析管线。")
             except Exception as e:
-                st.error(f"获取订阅链接失败: {e}")
-    else:  # 分享链接
-        share_link = st.text_input("输入分享链接", placeholder="ss://, trojan://, vmess:// 等分享链接", help="输入ss://, trojan://, vmess://等分享链接")
-        raw_yaml_input = ""
-        if share_link:
+                st.error(f"订阅链接导入失败: {e}")
+                st.info("部署时请确认 `/sub/` 路径被反代到 FastAPI 服务端口 8000，而不是 Streamlit Web UI 端口 8501。")
+    else:
+        share_link = st.text_area(
+            "输入分享链接",
+            placeholder="ss://... 或 vless://...，多条链接可一行一条",
+            height=140,
+            help="支持 ss、trojan、vmess、vless、tuic、hysteria2/hy2、anytls 等常见分享链接。",
+        )
+        if share_link.strip():
             try:
-                # 解析分享链接并转换为 YAML 格式
-                from urllib.parse import unquote, urlparse
-                import base64
-                
-                parsed = urlparse(share_link)
-                protocol = parsed.scheme
-                
-                if protocol == 'ss':
-                    # 解析Shadowsocks链接
-                    data = unquote(parsed.netloc + parsed.path)
-                    if '@' in data:
-                        # AEAD格式: method:password@server:port
-                        method_password, server_port = data.split('@')
-                        method, password = method_password.split(':', 1)
-                        server, port = server_port.split(':', 1)
-                        
-                        proxy = {
-                            "name": f"SS-{server}",
-                            "type": "ss",
-                            "server": server,
-                            "port": int(port),
-                            "cipher": method,
-                            "password": password
-                        }
-                    else:
-                        # 旧格式: base64(method:password)@server:port
-                        encoded, server_port = data.split('@')
-                        decoded = base64.b64decode(encoded + '=' * (4 - len(encoded) % 4)).decode()
-                        method, password = decoded.split(':', 1)
-                        server, port = server_port.split(':', 1)
-                        
-                        proxy = {
-                            "name": f"SS-{server}",
-                            "type": "ss",
-                            "server": server,
-                            "port": int(port),
-                            "cipher": method,
-                            "password": password
-                        }
-                    
-                    raw_yaml_input = yaml.dump([proxy], default_flow_style=False, allow_unicode=True)
-                    st.success("Shadowsocks链接解析成功！")
-                
-                elif protocol == 'trojan':
-                    # 解析Trojan链接
-                    password_and_host = parsed.netloc
-                    password, host = password_and_host.split('@', 1)
-                    server, port_str = host.split(':', 1) if ':' in host else (host, '443')
-                    port = int(port_str)
-                    
-                    # 解析查询参数
-                    query_params = {}
-                    if parsed.query:
-                        for param in parsed.query.split('&'):
-                            key, value = param.split('=', 1) if '=' in param else (param, '')
-                            query_params[key] = unquote(value)
-                    
-                    proxy = {
-                        "name": f"Trojan-{server}",
-                        "type": "trojan",
-                        "server": server,
-                        "port": port,
-                        "password": unquote(password)
-                    }
-                    
-                    if 'sni' in query_params:
-                        proxy["sni"] = query_params['sni']
-                    if 'alpn' in query_params:
-                        proxy["alpn"] = query_params['alpn'].split(',')
-                    if 'skip-cert-verify' in query_params:
-                        proxy["skip-cert-verify"] = query_params['skip-cert-verify'].lower() == 'true'
-                    
-                    raw_yaml_input = yaml.dump([proxy], default_flow_style=False, allow_unicode=True)
-                    st.success("Trojan链接解析成功！")
-                
-                elif protocol == 'vmess':
-                    # 解析VMess链接
-                    try:
-                        # VMess链接是base64编码的JSON
-                        decoded = base64.b64decode(share_link[8:])  # 移除"vmess://"前缀
-                        vmess_info = json.loads(decoded.decode())
-                        
-                        proxy = {
-                            "name": vmess_info.get("ps", f"VMess-{vmess_info.get('add', 'server')}"),
-                            "type": "vmess",
-                            "server": vmess_info.get("add", "server"),
-                            "port": int(vmess_info.get("port", 443)),
-                            "uuid": vmess_info.get("id", ""),
-                            "alterId": int(vmess_info.get("aid", 0)),
-                            "cipher": vmess_info.get("scy", "auto")
-                        }
-                        
-                        # 根据network类型设置传输协议
-                        net_type = vmess_info.get("net", "tcp")
-                        proxy["network"] = net_type
-                        
-                        # TLS设置
-                        if vmess_info.get("tls", "") == "tls":
-                            proxy["tls"] = True
-                        
-                        # 根据传输协议添加额外选项
-                        if net_type == "ws":
-                            ws_opts = {}
-                            if "path" in vmess_info:
-                                ws_opts["path"] = vmess_info["path"]
-                            if "host" in vmess_info:
-                                ws_opts["headers"] = {"Host": vmess_info["host"]}
-                            proxy["ws-opts"] = ws_opts
-                        elif net_type == "h2":
-                            if "path" in vmess_info:
-                                proxy["h2-opts"] = {"path": vmess_info["path"]}
-                        
-                        raw_yaml_input = yaml.dump([proxy], default_flow_style=False, allow_unicode=True)
-                        st.success("VMess链接解析成功！")
-                    except Exception as e:
-                        st.error(f"VMess链接解析失败: {e}")
-                
-                elif protocol in ("vless", "tuic", "hysteria2", "anytls"):
-                    proxy = parse_share_link(share_link)
-                    raw_yaml_input = yaml.dump([proxy], default_flow_style=False, allow_unicode=True)
-                    st.success(f"{protocol} 链接解析成功！")
-
-                else:
-                    st.error(f"不支持的协议类型: {protocol}")
-                    
+                proxies = []
+                for line in share_link.splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    proxies.append(parse_share_link(line))
+                raw_yaml_input = yaml.dump(proxies, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                st.success(f"分享链接解析成功，共识别 {len(proxies)} 个节点。")
             except Exception as e:
                 st.error(f"分享链接解析失败: {e}")
 
@@ -814,9 +815,30 @@ with tab2:
         node_name = st.text_input("节点名称", f"My-{node_type.title()}", help="给节点起一个便于识别的名称")
         node_server = st.text_input("服务器地址", "example.com", help="代理服务器的地址")
     with col2:
-        node_port = st.number_input("端口", 443, help="代理服务器的端口号")
+        node_port = st.number_input("端口", min_value=1, max_value=65535, value=443, help="代理服务器的端口号")
         if node_type not in ["tuic", "hysteria2"]:  # tuic和hy2协议有单独的配置或不需要此通用UDP开关
             node_udp = st.checkbox("UDP 支持", value=True, key=f"node_udp_{node_type}", help="是否启用UDP转发")
+
+    with st.expander("通用高级字段", expanded=False):
+        col_common1, col_common2 = st.columns(2)
+        with col_common1:
+            common_ip_version = st.selectbox(
+                "ip-version",
+                ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"],
+                index=0,
+                key=f"common_ip_version_{node_type}",
+                help="mihomo 公共字段；默认不写入，避免和核心自动选择冲突。",
+            )
+            common_tfo = st.checkbox("tfo", value=False, key=f"common_tfo_{node_type}", help="TCP Fast Open，服务端和系统都支持时才建议开启。")
+            common_mptcp = st.checkbox("mptcp", value=False, key=f"common_mptcp_{node_type}", help="多路径 TCP，适合支持 MPTCP 的系统内核。")
+        with col_common2:
+            enable_smux = st.checkbox("smux", value=False, key=f"enable_smux_{node_type}", help="mihomo 复用配置；onekey 的 VLESS Reality brutal 参数会写入这里。")
+            smux_enabled = st.checkbox("smux.enabled", value=True, key=f"smux_enabled_{node_type}") if enable_smux else False
+            smux_protocol = st.selectbox("smux.protocol", ["h2mux", "yamux", "smux"], index=0, key=f"smux_protocol_{node_type}") if enable_smux else "h2mux"
+            smux_max_connections = st.number_input("smux.max-connections", min_value=1, value=4, key=f"smux_max_conn_{node_type}") if enable_smux else 4
+            smux_brutal_enabled = st.checkbox("smux.brutal-opts.enabled", value=node_type == "vless", key=f"smux_brutal_enabled_{node_type}") if enable_smux else False
+            smux_brutal_up = st.number_input("brutal up Mbps", min_value=1, value=100, key=f"smux_brutal_up_{node_type}") if enable_smux and smux_brutal_enabled else 100
+            smux_brutal_down = st.number_input("brutal down Mbps", min_value=1, value=100, key=f"smux_brutal_down_{node_type}") if enable_smux and smux_brutal_enabled else 100
     
     # 根据节点类型显示不同的配置选项
     if node_type == "vmess":
@@ -849,7 +871,7 @@ with tab2:
                 "aes-128-gcm", "aes-192-gcm", "aes-256-gcm", 
                 "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305",
                 "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"
-            ], index=0, help="Shadowsocks协议的加密方式")
+            ], index=5, help="Shadowsocks协议的加密方式；onekey 默认使用 2022-blake3-aes-128-gcm。")
             node_password = st.text_input("密码", type="password", help="Shadowsocks协议的密码")
         with col4:
             ss_udp_over_tcp = st.checkbox("udp-over-tcp", value=False, key=f"ss_udp_over_tcp_{node_type}", help="是否启用UDP over TCP")
@@ -880,7 +902,7 @@ with tab2:
         col3, col4 = st.columns(2)
         with col3:
             node_password = st.text_input("密码", type="password", help="Hysteria2协议的认证密码")
-            hy2_sni = st.text_input("SNI", "example.com", help="TLS握手时的服务器名称指示")
+            hy2_sni = st.text_input("SNI", "www.bing.com", help="TLS握手时的服务器名称指示；onekey 默认伪装为 www.bing.com。")
             hy2_obfs_type = st.selectbox("混淆插件", ["none", "salamander"], index=0, help="流量混淆类型")
         with col4:
             hy2_up_mbps = st.number_input("上行链路容量（默认：Mbps）", 50, help="上行带宽限制")
@@ -895,7 +917,7 @@ with tab2:
         
         enable_port_hopping = st.checkbox("启用端口跳跃", key=f"enable_port_hopping_{node_type}", help="是否启用动态端口跳跃")
         if enable_port_hopping:
-            port_hopping_range = st.text_input("端口范围", "20000-40000", help="端口跳跃的范围")
+            port_hopping_range = st.text_input("端口范围", "29950-30000", help="端口跳跃的范围；兼容 onekey 的 ports 字段。")
         
         enable_protocol = st.checkbox("启用传输协议设置", key=f"enable_protocol_{node_type}", help="是否自定义传输协议")
         if enable_protocol:
@@ -960,7 +982,7 @@ with tab2:
             tuic_password = st.text_input("Password", type="password", help="TUIC协议的密码")
             tuic_server_ip = st.text_input("Server IP", "1.2.3.4", help="服务器IP地址")
         with col4:
-            tuic_congestion = st.selectbox("Congestion Controller", ["cubic", "new_reno", "bbr", "bbr2", "none"], index=0, help="拥塞控制算法")
+            tuic_congestion = st.selectbox("Congestion Controller", ["bbr", "cubic", "new_reno", "bbr2", "none"], index=0, help="拥塞控制算法；onekey 默认使用 bbr。")
             tuic_alpn = st.selectbox("ALPN", ["h3", "h3-29", "h3-27"], index=0, help="应用层协议协商标识")
             tuic_udp_relay_mode = st.selectbox("UDP Relay Mode", ["native", "quic"], index=0, help="UDP中继模式")
         
@@ -968,8 +990,8 @@ with tab2:
         tuic_heartbeat_interval = st.number_input("心跳间隔 (毫秒)", value=10000, help="Application Layer 心跳间隔")
 
         tuic_close_sni = st.checkbox("关闭 SNI 服务器名称指示", value=False, key=f"tuic_close_sni_{node_type}", help="是否关闭SNI服务器名称指示")
-        tuic_reduce_rtt = st.checkbox("Reduce RTT", value=False, key=f"tuic_reduce_rtt_{node_type}", help="是否启用0-RTT握手")
-        tuic_skip_cert_verify = st.checkbox("跳过证书验证", value=False, key=f"tuic_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
+        tuic_reduce_rtt = st.checkbox("Reduce RTT", value=True, key=f"tuic_reduce_rtt_{node_type}", help="是否启用0-RTT握手")
+        tuic_skip_cert_verify = st.checkbox("跳过证书验证", value=True, key=f"tuic_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
         tuic_fast_open = st.checkbox("快速打开", value=True, key=f"tuic_fast_open_{node_type}", help="是否启用快速打开")
         tuic_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
     
@@ -979,11 +1001,22 @@ with tab2:
             node_uuid = st.text_input("UUID", "your-uuid-here", help="VLESS协议的用户UUID")
             vless_tls = st.checkbox("TLS", value=True, key=f"vless_tls_{node_type}", help="是否启用TLS加密")
         with col4:
-            vless_flow = st.selectbox("flow (reality)", ["none", "xtls-rprx-vision", "xtls-rprx-vision-udp443"], index=0, help="XTLS的流量特征")
-            vless_servername = st.text_input("servername", "example.com", help="TLS握手时的服务器名称")
+            vless_flow = st.selectbox("flow (reality)", ["none", "xtls-rprx-vision", "xtls-rprx-vision-udp443"], index=1, help="XTLS 的流量特征；VLESS Reality 默认使用 xtls-rprx-vision。")
+            vless_servername = st.text_input("servername", "v1-dy.ixigua.com", help="TLS握手时的服务器名称；onekey Reality 默认使用该伪装域名。")
         
         vless_network = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc", "http"], index=0, help="传输层协议")
         vless_packet_encoding = st.text_input("Packet-Encoding", "", help="数据包编码方式")
+        if vless_network == "ws":
+            vless_ws_path = st.text_input("WebSocket path", "/vless", help="VLESS WS 的 ws-opts.path，兼容 OpenClash/mihomo。")
+            vless_ws_host = st.text_input("WebSocket Host", "", help="需要伪装 Host 时填写，留空不写入 headers。")
+        elif vless_network == "grpc":
+            vless_grpc_service_name = st.text_input("gRPC service-name", "grpc", help="VLESS gRPC 的 grpc-opts.grpc-service-name。")
+            vless_ws_path = ""
+            vless_ws_host = ""
+        else:
+            vless_ws_path = ""
+            vless_ws_host = ""
+            vless_grpc_service_name = ""
         # vless_udp 已统一使用上方的通用 UDP 选项
         vless_tfo = st.checkbox("TFO", value=False, key=f"vless_tfo_{node_type}", help="是否启用TCP Fast Open")
         vless_fp = st.selectbox("客户端指纹", ["chrome", "firefox", "safari", "edge", "ios", "android", "random", "none"], index=0, help="TLS客户端指纹")
@@ -1005,11 +1038,11 @@ with tab2:
         col3, col4 = st.columns(2)
         with col3:
             anytls_password = st.text_input("密码", type="password", help="AnyTLS协议的密码")
-            anytls_sni = st.text_input("SNI", "example.com", help="TLS握手时的服务器名称指示")
+            anytls_sni = st.text_input("SNI", "www.bing.com", help="TLS握手时的服务器名称指示；onekey 默认伪装为 www.bing.com。")
             anytls_fp = st.selectbox("客户端指纹", ["chrome", "firefox", "safari", "edge", "ios", "android", "random", "none"], index=0, help="TLS客户端指纹")
         with col4:
-            anytls_skip_cert_verify = st.checkbox("跳过证书验证", value=False, key=f"anytls_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
-            anytls_alpn = st.selectbox("ALPN", ["none", "h2", "http/1.1", "h2,http/1.1"], index=0, help="应用层协议协商标识")
+            anytls_skip_cert_verify = st.checkbox("跳过证书验证", value=True, key=f"anytls_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
+            anytls_alpn = st.selectbox("ALPN", ["h2,http/1.1", "h2", "http/1.1", "none"], index=0, help="应用层协议协商标识")
             anytls_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
         
         anytls_idle_session_check_interval = st.number_input("idle-session-check-interval", value=30, help="空闲会话检查间隔（秒）")
@@ -1161,11 +1194,12 @@ with tab2:
         
         # WS Opts etc.
         if vless_network == "ws":
-            # 这是一个 UI 缺失，但我们至少先把已有的值填对。
-             pass
+            ws_opts = {"path": vless_ws_path}
+            if vless_ws_host:
+                ws_opts["headers"] = {"Host": vless_ws_host}
+            manual_node["ws-opts"] = ws_opts
         elif vless_network == "grpc":
-             # 同上，缺少 input
-             pass
+             manual_node["grpc-opts"] = {"grpc-service-name": vless_grpc_service_name}
 
     elif node_type == "anytls":
         manual_node["password"] = anytls_password
@@ -1181,20 +1215,58 @@ with tab2:
         if anytls_ip_version != "默认":
             manual_node["ip-version"] = anytls_ip_version
 
+    if common_ip_version != "默认" and "ip-version" not in manual_node:
+        manual_node["ip-version"] = common_ip_version
+    if common_tfo and "tfo" not in manual_node:
+        manual_node["tfo"] = True
+    if common_mptcp:
+        manual_node["mptcp"] = True
+    if enable_smux:
+        manual_node["smux"] = {
+            "enabled": smux_enabled,
+            "protocol": smux_protocol,
+            "max-connections": smux_max_connections,
+        }
+        if smux_brutal_enabled:
+            manual_node["smux"]["brutal-opts"] = {
+                "enabled": True,
+                "up": f"{smux_brutal_up} Mbps",
+                "down": f"{smux_brutal_down} Mbps",
+            }
+
     # 添加链式代理配置
     if use_dialer_proxy and dialer_proxy_name:
         manual_node["dialer-proxy"] = dialer_proxy_name
 
-    st.json(manual_node)
-    
-    # 添加手动节点按钮
-    if st.button("添加节点", key=f"add_manual_node_{node_type}", help="将当前配置的节点添加到列表"):
-        # 检查是否已存在相同的节点
-        if manual_node not in st.session_state.proxies_data:
-            st.session_state.proxies_data.append(manual_node)
-            st.success(f"节点 '{manual_node['name']}' 已添加！")
-        else:
-            st.warning(f"节点 '{manual_node['name']}' 已存在，跳过重复添加")
+    manual_node_yaml = yaml.dump([manual_node], allow_unicode=True, sort_keys=False)
+    if st.session_state.get("manual_node_yaml_source") != manual_node_yaml:
+        st.session_state["manual_node_yaml_editor"] = manual_node_yaml
+        st.session_state["manual_node_yaml_source"] = manual_node_yaml
+
+    edited_manual_node_yaml = st.text_area(
+        "当前节点 YAML（可手动编辑）",
+        key="manual_node_yaml_editor",
+        height=320,
+        help="这里显示由表单生成的节点 YAML。你可以直接改字段；点击添加前会重新走统一校验，防止无效 YAML 被写入。",
+    )
+
+    if st.button("校验并添加节点", key=f"add_manual_node_{node_type}", help="校验当前 YAML 并添加到节点列表"):
+        try:
+            parsed_nodes, manual_warnings = parse_proxy_yaml(edited_manual_node_yaml)
+            if len(parsed_nodes) != 1:
+                st.error("手动添加一次只能包含 1 个节点；如果要批量导入，请使用“智能 YAML 导入”。")
+            else:
+                parsed_node = parsed_nodes[0]
+                existing_names = {proxy.get("name") for proxy in st.session_state.proxies_data}
+                if parsed_node["name"] in existing_names:
+                    st.warning(f"节点 '{parsed_node['name']}' 已存在，跳过重复添加")
+                else:
+                    st.session_state.proxies_data.append(parsed_node)
+                    st.success(f"节点 '{parsed_node['name']}' 已添加。")
+                for warning in manual_warnings:
+                    st.warning(warning)
+        except Exception as e:
+            st.error(f"节点 YAML 校验失败: {e}")
 
     # 节点管理功能
     st.subheader("节点管理")
@@ -1364,9 +1436,10 @@ with tab3:
         
         # 获取所有策略组名称用于下拉菜单
         all_groups = [group['name'] for group in proxy_groups]
-        all_groups.extend(['DIRECT', 'REJECT', 'Proxy'])
-        all_groups = list(set(all_groups))
+        all_groups.extend(['DIRECT', 'REJECT', 'REJECT-DROP', 'Proxy'])
+        all_groups = sorted(set(all_groups))
         
+        st.markdown("#### 单条规则")
         col1, col2 = st.columns(2)
         with col1:
             st.write("**规则类型**")
@@ -1397,7 +1470,7 @@ with tab3:
             elif rule_select != "MATCH" and not rule_value:
                  st.error("请输入规则值")
             else:
-                new_rule = f"{rule_select},{rule_value},{final_group}" if rule_select != "MATCH" else f"{final_group},{final_group}"
+                new_rule = f"{rule_select},{rule_value},{final_group}" if rule_select != "MATCH" else f"MATCH,{final_group}"
                 if new_rule not in st.session_state.custom_rules:
                     st.session_state.custom_rules.append(new_rule)
                     st.success(f"规则已添加: {new_rule}")
@@ -1421,7 +1494,7 @@ with tab3:
         # ==========================
         # 3. 编辑规则集配置 (Rule Providers)
         # ==========================
-        st.subheader("编辑规则集配置 (Rule Providers)")
+        st.subheader("规则集")
         st.caption("规则集使用介绍: https://wiki.metacubex.one/config/rule-providers/content/")
         
         with st.expander("➕ 添加新规则集", expanded=True):
@@ -1498,6 +1571,8 @@ with tab3:
                     st.session_state.custom_rule_providers[rp_name] = provider_config
                     st.success(f"规则集 {rp_name} 已添加")
         
+        st.subheader("已添加规则")
+
         # 显示已添加的规则集
         if st.session_state.custom_rule_providers:
             st.write(f"**已添加的规则集列表 ({len(st.session_state.custom_rule_providers)})**")
@@ -1537,6 +1612,54 @@ with tab4:
         if not st.session_state.proxies_data:
             st.error("❌ 错误: 未添加任何节点！无法生成配置。")
         else:
+            selected_rule = st.session_state.get("selected_rule_type", "lhie1规则")
+            final_config = build_subscription_config(
+                st.session_state.proxies_data,
+                st.session_state.global_config,
+                st.session_state.custom_rules,
+                st.session_state.custom_rule_providers,
+                selected_rule,
+            )
+            check_errors, check_warnings = validate_subscription_config(final_config)
+            final_config_str = build_subscription_yaml(final_config)
+
+            if check_errors:
+                st.error(f"❌ 检查发现 {len(check_errors)} 个错误")
+                for error in check_errors:
+                    st.text(f"- {error}")
+            else:
+                save_user_config(
+                    current_user["id"],
+                    st.session_state.proxies_data,
+                    st.session_state.global_config,
+                    st.session_state.custom_rules,
+                    st.session_state.custom_rule_providers,
+                    selected_rule,
+                    final_config_str,
+                )
+                refreshed_config = get_user_config(current_user["id"])
+                st.success(f"配置检查通过，订阅已保存并立即生效: {get_public_base_url()}/sub/{refreshed_config['token']}")
+
+            if check_warnings:
+                with st.expander(f"发现 {len(check_warnings)} 个警告", expanded=False):
+                    for warning in check_warnings:
+                        st.warning(warning)
+
+            st.divider()
+            col_d1, col_d2 = st.columns([3, 1])
+            with col_d1:
+                st.text_area("配置预览（全文）", value=final_config_str, height=600)
+            with col_d2:
+                st.download_button(
+                    label="下载 config.yaml",
+                    data=final_config_str,
+                    file_name="config.yaml",
+                    mime="application/x-yaml",
+                    type="primary",
+                    use_container_width=True,
+                )
+            st.stop()
+
             # 1. 重新构建配置 (复用逻辑)
             try:
                 final_proxy_groups = generate_proxy_groups(st.session_state.proxies_data)

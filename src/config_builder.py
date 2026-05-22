@@ -21,8 +21,100 @@ FAKE_IP_FILTER_LIST = [
     "geosite:cn",
 ]
 
-SNIFFER_FORCE_DOMAIN = ["+.netflix.com", "+.nflxvideo.net", "+.amazonaws.com", "+.media.dssott.com"]
-SNIFFER_SKIP_DOMAIN = ["Mijia Cloud", "dlg.io.mi.com", "+.oray.com", "+.sunlogin.net", "+.push.apple.com"]
+SOFT_ROUTER_FAKE_IP_FILTER_LIST = [
+    "+.lan", "+.local", "+.localhost", "+.localdomain", "+.home.arpa", "+.test", "+.example", "+.invalid",
+    "localhost", "msftconnecttest.com", "www.msftconnecttest.com", "msftncsi.com", "www.msftncsi.com",
+    "detectportal.firefox.com", "time.apple.com", "time-ios.apple.com", "time1.apple.com", "time.windows.com",
+    "time.nist.gov", "time.cloudflare.com", "time1.cloud.tencent.com", "ntp.aliyun.com", "ntp.tencent.com",
+    "+.pool.ntp.org", "+.ntp.org.cn", "+.time.edu.cn", "short.weixin.qq.com", "long.weixin.qq.com",
+    "dns.weixin.qq.com", "+.weixin.qq.com", "+.wechat.com", "+.wechatpay.com", "+.tenpay.com",
+    "+.qpic.cn", "+.qlogo.cn", "+.gtimg.com", "+.gtimg.cn", "+.idqqimg.com", "stun.*.*", "stun.*.*.*",
+    "+.srv.nintendo.net", "xbox.*.microsoft.com", "+.xboxlive.com", "+.steamcontent.com", "+.music.163.com",
+    "+.126.net", "+.qqmusic.qq.com", "+.music.migu.cn", "+.mcdn.bilivideo.cn", "+.bilivideo.cn",
+    "dlg.io.mi.com", "ot.io.mi.com", "+.mi.com", "+.xiaomi.com", "+.push.xiaomi.com", "+.cmbchina.com",
+    "+.unionpay.com", "geosite:cn",
+]
+
+SNIFFER_FORCE_DOMAIN = [
+    "+.youtube.com", "+.googlevideo.com", "+.ytimg.com", "+.ggpht.com",
+    "+.netflix.com", "+.nflxvideo.net", "+.nflximg.net", "+.nflxso.net", "+.nflxext.com",
+    "+.disneyplus.com", "+.dssott.com", "+.disney.com",
+    "+.discord.com", "+.discord.gg", "+.discordapp.com", "+.discordapp.net",
+    "+.telegram.org", "+.t.me", "+.twitter.com", "+.x.com", "+.twimg.com",
+    "+.facebook.com", "+.fbcdn.net", "+.instagram.com", "+.cdninstagram.com",
+]
+SNIFFER_SKIP_DOMAIN = [
+    "Mijia Cloud", "dlg.io.mi.com", "+.mi.com", "+.xiaomi.com", "+.push.xiaomi.com",
+    "+.oray.com", "+.sunlogin.net", "+.xunlei.com", "courier.push.apple.com", "+.push.apple.com",
+]
+SNIFFER_SKIP_DST_ADDRESS = [
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+    "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/4", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
+]
+
+LHIE1_PROVIDERS_MAP = {
+    "AdBlock": ("AdBlock", "AdBlock"),
+    "HTTPDNS": ("HTTPDNS", "HTTPDNS"),
+    "Special": ("Special", "DIRECT"),
+    "PROXY": ("Proxy", "Proxy"),
+    "Domestic": ("Domestic", "Domestic"),
+    "Domestic IPs": ("Domestic%20IPs", "Domestic"),
+    "LAN": ("LAN", "DIRECT"),
+    "Netflix": ("Media/Netflix", "Netflix"),
+    "Spotify": ("Media/Spotify", "Spotify"),
+    "YouTube": ("Media/YouTube", "Youtube"),
+    "Max": ("Media/Max", "HBO Max"),
+    "Bilibili": ("Media/Bilibili", "Bilibili"),
+    "IQ": ("Media/IQ", "Asian TV"),
+    "IQIYI": ("Media/IQIYI", "Asian TV"),
+    "Letv": ("Media/Letv", "Asian TV"),
+    "Netease Music": ("Media/Netease%20Music", "Asian TV"),
+    "Tencent Video": ("Media/Tencent%20Video", "Asian TV"),
+    "Youku": ("Media/Youku", "Asian TV"),
+    "WeTV": ("Media/WeTV", "Global TV"),
+    "ABC": ("Media/ABC", "Global TV"),
+    "Abema TV": ("Media/Abema%20TV", "Asian TV"),
+    "Amazon": ("Media/Amazon", "Global TV"),
+    "Apple Music": ("Media/Apple%20Music", "Apple"),
+    "Apple News": ("Media/Apple%20News", "Apple"),
+    "Apple TV": ("Media/Apple%20TV", "Apple TV"),
+    "Bahamut": ("Media/Bahamut", "Bahamut"),
+    "BBC iPlayer": ("Media/BBC%20iPlayer", "Global TV"),
+    "DAZN": ("Media/DAZN", "DAZN"),
+    "Discovery Plus": ("Media/Discovery%20Plus", "Discovery Plus"),
+    "Disney Plus": ("Media/Disney%20Plus", "Disney Plus"),
+    "DMM": ("Media/DMM", "Asian TV"),
+    "encoreTVB": ("Media/encoreTVB", "Global TV"),
+    "F1 TV": ("Media/F1%20TV", "Global TV"),
+    "Fox Now": ("Media/Fox%20Now", "Global TV"),
+    "Fox+": ("Media/Fox%2B", "Asian TV"),
+    "Hulu Japan": ("Media/Hulu%20Japan", "Asian TV"),
+    "Hulu": ("Media/Hulu", "Global TV"),
+    "JOOX": ("Media/JOOX", "Asian TV"),
+    "KKBOX": ("Media/KKBOX", "Asian TV"),
+    "KKTV": ("Media/KKTV", "Asian TV"),
+    "Line TV": ("Media/Line%20TV", "Asian TV"),
+    "myTV SUPER": ("Media/myTV%20SUPER", "Asian TV"),
+    "Niconico": ("Media/Niconico", "Asian TV"),
+    "Pandora": ("Media/Pandora", "Global TV"),
+    "PBS": ("Media/PBS", "Global TV"),
+    "Pornhub": ("Media/Pornhub", "Pornhub"),
+    "Soundcloud": ("Media/Soundcloud", "Global TV"),
+    "ViuTV": ("Media/ViuTV", "Asian TV"),
+    "Telegram": ("Telegram", "Telegram"),
+    "Crypto": ("Crypto", "Crypto"),
+    "Discord": ("Discord", "Discord"),
+    "Steam": ("Steam", "Steam"),
+    "TikTok": ("TikTok", "TikTok"),
+    "Speedtest": ("Speedtest", "Speedtest"),
+    "PayPal": ("PayPal", "PayPal"),
+    "Microsoft": ("Microsoft", "Microsoft"),
+    "AI Suite": ("AI%20Suite", "AI Suite"),
+    "Apple": ("Apple", "Apple"),
+    "Google FCM": ("Google%20FCM", "Google FCM"),
+    "Scholar": ("Scholar", "Scholar"),
+    "miHoYo": ("miHoYo", "miHoYo"),
+}
 
 
 def text_to_list(text: str) -> list[str]:
@@ -68,6 +160,23 @@ def build_config(
         "proxy-groups": final_proxy_groups,
     }
 
+    for key, default in {
+        "redir-port": global_config.get("redir_port"),
+        "tproxy-port": global_config.get("tproxy_port"),
+        "interface-name": global_config.get("interface_name"),
+        "keep-alive-interval": global_config.get("keep_alive_interval"),
+        "keep-alive-idle": global_config.get("keep_alive_idle"),
+    }.items():
+        if default not in (None, ""):
+            final_config[key] = default
+
+    if global_config.get("external_ui"):
+        final_config["external-ui"] = global_config["external_ui"]
+    if global_config.get("external_ui_name"):
+        final_config["external-ui-name"] = global_config["external_ui_name"]
+    if global_config.get("external_ui_url"):
+        final_config["external-ui-url"] = global_config["external_ui_url"]
+
     if global_config.get("enable_tun", False):
         final_config["tun"] = {
             "enable": True,
@@ -75,7 +184,10 @@ def build_config(
             "device": global_config.get("tun_device", "utun"),
             "auto-route": global_config.get("tun_auto_route", True),
             "auto-detect-interface": global_config.get("tun_auto_detect_interface", True),
-            "dns-hijack": ["any:53"] if global_config.get("tun_dns_hijack", True) else [],
+            "dns-hijack": text_to_list(global_config.get("tun_dns_hijack_value", "127.0.0.1:53")) if global_config.get("tun_dns_hijack", True) else [],
+            "endpoint-independent-nat": global_config.get("tun_endpoint_independent_nat", True),
+            "auto-redirect": global_config.get("tun_auto_redirect", False),
+            "strict-route": global_config.get("tun_strict_route", False),
         }
 
     if global_config.get("enable_dns", True):
@@ -85,12 +197,22 @@ def build_config(
             "ipv6": global_config.get("dns_ipv6", True),
             "enhanced-mode": global_config.get("enhanced_mode", "fake-ip"),
             "fake-ip-range": global_config.get("fake_ip_range", "198.18.0.1/16"),
-            "fake-ip-filter": FAKE_IP_FILTER_LIST,
+            "fake-ip-filter": SOFT_ROUTER_FAKE_IP_FILTER_LIST if global_config.get("openclash_preset", True) else FAKE_IP_FILTER_LIST,
             "default-nameserver": text_to_list(global_config.get("default_nameserver", "")),
             "nameserver": text_to_list(global_config.get("nameserver", "")),
-            "fallback": text_to_list(global_config.get("fallback", "")),
-            "fallback-filter": {"geoip": True, "geoip-code": "CN", "ipcidr": ["240.0.0.0/4"]},
         }
+        if global_config.get("fake_ip_range6"):
+            final_config["dns"]["fake-ip-range6"] = global_config["fake_ip_range6"]
+        final_config["dns"]["respect-rules"] = global_config.get("dns_respect_rules", False)
+        if global_config.get("fake_ip_filter_mode"):
+            final_config["dns"]["fake-ip-filter-mode"] = global_config["fake_ip_filter_mode"]
+        direct_nameserver = text_to_list(global_config.get("direct_nameserver", ""))
+        if direct_nameserver:
+            final_config["dns"]["direct-nameserver"] = direct_nameserver
+        fallback = text_to_list(global_config.get("fallback", ""))
+        if fallback:
+            final_config["dns"]["fallback"] = fallback
+            final_config["dns"]["fallback-filter"] = {"geoip": True, "geoip-code": "CN", "ipcidr": ["240.0.0.0/4"]}
         policy = _parse_nameserver_policy(global_config.get("nameserver_policy", ""))
         if policy:
             final_config["dns"]["nameserver-policy"] = policy
@@ -108,11 +230,36 @@ def build_config(
             "enable": True,
             "sniff": {
                 "TLS": {"ports": [443]},
-                "HTTP": {"ports": [80], "override-destination": True},
+                "HTTP": {"ports": [80, "8080-8880"], "override-destination": True},
+                "QUIC": {"ports": [443, 8443]},
             },
+            "override-destination": global_config.get("sniff_override_dest", False),
             "force-domain": SNIFFER_FORCE_DOMAIN,
             "skip-domain": SNIFFER_SKIP_DOMAIN,
+            "parse-pure-ip": global_config.get("sniffer_parse_pure_ip", True),
+            "force-dns-mapping": global_config.get("sniffer_force_dns_mapping", True),
+            "skip-dst-address": SNIFFER_SKIP_DST_ADDRESS,
         }
+
+    if global_config.get("profile_store_selected", True) or global_config.get("profile_store_fake_ip", True):
+        final_config["profile"] = {
+            "store-selected": global_config.get("profile_store_selected", True),
+            "store-fake-ip": global_config.get("profile_store_fake_ip", True),
+        }
+
+    if global_config.get("ntp_enable", False):
+        final_config["ntp"] = {
+            "enable": True,
+            "server": global_config.get("ntp_server", "time.apple.com"),
+            "port": global_config.get("ntp_port", 123),
+            "interval": global_config.get("ntp_interval", 30),
+            "write-to-system": global_config.get("ntp_write_to_system", True),
+        }
+
+    auth = global_config.get("authentication", "")
+    auth_list = text_to_list(auth)
+    if auth_list:
+        final_config["authentication"] = auth_list
 
     rules, rule_providers = build_rules(selected_rule_type, custom_rules, custom_rule_providers)
     if rule_providers:
@@ -174,28 +321,11 @@ def build_rules(
     rule_providers: dict[str, Any] = {}
     if selected_rule_type == "lhie1规则":
         base_url = "https://testingcf.jsdelivr.net/gh/dler-io/Rules@main/Clash/Provider"
-        providers_map = {
-            "AdBlock": ("AdBlock", "AdBlock"),
-            "HTTPDNS": ("HTTPDNS", "HTTPDNS"),
-            "Special": ("Special", "DIRECT"),
-            "PROXY": ("Proxy", "Proxy"),
-            "Domestic": ("Domestic", "Domestic"),
-            "Domestic IPs": ("Domestic%20IPs", "Domestic"),
-            "LAN": ("LAN", "DIRECT"),
-            "Netflix": ("Media/Netflix", "Netflix"),
-            "YouTube": ("Media/YouTube", "Youtube"),
-            "Microsoft": ("Microsoft", "Microsoft"),
-            "AI Suite": ("AI%20Suite", "AI Suite"),
-            "Apple": ("Apple", "Apple"),
-            "Telegram": ("Telegram", "Telegram"),
-            "Steam": ("Steam", "Steam"),
-            "TikTok": ("TikTok", "TikTok"),
-        }
         rule_list = [
             "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
             "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
         ]
-        for name, (suffix, target) in providers_map.items():
+        for name, (suffix, target) in LHIE1_PROVIDERS_MAP.items():
             rule_providers[name] = {
                 "type": "http",
                 "behavior": "classical",
