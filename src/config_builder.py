@@ -191,31 +191,39 @@ def build_config(
         }
 
     if global_config.get("enable_dns", True):
+        is_desktop = global_config.get("is_desktop", True)
         final_config["dns"] = {
             "enable": True,
-            "listen": global_config.get("dns_listen", "0.0.0.0:7874"),
-            "ipv6": global_config.get("dns_ipv6", True),
-            "enhanced-mode": global_config.get("enhanced_mode", "fake-ip"),
-            "fake-ip-range": global_config.get("fake_ip_range", "198.18.0.1/16"),
             "fake-ip-filter": SOFT_ROUTER_FAKE_IP_FILTER_LIST if global_config.get("openclash_preset", True) else FAKE_IP_FILTER_LIST,
-            "default-nameserver": text_to_list(global_config.get("default_nameserver", "")),
-            "nameserver": text_to_list(global_config.get("nameserver", "")),
         }
-        if global_config.get("fake_ip_range6"):
-            final_config["dns"]["fake-ip-range6"] = global_config["fake_ip_range6"]
-        final_config["dns"]["respect-rules"] = global_config.get("dns_respect_rules", False)
-        if global_config.get("fake_ip_filter_mode"):
-            final_config["dns"]["fake-ip-filter-mode"] = global_config["fake_ip_filter_mode"]
-        direct_nameserver = text_to_list(global_config.get("direct_nameserver", ""))
-        if direct_nameserver:
-            final_config["dns"]["direct-nameserver"] = direct_nameserver
-        fallback = text_to_list(global_config.get("fallback", ""))
-        if fallback:
-            final_config["dns"]["fallback"] = fallback
-            final_config["dns"]["fallback-filter"] = {"geoip": True, "geoip-code": "CN", "ipcidr": ["240.0.0.0/4"]}
-        policy = _parse_nameserver_policy(global_config.get("nameserver_policy", ""))
-        if policy:
-            final_config["dns"]["nameserver-policy"] = policy
+        # OpenClash 模式下仅生成精简 DNS 配置，其他字段由插件管理
+        if is_desktop:
+            final_config["dns"].update({
+                "listen": global_config.get("dns_listen", "0.0.0.0:7874"),
+                "ipv6": global_config.get("dns_ipv6", True),
+                "enhanced-mode": global_config.get("enhanced_mode", "fake-ip"),
+                "fake-ip-range": global_config.get("fake_ip_range", "198.18.0.1/16"),
+                "default-nameserver": text_to_list(global_config.get("default_nameserver", "")),
+                "nameserver": text_to_list(global_config.get("nameserver", "")),
+            })
+            if global_config.get("fake_ip_range6"):
+                final_config["dns"]["fake-ip-range6"] = global_config["fake_ip_range6"]
+            final_config["dns"]["respect-rules"] = global_config.get("dns_respect_rules", False)
+            if global_config.get("fake_ip_filter_mode"):
+                final_config["dns"]["fake-ip-filter-mode"] = global_config["fake_ip_filter_mode"]
+            direct_nameserver = text_to_list(global_config.get("direct_nameserver", ""))
+            if direct_nameserver:
+                final_config["dns"]["direct-nameserver"] = direct_nameserver
+            fallback = text_to_list(global_config.get("fallback", ""))
+            if fallback:
+                final_config["dns"]["fallback"] = fallback
+                final_config["dns"]["fallback-filter"] = {"geoip": True, "geoip-code": "CN", "ipcidr": ["240.0.0.0/4"]}
+            policy = _parse_nameserver_policy(global_config.get("nameserver_policy", ""))
+            if policy:
+                final_config["dns"]["nameserver-policy"] = policy
+        else:
+            # OpenClash 模式下仅保留必要的 DNS 字段
+            final_config["dns"]["respect-rules"] = global_config.get("dns_respect_rules", True)
 
     if global_config.get("secret"):
         final_config["secret"] = global_config["secret"]

@@ -86,6 +86,65 @@ https://clash.910501.xyz/sub/用户自己的随机Token
 https://clash.910501.xyz/sub/用户自己的随机Token
 ```
 
+## Nginx反向代理配置
+
+部署后需要配置 Nginx 反向代理，将订阅 API 和 Web UI 分别转发到不同端口。**这是最常见的部署问题**：如果配置错误，订阅链接会返回 HTML 页面而非 YAML 配置。
+
+### 关键说明
+
+本服务包含两个独立的 Web 服务：
+- **Streamlit Web UI**：端口 8501，用于管理界面
+- **FastAPI 订阅 API**：端口 8000，用于 `/sub/` 和 `/health` 接口
+
+Nginx 必须将 `/sub/` 和 `/health` 路径转发到 FastAPI 端口（8000），其他路径转发到 Streamlit 端口（8501）。
+
+### Nginx 配置示例
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name clash.910501.xyz;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    # Streamlit Web UI (端口 8501)
+    location / {
+        proxy_pass http://127.0.0.1:8501;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Streamlit WebSocket 支持
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    # FastAPI 订阅 API (端口 8000) - 必须单独配置！
+    location /sub/ {
+        proxy_pass http://127.0.0.1:8000/sub/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # FastAPI 健康检查
+    location /health {
+        proxy_pass http://127.0.0.1:8000/health;
+    }
+}
+```
+
+### 常见问题
+
+| 问题 | 原因 | 解决方案 |
+| --- | --- | --- |
+| 订阅链接返回 HTML 页面 | `/sub/` 被转发到 8501 | 确保 `/sub/` 转发到 8000 端口 |
+| OpenClash 无法拉取订阅 | 反代配置错误 | 检查 Nginx 日志，确认 `/sub/` 返回 `application/x-yaml` |
+| Web UI 无法正常交互 | WebSocket 未配置 | 添加 WebSocket 升级头（见上方示例） |
+
+如果修改了 docker-compose.yml 中的端口映射（例如将 8000 映射到 8502），需要同步修改 Nginx 配置中的 `proxy_pass` 地址。
+
 ## onekey 协议兼容
 
 | 协议 | 已适配字段 |

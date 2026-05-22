@@ -334,7 +334,25 @@ with st.sidebar:
     st.header("账号")
     st.caption(f"当前用户: {current_user['username']}")
     subscription_url = f"{get_public_base_url()}/sub/{saved_config['token']}"
-    st.text_input("订阅链接", value=subscription_url, key="subscription_url_view", help="复制到 OpenClash 的订阅地址")
+
+    # 使用两列布局：订阅链接 + 一键复制按钮
+    col_url, col_copy = st.columns([4, 1])
+    with col_url:
+        st.text_input("订阅链接", value=subscription_url, key="subscription_url_view",
+                     help="复制到 OpenClash 的订阅地址", disabled=True)
+    with col_copy:
+        st.write("")  # 对齐
+        st.write("")
+        if st.button("📋", key="copy_url_btn", help="一键复制订阅链接"):
+            import streamlit.components.v1 as components
+            copy_js = f"""
+            <script>
+            navigator.clipboard.writeText('{subscription_url}');
+            </script>
+            """
+            components.html(copy_js, height=0)
+            st.toast("订阅链接已复制到剪贴板", icon="✅")
+
     if st.button("重置订阅 Token", help="旧订阅链接会立即失效，适合链接泄露后的应急处理"):
         reset_subscription_token(current_user["id"])
         st.success("订阅 Token 已重置。")
@@ -647,7 +665,7 @@ st.session_state.global_config.update({
     "keep_alive_interval": keep_alive, "tcp_concurrent": tcp_concurrent,
     "enable_tun": enable_tun, "unified_delay": unified_delay, "find_process_mode": find_process_mode,
     "geodata_mode": geodata_mode, "enable_sniffer": enable_sniffer, "sniff_override_dest": sniff_override,
-    "openclash_preset": openclash_preset,
+    "openclash_preset": openclash_preset, "is_desktop": is_desktop,
     "redir_port": redir_port,
     "tproxy_port": tproxy_port,
     "interface_name": interface_name,
@@ -819,26 +837,36 @@ with tab2:
         if node_type not in ["tuic", "hysteria2"]:  # tuic和hy2协议有单独的配置或不需要此通用UDP开关
             node_udp = st.checkbox("UDP 支持", value=True, key=f"node_udp_{node_type}", help="是否启用UDP转发")
 
-    with st.expander("通用高级字段", expanded=False):
-        col_common1, col_common2 = st.columns(2)
-        with col_common1:
-            common_ip_version = st.selectbox(
-                "ip-version",
-                ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"],
-                index=0,
-                key=f"common_ip_version_{node_type}",
-                help="mihomo 公共字段；默认不写入，避免和核心自动选择冲突。",
-            )
-            common_tfo = st.checkbox("tfo", value=False, key=f"common_tfo_{node_type}", help="TCP Fast Open，服务端和系统都支持时才建议开启。")
-            common_mptcp = st.checkbox("mptcp", value=False, key=f"common_mptcp_{node_type}", help="多路径 TCP，适合支持 MPTCP 的系统内核。")
-        with col_common2:
-            enable_smux = st.checkbox("smux", value=False, key=f"enable_smux_{node_type}", help="mihomo 复用配置；onekey 的 VLESS Reality brutal 参数会写入这里。")
-            smux_enabled = st.checkbox("smux.enabled", value=True, key=f"smux_enabled_{node_type}") if enable_smux else False
-            smux_protocol = st.selectbox("smux.protocol", ["h2mux", "yamux", "smux"], index=0, key=f"smux_protocol_{node_type}") if enable_smux else "h2mux"
-            smux_max_connections = st.number_input("smux.max-connections", min_value=1, value=4, key=f"smux_max_conn_{node_type}") if enable_smux else 4
-            smux_brutal_enabled = st.checkbox("smux.brutal-opts.enabled", value=node_type == "vless", key=f"smux_brutal_enabled_{node_type}") if enable_smux else False
-            smux_brutal_up = st.number_input("brutal up Mbps", min_value=1, value=100, key=f"smux_brutal_up_{node_type}") if enable_smux and smux_brutal_enabled else 100
-            smux_brutal_down = st.number_input("brutal down Mbps", min_value=1, value=100, key=f"smux_brutal_down_{node_type}") if enable_smux and smux_brutal_enabled else 100
+    # 通用高级字段仅对 ss、vless、vmess 协议显示
+    if node_type in ["ss", "vless", "vmess"]:
+        with st.expander("通用高级字段", expanded=False):
+            col_common1, col_common2 = st.columns(2)
+            with col_common1:
+                common_ip_version = st.selectbox(
+                    "ip-version",
+                    ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"],
+                    index=0,
+                    key=f"common_ip_version_{node_type}",
+                    help="mihomo 公共字段；默认不写入，避免和核心自动选择冲突。",
+                )
+            with col_common2:
+                enable_smux = st.checkbox("smux", value=False, key=f"enable_smux_{node_type}", help="mihomo 复用配置；onekey 的 VLESS Reality brutal 参数会写入这里。")
+                smux_enabled = st.checkbox("smux.enabled", value=True, key=f"smux_enabled_{node_type}") if enable_smux else False
+                smux_protocol = st.selectbox("smux.protocol", ["h2mux", "yamux", "smux"], index=0, key=f"smux_protocol_{node_type}") if enable_smux else "h2mux"
+                smux_max_connections = st.number_input("smux.max-connections", min_value=1, value=4, key=f"smux_max_conn_{node_type}") if enable_smux else 4
+                smux_brutal_enabled = st.checkbox("smux.brutal-opts.enabled", value=node_type == "vless", key=f"smux_brutal_enabled_{node_type}") if enable_smux else False
+                smux_brutal_up = st.number_input("brutal up Mbps", min_value=1, value=100, key=f"smux_brutal_up_{node_type}") if enable_smux and smux_brutal_enabled else 100
+                smux_brutal_down = st.number_input("brutal down Mbps", min_value=1, value=100, key=f"smux_brutal_down_{node_type}") if enable_smux and smux_brutal_enabled else 100
+    else:
+        # 其他协议不显示通用高级字段，设置默认值避免后续引用报错
+        common_ip_version = "默认"
+        enable_smux = False
+        smux_enabled = False
+        smux_protocol = "h2mux"
+        smux_max_connections = 4
+        smux_brutal_enabled = False
+        smux_brutal_up = 100
+        smux_brutal_down = 100
     
     # 根据节点类型显示不同的配置选项
     if node_type == "vmess":
@@ -1217,10 +1245,6 @@ with tab2:
 
     if common_ip_version != "默认" and "ip-version" not in manual_node:
         manual_node["ip-version"] = common_ip_version
-    if common_tfo and "tfo" not in manual_node:
-        manual_node["tfo"] = True
-    if common_mptcp:
-        manual_node["mptcp"] = True
     if enable_smux:
         manual_node["smux"] = {
             "enabled": smux_enabled,

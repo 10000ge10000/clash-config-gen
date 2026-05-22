@@ -19,6 +19,25 @@ def parse_proxy_yaml(raw_text: str) -> tuple[list[dict[str, Any]], list[str]]:
     _raise_if_html_response(raw_text)
 
     warnings: list[str] = []
+    text = raw_text.strip()
+
+    # onekey 格式检测：直接以 - name: 开头的节点列表（无 proxies: 包裹）
+    # 或者以空格开头的 - name:（缩进格式）
+    first_nonempty = next((line for line in text.splitlines() if line.strip()), "")
+    if first_nonempty.strip().startswith("- name:") or first_nonempty.startswith("  - name:"):
+        try:
+            # 尝试包装为 proxies 列表
+            wrapped = f"proxies:\n{text}"
+            loaded = yaml.safe_load(wrapped)
+            if loaded and isinstance(loaded, dict) and "proxies" in loaded:
+                proxies = loaded["proxies"]
+                if isinstance(proxies, list) and proxies:
+                    valid, validate_warnings = validate_proxies(proxies)
+                    warnings.append("已按 onekey 节点列表格式解析")
+                    return valid, warnings + validate_warnings
+        except Exception:
+            pass  # 继续尝试其他解析方式
+
     attempts = _build_text_candidates(raw_text)
     errors: list[str] = []
 
@@ -211,6 +230,26 @@ def _repair_yaml_text(raw_text: str) -> str:
     if not lines:
         return raw_text.strip()
 
+    # 检测并修复 4 空格缩进问题（onekey 常见输出格式）
+    # 判断条件：存在以4空格开头但不是8空格的行，且没有以2空格开头的行
+    has_4space = any(line.startswith("    ") and not line.startswith("      ") for line in lines if line.strip())
+    has_2space = any(line.startswith("  ") and not line.startswith("    ") for line in lines if line.strip())
+    if has_4space and not has_2space:
+        fixed_lines = []
+        for line in lines:
+            if not line.strip():
+                fixed_lines.append("")
+                continue
+            stripped = line.lstrip()
+            indent = len(line) - len(stripped)
+            if indent > 0:
+                # 将 4 空格缩进转为 2 空格
+                new_indent = (indent // 4) * 2 + (indent % 4 // 2)
+                fixed_lines.append("  " * new_indent + stripped)
+            else:
+                fixed_lines.append(line)
+        lines = fixed_lines
+
     if any(line.strip().startswith("- ") for line in lines):
         lines = _dedent_block(lines).splitlines()
         repaired: list[str] = []
@@ -242,9 +281,17 @@ def _is_noise_line(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
         return False
+    # 原有过滤：OpenClash 输出标记
     if stripped.startswith(("OpenClash YAML 配置", "分享链接", "配置如下", "节点信息", "```")):
         return True
+    # 原有过滤：终端符号
     if stripped.startswith(("➜", "✔", "✖", "⚡", "│", "─", "═")):
+        return True
+    # 新增 onekey 过滤：脚本进度标记和状态输出
+    if stripped.startswith(("[*]", "[+]", "[-]", "[OK]", "[ERROR]", "[INFO]")):
+        return True
+    # 过滤 ANSI 颜色代码开头的行
+    if stripped.startswith("\x1b["):
         return True
     return False
 
