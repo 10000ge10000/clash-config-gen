@@ -16,62 +16,57 @@
 | Docker 部署 | 使用 GHCR 镜像和 Docker Compose 运行，数据通过 volume 持久化 |
 | 自动构建 | 推送到 `main` 后由 GitHub Actions 自动构建并发布镜像 |
 
-## 推荐部署
+## 一键部署
 
-生产环境推荐直接使用 GitHub Container Registry 镜像：
+在服务器中新建一个目录，例如 `clash-config-gen`，然后创建 `docker-compose.yml`：
+
+```yaml
+services:
+  clash-gen:
+    image: ghcr.io/10000ge10000/clash-config-gen:main
+    container_name: clash-gen
+    restart: always
+    ports:
+      # Web 管理页面端口。反代 Web UI 时指向这个端口。
+      - "8501:8501"
+      # 订阅 API 端口。反代 /sub/ 和 /health 时指向这个端口。
+      - "8000:8000"
+    environment:
+      # 改成你的公网访问地址。订阅链接会基于这个地址生成。
+      - PUBLIC_BASE_URL=https://clash.910501.xyz
+      # 是否允许普通用户自行注册。只给自己用可以改成 false。
+      - ALLOW_REGISTRATION=true
+      # 初始化管理员账号。首次启动时自动创建。
+      - ADMIN_USERNAME=admin
+      # 必须改成强密码，不要使用示例值。
+      - ADMIN_PASSWORD=please-change-this-password
+      # SQLite 数据库存储位置，保持默认即可。
+      - APP_DB_PATH=/app/data/app.db
+    volumes:
+      # 保存用户、节点、订阅 Token 和最终配置。不要删除这个目录。
+      - ./data:/app/data
+      # 保存自定义规则集文件。暂时不用也可以保留。
+      - ./ruleset:/app/ruleset
+```
+
+启动：
+
+```bash
+docker compose up -d
+```
+
+更新：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+部署后访问 Web 管理页面，使用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录。生成配置后，侧边栏会显示当前用户的订阅链接，格式如下：
 
 ```text
-ghcr.io/10000ge10000/clash-config-gen:main
+https://clash.910501.xyz/sub/用户自己的随机Token
 ```
-
-先准备环境变量：
-
-```bash
-cp .env.example .env
-nano .env
-```
-
-`.env` 示例：
-
-```env
-PUBLIC_BASE_URL=https://clash.910501.xyz
-ALLOW_REGISTRATION=true
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=please-change-this-password
-WEB_PORT=8501
-API_PORT=8000
-```
-
-启动服务：
-
-```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
-后续更新：
-
-```bash
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
-
-`docker-compose.prod.yml` 会挂载两个目录：
-
-| 路径 | 用途 |
-| --- | --- |
-| `./data:/app/data` | 保存 SQLite 数据库，包含用户、订阅 Token 和配置 |
-| `./ruleset:/app/ruleset` | 保存自定义规则集文件 |
-
-## 环境变量
-
-| 变量 | 必填 | 说明 |
-| --- | --- | --- |
-| `PUBLIC_BASE_URL` | 是 | 对外访问地址，用于生成订阅链接，例如 `https://clash.910501.xyz` |
-| `ADMIN_USERNAME` | 是 | 初始化管理员用户名 |
-| `ADMIN_PASSWORD` | 是 | 初始化管理员密码，生产环境必须使用强密码 |
-| `ALLOW_REGISTRATION` | 否 | 是否开放普通用户注册，默认 `true` |
-| `WEB_PORT` | 否 | Streamlit Web UI 映射端口，默认 `8501` |
-| `API_PORT` | 否 | FastAPI 订阅接口映射端口，默认 `8000` |
 
 ## 使用流程
 
@@ -128,8 +123,8 @@ https://clash.910501.xyz/sub/用户自己的随机Token
 发布完成后，服务器只需要执行：
 
 ```bash
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
+docker compose pull
+docker compose up -d
 ```
 
 ## 目录说明
@@ -144,8 +139,7 @@ src/
   config_builder.py   # Clash 配置生成与校验
   clash_meta_gen.py   # 策略组生成逻辑
 
-docker-compose.prod.yml      # 生产部署模板
-.env.example                 # 环境变量示例
+docker-compose.yml           # 本仓库开发/自建部署模板
 .github/workflows/           # GitHub Actions 构建发布流程
 ```
 
