@@ -10,4 +10,5 @@ venv/
 .github/
 .vscode/
 ruleset/
+data/
 *.log

@@ -22,7 +22,7 @@ COPY src/ .
 RUN dos2unix start.sh && chmod +x start.sh
 
 # 创建规则集目录 (持久化准备)
-RUN mkdir -p ruleset
+RUN mkdir -p data ruleset
 
 # 暴露 Streamlit 和 FastAPI 端口
 EXPOSE 8501 8000

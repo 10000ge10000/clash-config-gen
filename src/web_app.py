@@ -5,6 +5,22 @@ import json
 import uuid
 import os
 
+from auth import get_bool_env
+from config_builder import build_yaml as build_subscription_yaml
+from importers import parse_proxy_yaml, parse_share_link
+from storage import (
+    authenticate_user,
+    create_user,
+    ensure_admin_from_env,
+    get_public_base_url,
+    get_user_config,
+    init_db,
+    list_users,
+    reset_subscription_token,
+    save_user_config,
+    set_user_enabled,
+)
+
 # ==========================================
 # 1. 页面基础设置 (必须位于所有 Streamlit 命令之前)
 # ==========================================
@@ -59,6 +75,72 @@ st.markdown("""
 
 st.title("OpenClash 配置文件生成器")
 st.markdown("不用手写 YAML，输入节点信息，自动生成符合 Meta 规范的配置文件。")
+
+
+# ==========================================
+# 0.1 数据库初始化 + 登录注册门禁
+# ==========================================
+init_db()
+ensure_admin_from_env()
+
+if "auth_user" not in st.session_state:
+    st.session_state.auth_user = None
+
+
+def render_auth_gate():
+    """所有配置都和用户绑定，未登录时必须提前拦截，避免匿名配置丢失。"""
+    st.divider()
+    login_tab, register_tab = st.tabs(["登录", "注册"])
+
+    with login_tab:
+        st.subheader("用户登录")
+        with st.form("login_form"):
+            username = st.text_input("用户名", key="login_username")
+            password = st.text_input("密码", type="password", key="login_password")
+            submitted = st.form_submit_button("登录", type="primary", use_container_width=True)
+        if submitted:
+            user = authenticate_user(username, password)
+            if user:
+                st.session_state.auth_user = {
+                    "id": int(user["id"]),
+                    "username": user["username"],
+                    "is_admin": bool(user["is_admin"]),
+                }
+                st.session_state.pop("session_loaded_user_id", None)
+                st.rerun()
+            else:
+                st.error("用户名或密码错误，或账号已被禁用。")
+
+    with register_tab:
+        if not get_bool_env("ALLOW_REGISTRATION", True):
+            st.warning("当前部署已关闭公开注册，请联系管理员创建账号。")
+            return
+        st.subheader("注册账号")
+        with st.form("register_form"):
+            new_username = st.text_input("用户名", key="register_username", help="3-32 位字母、数字、下划线、点或短横线")
+            new_password = st.text_input("密码", type="password", key="register_password", help="至少 8 位")
+            new_password_confirm = st.text_input("确认密码", type="password", key="register_password_confirm")
+            submitted = st.form_submit_button("注册并登录", type="primary", use_container_width=True)
+        if submitted:
+            if new_password != new_password_confirm:
+                st.error("两次输入的密码不一致。")
+                return
+            try:
+                user = create_user(new_username, new_password, is_admin=False)
+                st.session_state.auth_user = {
+                    "id": int(user["id"]),
+                    "username": user["username"],
+                    "is_admin": bool(user["is_admin"]),
+                }
+                st.session_state.pop("session_loaded_user_id", None)
+                st.rerun()
+            except Exception as exc:
+                st.error(f"注册失败: {exc}")
+
+
+if not st.session_state.auth_user:
+    render_auth_gate()
+    st.stop()
 
 
 # ==========================================
@@ -198,10 +280,59 @@ if 'global_config' not in st.session_state:
         "custom_rules": DEFAULT_DIRECT_RULES # 注入默认规则
     }
 
+current_user = st.session_state.auth_user
+saved_config = get_user_config(current_user["id"])
+if st.session_state.get("session_loaded_user_id") != current_user["id"]:
+    # 登录后只自动加载一次，避免用户在页面上刚修改的内容被每次 rerun 覆盖。
+    if saved_config.get("proxies"):
+        st.session_state.proxies_data = saved_config["proxies"]
+    if saved_config.get("global_config"):
+        st.session_state.global_config.update(saved_config["global_config"])
+    if saved_config.get("custom_rules"):
+        st.session_state.custom_rules = saved_config["custom_rules"]
+    if saved_config.get("custom_rule_providers"):
+        st.session_state.custom_rule_providers = saved_config["custom_rule_providers"]
+    if saved_config.get("selected_rule_type"):
+        st.session_state.selected_rule_type = saved_config["selected_rule_type"]
+    st.session_state.session_loaded_user_id = current_user["id"]
+
 # ==========================================
 # 2. 侧边栏：认证 + 高级全局设置
 # ==========================================
 with st.sidebar:
+    st.header("账号")
+    st.caption(f"当前用户: {current_user['username']}")
+    subscription_url = f"{get_public_base_url()}/sub/{saved_config['token']}"
+    st.text_input("订阅链接", value=subscription_url, key="subscription_url_view", help="复制到 OpenClash 的订阅地址")
+    if st.button("重置订阅 Token", help="旧订阅链接会立即失效，适合链接泄露后的应急处理"):
+        reset_subscription_token(current_user["id"])
+        st.success("订阅 Token 已重置。")
+        st.rerun()
+    if st.button("退出登录"):
+        st.session_state.clear()
+        st.rerun()
+
+    if current_user["is_admin"]:
+        with st.expander("用户管理", expanded=False):
+            for user in list_users():
+                cols = st.columns([2, 1, 1])
+                with cols[0]:
+                    role = "管理员" if user["is_admin"] else "用户"
+                    status = "启用" if user["is_enabled"] else "禁用"
+                    st.caption(f"{user['username']} / {role} / {status}")
+                with cols[1]:
+                    if not user["is_admin"]:
+                        target_enabled = not bool(user["is_enabled"])
+                        label = "启用" if target_enabled else "禁用"
+                        if st.button(label, key=f"toggle_user_{user['id']}"):
+                            set_user_enabled(int(user["id"]), target_enabled)
+                            st.rerun()
+                with cols[2]:
+                    if st.button("重置Token", key=f"reset_token_{user['id']}"):
+                        reset_subscription_token(int(user["id"]))
+                        st.rerun()
+
+    st.divider()
     st.header("全局设置")
     
     # 目标环境选择
@@ -481,10 +612,19 @@ with tab1:
 """
 
     # 添加通过链接导入的功能
-    import_method = st.radio("选择导入方式", ("分享链接", "订阅链接", "粘贴YAML"), help="选择节点信息的导入方式")
+    import_method = st.radio(
+        "选择导入方式",
+        ("OpenClash/onekey YAML", "分享链接", "订阅链接", "粘贴YAML"),
+        help="onekey 脚本输出的 OpenClash YAML 片段、完整配置、纯节点列表都可以直接导入。",
+    )
     
-    if import_method == "粘贴YAML":
-        raw_yaml_input = st.text_area("粘贴 YAML 格式的节点列表", value=default_yaml.strip(), height=300, help="在此处粘贴YAML格式的节点列表")
+    if import_method in ("粘贴YAML", "OpenClash/onekey YAML"):
+        raw_yaml_input = st.text_area(
+            "粘贴 YAML / OpenClash 节点片段",
+            value=default_yaml.strip(),
+            height=300,
+            help="支持完整 config.yaml、proxies: 段、纯 - name 节点列表，以及 onekey.sh 打印出的 OpenClash YAML 配置。",
+        )
     elif import_method == "订阅链接":
         subscription_url = st.text_input("输入订阅链接", placeholder="https://example.com/subscribe/...", help="输入Base64编码的订阅链接")
         raw_yaml_input = ""
@@ -628,6 +768,11 @@ with tab1:
                     except Exception as e:
                         st.error(f"VMess链接解析失败: {e}")
                 
+                elif protocol in ("vless", "tuic", "hysteria2", "anytls"):
+                    proxy = parse_share_link(share_link)
+                    raw_yaml_input = yaml.dump([proxy], default_flow_style=False, allow_unicode=True)
+                    st.success(f"{protocol} 链接解析成功！")
+
                 else:
                     st.error(f"不支持的协议类型: {protocol}")
                     
@@ -636,101 +781,26 @@ with tab1:
 
     # 添加导入按钮
     if st.button("导入节点", key="import_proxies", help="导入当前输入的节点"):
-        if import_method == "粘贴YAML" and raw_yaml_input:
+        if not raw_yaml_input:
+            st.error("没有可导入的内容。")
+        else:
             try:
-                input_proxies = yaml.safe_load(raw_yaml_input)
-            except Exception as e:
-                # 尝试自动修复缩进问题 (处理常见的复制粘贴导致的子项缩进过深)
-                try:
-                    fixed_lines = []
-                    lines = raw_yaml_input.split('\n')
-                    expected_indent = 0
-                    current_shift = 0
-                    
-                    for line in lines:
-                        stripped = line.strip()
-                        if not stripped or stripped.startswith('#'):
-                            fixed_lines.append(line)
-                            continue
-                            
-                        # 检测列表项 "- "
-                        if line.lstrip().startswith('- '):
-                            indent = len(line) - len(line.lstrip())
-                            expected_indent = indent + 2
-                            current_shift = 0
-                            fixed_lines.append(line)
-                            continue
-                        
-                        # 计算偏移量 (仅针对第一个非列表项行确定偏移)
-                        curr_indent = len(line) - len(line.lstrip())
-                        if current_shift == 0 and expected_indent > 0:
-                             if curr_indent > expected_indent:
-                                 # 发现缩进大于预期的对齐位置，记录偏移量
-                                 current_shift = curr_indent - expected_indent
-                        
-                        # 应用反向缩进
-                        if current_shift > 0 and curr_indent >= current_shift:
-                            fixed_lines.append(line[current_shift:])
-                        else:
-                            fixed_lines.append(line)
-                            
-                    fixed_yaml = '\n'.join(fixed_lines)
-                    input_proxies = yaml.safe_load(fixed_yaml)
-                    st.warning("⚠️ 检测到 YAML 缩进格式异常，已尝试自动修复。")
-                except:
-                    st.error(f"YAML 解析错误: {e}")
-                    input_proxies = None
+                input_proxies, import_warnings = parse_proxy_yaml(raw_yaml_input)
+                existing_names = {proxy.get("name") for proxy in st.session_state.proxies_data}
+                new_proxies = []
+                for proxy in input_proxies:
+                    if proxy["name"] in existing_names:
+                        st.warning(f"节点 '{proxy['name']}' 已存在，跳过重复添加")
+                        continue
+                    new_proxies.append(proxy)
+                    existing_names.add(proxy["name"])
 
-            if input_proxies and isinstance(input_proxies, list):
-                    # 检查是否有重复节点
-                    new_proxies = []
-                    for proxy in input_proxies:
-                        if proxy not in st.session_state.proxies_data:
-                            new_proxies.append(proxy)
-                        else:
-                            st.warning(f"节点 '{proxy['name']}' 已存在，跳过重复添加")
-                    
-                    st.session_state.proxies_data.extend(new_proxies)
-                    st.success(f"成功添加 {len(new_proxies)} 个新节点！")
-            elif input_proxies is not None:
-                    st.error("YAML 格式错误：必须是一个列表 (以 - 开头)")
-
-        elif import_method == "订阅链接" and raw_yaml_input:
-            try:
-                input_proxies = yaml.safe_load(raw_yaml_input)
-                if isinstance(input_proxies, list):
-                    # 检查是否有重复节点
-                    new_proxies = []
-                    for proxy in input_proxies:
-                        if proxy not in st.session_state.proxies_data:
-                            new_proxies.append(proxy)
-                        else:
-                            st.warning(f"节点 '{proxy['name']}' 已存在，跳过重复添加")
-                    
-                    st.session_state.proxies_data.extend(new_proxies)
-                    st.success(f"成功添加 {len(new_proxies)} 个新节点！")
-                else:
-                    st.error("订阅链接解析错误：内容不是有效的YAML列表")
+                st.session_state.proxies_data.extend(new_proxies)
+                st.success(f"成功添加 {len(new_proxies)} 个新节点。")
+                for warning in import_warnings:
+                    st.warning(warning)
             except Exception as e:
-                st.error(f"YAML 解析错误: {e}")
-        elif import_method == "分享链接" and raw_yaml_input:
-            try:
-                input_proxies = yaml.safe_load(raw_yaml_input)
-                if isinstance(input_proxies, list):
-                    # 检查是否有重复节点
-                    new_proxies = []
-                    for proxy in input_proxies:
-                        if proxy not in st.session_state.proxies_data:
-                            new_proxies.append(proxy)
-                        else:
-                            st.warning(f"节点 '{proxy['name']}' 已存在，跳过重复添加")
-                    
-                    st.session_state.proxies_data.extend(new_proxies)
-                    st.success(f"成功添加 {len(new_proxies)} 个新节点！")
-                else:
-                    st.error("分享链接解析错误：内容不是有效的YAML列表")
-            except Exception as e:
-                st.error(f"YAML 解析错误: {e}")
+                st.error(f"导入失败: {e}")
 
 with tab2:
     st.write("手动添加单个节点：")
@@ -1804,7 +1874,19 @@ with tab4:
                         st.warning(w)
 
             # 生成 YAML
-            final_config_str = "# Generator: Clash-Config-Gen\n" + yaml.dump(final_config, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            final_config_str = build_subscription_yaml(final_config)
+            if not check_errors:
+                save_user_config(
+                    current_user["id"],
+                    st.session_state.proxies_data,
+                    st.session_state.global_config,
+                    st.session_state.custom_rules,
+                    st.session_state.custom_rule_providers,
+                    selected_rule,
+                    final_config_str,
+                )
+                refreshed_config = get_user_config(current_user["id"])
+                st.success(f"订阅已保存并立即生效: {get_public_base_url()}/sub/{refreshed_config['token']}")
             
             st.divider()
             col_d1, col_d2 = st.columns([3, 1])

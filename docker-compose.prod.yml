@@ -1,0 +1,17 @@
+services:
+  clash-gen:
+    image: ghcr.io/10000ge10000/clash-config-gen:main
+    container_name: clash-gen
+    restart: always
+    ports:
+      - "${WEB_PORT:-8501}:8501"
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
+      - APP_DB_PATH=/app/data/app.db
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    volumes:
+      - ./data:/app/data
+      - ./ruleset:/app/ruleset
