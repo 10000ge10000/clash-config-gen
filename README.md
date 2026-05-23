@@ -86,6 +86,12 @@ https://clash.910501.xyz/sub/用户自己的随机Token
 https://clash.910501.xyz/sub/用户自己的随机Token
 ```
 
+如果订阅客户端或 CDN 对无扩展名路径兼容性不好，也可以使用等价的 YAML 路径：
+
+```text
+https://clash.910501.xyz/sub/用户自己的随机Token/config.yaml
+```
+
 ## Nginx反向代理配置
 
 部署后需要配置 Nginx 反向代理，将订阅 API 和 Web UI 分别转发到不同端口。**这是最常见的部署问题**：如果配置错误，订阅链接会返回 HTML 页面而非 YAML 配置。
@@ -141,6 +147,8 @@ server {
 | --- | --- | --- |
 | 订阅链接返回 HTML 页面 | `/sub/` 被转发到 8501 | 确保 `/sub/` 转发到 8000 端口 |
 | OpenClash 无法拉取订阅 | 反代配置错误 | 检查 Nginx 日志，确认 `/sub/` 返回 `application/x-yaml` |
+| 普通脚本测试返回 403 / Cloudflare 1010 | CDN 浏览器完整性检查拦截了默认脚本 User-Agent | 用 OpenClash、mihomo、浏览器或显式设置 User-Agent 测试；真实 OpenClash 拉取应返回 `application/x-yaml` |
+| 客户端只看到内置 Global | 订阅内容不是有效 YAML，或 YAML 缺少 `proxy-groups` | 重新在“生成与检查”中保存；新版本会拒绝继续提供没有策略组的坏配置 |
 | Web UI 无法正常交互 | WebSocket 未配置 | 添加 WebSocket 升级头（见上方示例） |
 
 如果修改了 docker-compose.yml 中的端口映射（例如将 8000 映射到 8502），需要同步修改 Nginx 配置中的 `proxy_pass` 地址。

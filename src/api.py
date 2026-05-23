@@ -1,6 +1,7 @@
 import yaml
 from fastapi import FastAPI, HTTPException, Response
 
+from config_builder import validate_config
 from storage import ensure_admin_from_env, get_config_by_token, health_snapshot, init_db
 
 
@@ -18,8 +19,7 @@ def health_check():
     return health_snapshot()
 
 
-@app.get("/sub/{token}")
-def get_subscription(token: str):
+def _build_subscription_response(token: str) -> Response:
     config = get_config_by_token(token)
     if not config:
         raise HTTPException(status_code=404, detail="订阅不存在、用户已禁用或 Token 已失效")
@@ -29,15 +29,38 @@ def get_subscription(token: str):
         raise HTTPException(status_code=409, detail="该用户尚未保存可用配置")
 
     try:
-        yaml.safe_load(final_yaml)
+        loaded_config = yaml.safe_load(final_yaml)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"订阅 YAML 已损坏: {exc}") from exc
+    if not isinstance(loaded_config, dict):
+        raise HTTPException(status_code=500, detail="订阅 YAML 顶层结构不是字典")
+
+    errors, _warnings = validate_config(loaded_config)
+    if errors:
+        raise HTTPException(status_code=409, detail=f"该用户保存的配置未通过可用性检查: {'; '.join(errors)}")
+
+    proxy_count = len(loaded_config.get("proxies") or [])
+    group_count = len(loaded_config.get("proxy-groups") or [])
 
     return Response(
         content=final_yaml,
         media_type="application/x-yaml; charset=utf-8",
         headers={
             "Profile-Update-Interval": "24",
-            "Subscription-Userinfo": "upload=0; download=0; total=0; expire=0",
+            "Content-Disposition": 'inline; filename="clash-config.yaml"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Clash-Proxy-Count": str(proxy_count),
+            "X-Clash-Proxy-Group-Count": str(group_count),
         },
     )
+
+
+@app.get("/sub/{token}")
+def get_subscription(token: str):
+    return _build_subscription_response(token)
+
+
+@app.get("/sub/{token}/config.yaml")
+def get_subscription_yaml(token: str):
+    return _build_subscription_response(token)

@@ -323,6 +323,8 @@ def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
 
     if not proxies:
         errors.append("Proxies 为空")
+    if not groups:
+        errors.append("Proxy Groups 为空")
     if not any(str(rule).startswith("MATCH,") for rule in rules):
         errors.append("Rules 缺少 MATCH 兜底规则")
 
@@ -338,7 +340,11 @@ def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
     for rule in rules:
         parts = str(rule).split(",")
         if len(parts) >= 2:
-            target = parts[-1]
+            # Clash/Mihomo 规则允许在最后追加 no-resolve，例如：
+            # GEOIP,CN,Domestic,no-resolve
+            # 真正的策略组目标是倒数第二段。如果直接取最后一段，会漏掉
+            # Domestic 这类缺失策略组，坏配置就会被误判为可用。
+            target = parts[-2] if parts[-1] == "no-resolve" and len(parts) >= 3 else parts[-1]
             if target not in valid_targets and target != "no-resolve":
                 warnings.append(f"规则 '{rule}' 指向了不存在的策略组: '{target}'")
 
