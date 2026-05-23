@@ -414,18 +414,10 @@ SNIFFER_SKIP_DOMAIN = [
     "Mijia Cloud", "dlg.io.mi.com", "+.oray.com", "+.sunlogin.net", "+.push.apple.com"
 ]
 
-# 初始化session state来存储节点
-if 'proxies_data' not in st.session_state:
-    st.session_state.proxies_data = []
 
-if 'custom_rules' not in st.session_state:
-    st.session_state.custom_rules = []
-
-if 'custom_rule_providers' not in st.session_state:
-    st.session_state.custom_rule_providers = {}
-
-if 'global_config' not in st.session_state:
-    st.session_state.global_config = {
+def build_default_global_config() -> dict:
+    """返回每个用户独立的默认全局配置，避免账号切换时复用上一位用户状态。"""
+    return {
         # 基础
         "include_global_compat": False,
         "include_inbound_ports": False,
@@ -434,7 +426,6 @@ if 'global_config' not in st.session_state:
         "enable_core_options": False,
         "optional_globals_v2": True,
         "port": 7890,
-
         "socks_port": 7891,
         "mixed_port": 7893,
         "allow_lan": False,
@@ -460,7 +451,7 @@ if 'global_config' not in st.session_state:
         "geodata_loader": "standard",
         # TUN
         "enable_tun": False,
-        "tun_stack": "mixed", # 修改为 mixed
+        "tun_stack": "mixed",
         "tun_device": "utun",
         "tun_auto_route": False,
         "tun_auto_detect_interface": False,
@@ -469,9 +460,9 @@ if 'global_config' not in st.session_state:
         "tun_endpoint_independent_nat": False,
         "tun_auto_redirect": False,
         "tun_strict_route": False,
-        # DNS (参考 Config)
+        # DNS
         "enable_dns": False,
-        "dns_listen": "0.0.0.0:7874", # 修改为 7874
+        "dns_listen": "0.0.0.0:7874",
         "dns_ipv6": False,
         "enhanced_mode": "fake-ip",
         "fake_ip_range": "198.18.0.1/16",
@@ -483,7 +474,7 @@ if 'global_config' not in st.session_state:
         "default_nameserver": "223.5.5.5\n119.29.29.29",
         "nameserver": "https://dns.alidns.com/dns-query\nhttps://doh.pub/dns-query",
         "fallback": "https://1.1.1.1/dns-query\ntcp://8.8.8.8",
-        # 嗅探 (默认关闭，只有用户勾选或应用预设后才写入 YAML)
+        # 嗅探
         "enable_sniffer": False,
         "sniff_override_dest": False,
         "sniffer_parse_pure_ip": False,
@@ -499,39 +490,74 @@ if 'global_config' not in st.session_state:
         "ntp_write_to_system": False,
         "authentication": "",
         # 规则
-        "custom_rules": DEFAULT_DIRECT_RULES, # 注入默认规则
+        "custom_rules": DEFAULT_DIRECT_RULES,
         "lhie1_provider_targets": {},
     }
+
+
+def normalize_hy2_hop_interval(raw_value: str) -> int | str:
+    """mihomo Hysteria2 支持整数秒或 `5-25` 这种随机范围；范围只能使用短横线。"""
+    value = str(raw_value or "").strip()
+    if not value:
+        return 30
+    if value.isdigit():
+        seconds = int(value)
+        if seconds <= 0:
+            raise ValueError("hop-interval 必须大于 0 秒")
+        return seconds
+    if "-" in value:
+        left, right = [part.strip() for part in value.split("-", 1)]
+        if not left.isdigit() or not right.isdigit():
+            raise ValueError("随机跳跃间隔必须写成 5-25 这种纯数字范围")
+        start = int(left)
+        end = int(right)
+        if start <= 0 or end <= 0 or start > end:
+            raise ValueError("随机跳跃间隔范围必须大于 0，且左侧不能大于右侧")
+        return f"{start}-{end}"
+    raise ValueError("hop-interval 只支持整数秒或 5-25 这种范围格式")
+
+
+# 初始化session state来存储节点
+if 'proxies_data' not in st.session_state:
+    st.session_state.proxies_data = []
+
+if 'custom_rules' not in st.session_state:
+    st.session_state.custom_rules = []
+
+if 'custom_rule_providers' not in st.session_state:
+    st.session_state.custom_rule_providers = {}
+
+if 'global_config' not in st.session_state:
+    st.session_state.global_config = build_default_global_config()
 
 current_user = st.session_state.auth_user
 saved_config = get_user_config(current_user["id"])
 if st.session_state.get("session_loaded_user_id") != current_user["id"]:
-    # 登录后只自动加载一次，避免用户在页面上刚修改的内容被每次 rerun 覆盖。
-    if saved_config.get("proxies"):
-        st.session_state.proxies_data = saved_config["proxies"]
-    if saved_config.get("global_config"):
-        st.session_state.global_config.update(saved_config["global_config"])
-        if not st.session_state.global_config.get("optional_globals_v2"):
-            st.session_state.global_config.update({
-                "include_global_compat": False,
-                "include_inbound_ports": False,
-                "include_controller": False,
-                "include_router_options": False,
-                "enable_core_options": False,
-                "enable_dns": False,
-                "enable_sniffer": False,
-                "openclash_preset": False,
-                "dns_respect_rules": False,
-                "profile_store_selected": False,
-                "profile_store_fake_ip": False,
-                "optional_globals_v2": True,
-            })
-    if saved_config.get("custom_rules"):
-        st.session_state.custom_rules = saved_config["custom_rules"]
-    if saved_config.get("custom_rule_providers"):
-        st.session_state.custom_rule_providers = saved_config["custom_rule_providers"]
+    # 切换账号时必须先回到干净默认态，再加载当前用户配置。
+    # 否则新用户空配置会继续沿用上一位用户的 session_state，下载到错误账号的 YAML。
+    st.session_state.proxies_data = saved_config.get("proxies") or []
+    st.session_state.global_config = build_default_global_config()
+    st.session_state.global_config.update(saved_config.get("global_config") or {})
+    if not st.session_state.global_config.get("optional_globals_v2"):
+        st.session_state.global_config.update({
+            "include_global_compat": False,
+            "include_inbound_ports": False,
+            "include_controller": False,
+            "include_router_options": False,
+            "enable_core_options": False,
+            "enable_dns": False,
+            "enable_sniffer": False,
+            "openclash_preset": False,
+            "dns_respect_rules": False,
+            "profile_store_selected": False,
+            "profile_store_fake_ip": False,
+            "optional_globals_v2": True,
+        })
+    st.session_state.custom_rules = saved_config.get("custom_rules") or []
+    st.session_state.custom_rule_providers = saved_config.get("custom_rule_providers") or {}
     if saved_config.get("selected_rule_type"):
         st.session_state.selected_rule_type = saved_config["selected_rule_type"]
+    reset_global_widget_keys()
     st.session_state.session_loaded_user_id = current_user["id"]
 
 # ==========================================
@@ -1228,7 +1254,7 @@ with tab2:
         hy2_skip_cert = st.checkbox("跳过证书验证", value=True, key=f"hy2_skip_cert_{node_type}", help="是否跳过TLS证书验证")
         hy2_alpn = st.selectbox("ALPN", ["h3", "h3-29", "h3-27"], index=0, help="应用层协议协商标识")
         
-        enable_port_hopping = st.checkbox("启用端口跳跃", key=f"enable_port_hopping_{node_type}", help="是否启用动态端口跳跃")
+        enable_port_hopping = st.checkbox("启用端口跳跃", value=True, key=f"enable_port_hopping_{node_type}", help="启用后写入 ports 字段；mihomo 会忽略 port 并按端口范围跳跃。")
         if enable_port_hopping:
             port_hopping_range = st.text_input("端口范围", "29950-30000", help="端口跳跃的范围；兼容 onekey 的 ports 字段。")
         
@@ -1284,7 +1310,11 @@ with tab2:
                 initial_connection_receive_window = st.number_input("initial_connection_receive_window", value=st.session_state.quic_params_vals["init_conn"], help="QUIC初始连接接收窗口大小")
                 max_connection_receive_window = st.number_input("max_connection_receive_window", value=st.session_state.quic_params_vals["max_conn"], help="QUIC最大连接接收窗口大小")
         
-        hy2_hop_interval = st.number_input("跳跃间隔（单位：秒）", value=30, help="端口跳跃的时间间隔")
+        hy2_hop_interval = st.text_input(
+            "跳跃间隔（单位：秒）",
+            value="5-25",
+            help="mihomo 官方支持整数秒或范围。填写 5-25 会在每次端口切换时随机选择 5 到 25 秒；范围只支持短横线，不支持逗号。",
+        )
         hy2_fingerprint = st.selectbox("Fingerprint", ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "none"], index=0, help="TLS指纹，用于伪装客户端")
         hy2_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
     
@@ -1441,13 +1471,15 @@ with tab2:
         manual_node["skip-cert-verify"] = hy2_skip_cert
         manual_node["alpn"] = [hy2_alpn]
         if hy2_obfs_type and hy2_obfs_type != "none":
-            manual_node["obfs"] = {
-                "type": hy2_obfs_type,
-                "password": hy2_obfs_password
-            }
+            manual_node["obfs"] = hy2_obfs_type
+            manual_node["obfs-password"] = hy2_obfs_password
         manual_node["up"] = f"{hy2_up_mbps} Mbps"
         manual_node["down"] = f"{hy2_down_mbps} Mbps"
-        manual_node["hop-interval"] = hy2_hop_interval
+        try:
+            manual_node["hop-interval"] = normalize_hy2_hop_interval(hy2_hop_interval)
+        except ValueError as exc:
+            st.warning(str(exc))
+            manual_node["hop-interval"] = str(hy2_hop_interval).strip() or 30
         manual_node["fingerprint"] = hy2_fingerprint
         if hy2_ip_version != "默认":
             manual_node["ip-version"] = hy2_ip_version
@@ -1587,7 +1619,21 @@ with tab2:
         for idx, proxy in enumerate(st.session_state.proxies_data):
             proxy_expander = st.expander(f"节点: {proxy['name']}", expanded=False)
             with proxy_expander:
-                col_proxy_actions, col_proxy_type = st.columns([3, 1])
+                col_up, col_down, col_proxy_actions, col_proxy_type = st.columns([1, 1, 2, 1])
+                with col_up:
+                    if st.button("上移", key=f"move_proxy_up_{idx}", disabled=idx == 0, use_container_width=True):
+                        st.session_state.proxies_data[idx - 1], st.session_state.proxies_data[idx] = (
+                            st.session_state.proxies_data[idx],
+                            st.session_state.proxies_data[idx - 1],
+                        )
+                        st.rerun()
+                with col_down:
+                    if st.button("下移", key=f"move_proxy_down_{idx}", disabled=idx == len(st.session_state.proxies_data) - 1, use_container_width=True):
+                        st.session_state.proxies_data[idx + 1], st.session_state.proxies_data[idx] = (
+                            st.session_state.proxies_data[idx],
+                            st.session_state.proxies_data[idx + 1],
+                        )
+                        st.rerun()
                 with col_proxy_actions:
                     if st.button(f"删除节点 {proxy['name']}", key=f"delete_proxy_{idx}"):
                         st.session_state.proxies_data.pop(idx)
