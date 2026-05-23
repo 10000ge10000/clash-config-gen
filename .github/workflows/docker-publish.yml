@@ -20,6 +20,52 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r src/requirements.txt
+
+      - name: Run unit tests
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+
+      - name: Install mihomo for sample validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="v1.19.24"
+          curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/${version}/mihomo-linux-amd64-${version}.gz" -o /tmp/mihomo.gz
+          gunzip /tmp/mihomo.gz
+          chmod +x /tmp/mihomo
+          /tmp/mihomo -v
+
+      - name: Validate sample config with mihomo
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src python - <<'PY'
+          from config_builder import build_config, build_yaml
+
+          config = build_config(
+              [
+                  {
+                      "name": "sample",
+                      "type": "ss",
+                      "server": "127.0.0.1",
+                      "port": 8388,
+                      "cipher": "aes-128-gcm",
+                      "password": "password",
+                  }
+              ],
+              {"generation_profile": "minimal"},
+          )
+          with open("/tmp/clash-config-gen-sample.yaml", "w", encoding="utf-8") as file:
+              file.write(build_yaml(config))
+          PY
+          /tmp/mihomo -t -f /tmp/clash-config-gen-sample.yaml
+
       - name: Normalize image name
         id: image
         shell: bash

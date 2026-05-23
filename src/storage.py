@@ -8,7 +8,8 @@ from typing import Any
 import yaml
 
 from auth import generate_token, hash_password, is_valid_username, verify_password
-from config_builder import build_yaml, normalize_proxies_for_mihomo
+from config_builder import build_yaml
+from normalizer import normalize_proxies_for_mihomo
 
 
 def get_db_path() -> str:
@@ -64,12 +65,16 @@ def init_db() -> None:
                 custom_rule_providers_json TEXT NOT NULL DEFAULT '{}',
                 selected_rule_type TEXT NOT NULL DEFAULT '自定义规则',
                 final_yaml TEXT NOT NULL DEFAULT '',
+                validation_status TEXT NOT NULL DEFAULT 'unknown',
+                validation_message TEXT NOT NULL DEFAULT '',
+                validated_at TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             );
             """
         )
+        _ensure_subscription_config_columns(conn)
         _migrate_mihomo_proxy_fields(conn)
 
 
@@ -226,6 +231,8 @@ def save_user_config(
     custom_rule_providers: dict[str, Any],
     selected_rule_type: str,
     final_yaml: str,
+    validation_status: str = "unknown",
+    validation_message: str = "",
 ) -> None:
     ensure_user_config(user_id)
     now = utc_now()
@@ -241,6 +248,9 @@ def save_user_config(
                 custom_rule_providers_json = ?,
                 selected_rule_type = ?,
                 final_yaml = ?,
+                validation_status = ?,
+                validation_message = ?,
+                validated_at = ?,
                 updated_at = ?
             WHERE user_id = ?
             """,
@@ -251,10 +261,26 @@ def save_user_config(
                 json.dumps(custom_rule_providers, ensure_ascii=False),
                 selected_rule_type,
                 final_yaml,
+                validation_status,
+                validation_message[:2000],
+                now if validation_status != "unknown" else "",
                 now,
                 user_id,
             ),
         )
+
+
+def _ensure_subscription_config_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(subscription_configs)").fetchall()
+    }
+    for column, definition in {
+        "validation_status": "TEXT NOT NULL DEFAULT 'unknown'",
+        "validation_message": "TEXT NOT NULL DEFAULT ''",
+        "validated_at": "TEXT NOT NULL DEFAULT ''",
+    }.items():
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE subscription_configs ADD COLUMN {column} {definition}")
 
 
 def _migrate_mihomo_proxy_fields(conn: sqlite3.Connection) -> None:
@@ -363,6 +389,9 @@ def _decode_config_row(row: sqlite3.Row) -> dict[str, Any]:
         "custom_rule_providers": load_json("custom_rule_providers_json", {}),
         "selected_rule_type": row["selected_rule_type"],
         "final_yaml": row["final_yaml"] or "",
+        "validation_status": row["validation_status"] if "validation_status" in row.keys() else "unknown",
+        "validation_message": row["validation_message"] if "validation_message" in row.keys() else "",
+        "validated_at": row["validated_at"] if "validated_at" in row.keys() else "",
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

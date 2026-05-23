@@ -1,6 +1,7 @@
 import unittest
 
-from config_builder import build_config, normalize_proxy_for_mihomo, validate_config
+from config_builder import build_config, validate_config
+from normalizer import normalize_proxy_for_mihomo
 
 
 class ValidateConfigTest(unittest.TestCase):
@@ -64,6 +65,8 @@ class ValidateConfigTest(unittest.TestCase):
                         "type": "ss",
                         "server": "127.0.0.1",
                         "port": 8388,
+                        "cipher": "aes-128-gcm",
+                        "password": "password",
                     }
                 ],
                 "proxy-groups": [],
@@ -84,6 +87,8 @@ class ValidateConfigTest(unittest.TestCase):
                         "type": "ss",
                         "server": "127.0.0.1",
                         "port": 8388,
+                        "cipher": "aes-128-gcm",
+                        "password": "password",
                     }
                 ],
                 "proxy-groups": [
@@ -106,6 +111,8 @@ class ValidateConfigTest(unittest.TestCase):
                         "type": "ss",
                         "server": "127.0.0.1",
                         "port": 8388,
+                        "cipher": "aes-128-gcm",
+                        "password": "password",
                     }
                 ],
                 "proxy-groups": [
@@ -118,6 +125,27 @@ class ValidateConfigTest(unittest.TestCase):
 
         self.assertEqual([], errors)
         self.assertEqual([], warnings)
+
+    def test_protocol_required_fields_are_enforced(self):
+        """协议级必填字段缺失时必须阻止保存，避免把坏配置交给 OpenClash。"""
+        errors, _warnings = validate_config(
+            {
+                "proxies": [
+                    {
+                        "name": "broken-ss",
+                        "type": "ss",
+                        "server": "127.0.0.1",
+                        "port": 8388,
+                    }
+                ],
+                "proxy-groups": [
+                    {"name": "Proxy", "type": "select", "proxies": ["broken-ss"]},
+                ],
+                "rules": ["MATCH,Proxy"],
+            }
+        )
+
+        self.assertIn("节点 'broken-ss' 缺少必填字段: cipher, password", errors)
 
 
 if __name__ == "__main__":

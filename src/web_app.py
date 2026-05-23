@@ -13,6 +13,7 @@ from config_builder import (
     validate_config as validate_subscription_config,
 )
 from importers import normalize_subscription_content, parse_proxy_yaml, parse_share_link
+from mihomo_validator import validate_with_mihomo
 from storage import (
     authenticate_user,
     create_user,
@@ -362,6 +363,7 @@ def apply_full_client_dns_leak_preset() -> None:
         "sniffer_force_dns_mapping": True,
         "profile_store_selected": True,
         "profile_store_fake_ip": True,
+        "generation_profile": "desktop-full",
     })
     reset_global_widget_keys()
     st.session_state["target_mode"] = "全平台客户端 (PC/移动端)"
@@ -389,6 +391,7 @@ def apply_openclash_router_safe_preset() -> None:
         "openclash_preset": False,
         "profile_store_selected": False,
         "profile_store_fake_ip": False,
+        "generation_profile": "openclash-router",
     })
     reset_global_widget_keys()
     st.session_state["target_mode"] = "OpenClash / 软路由"
@@ -490,6 +493,7 @@ def build_default_global_config() -> dict:
         "ntp_write_to_system": False,
         "authentication": "",
         # 规则
+        "generation_profile": "desktop-full",
         "custom_rules": DEFAULT_DIRECT_RULES,
         "lhie1_provider_targets": {},
     }
@@ -638,6 +642,18 @@ with st.sidebar:
         help="全平台客户端：适用于 Windows, macOS, Android, iOS 等独立运行的客户端，生成包含 TUN、DNS 的完整配置。\nOpenClash：精简配置，仅生成节点和策略，基础设置由插件接管。"
     )
     is_desktop = target_mode == "全平台客户端 (PC/移动端)"
+    default_profile = "desktop-full" if is_desktop else "openclash-router"
+    profile_options = ["openclash-router", "desktop-full", "minimal"]
+    current_profile = st.session_state.global_config.get("generation_profile", default_profile)
+    if current_profile not in profile_options:
+        current_profile = default_profile
+    generation_profile = st.selectbox(
+        "生成模板",
+        profile_options,
+        index=profile_options.index(current_profile),
+        help="openclash-router 会强制关闭 DNS/TUN；desktop-full 允许完整客户端字段；minimal 只输出基础代理组和 MATCH。",
+        key="gc_generation_profile",
+    )
 
     with st.expander("DNS 防泄露预设", expanded=True):
         st.caption("优先使用预设，再按需微调。预设会自动处理 respect-rules 与 proxy-server-nameserver 的依赖关系。")
@@ -999,6 +1015,7 @@ st.session_state.global_config.update({
     "ntp_port": ntp_port,
     "ntp_interval": ntp_interval,
     "ntp_write_to_system": ntp_write_to_system,
+    "generation_profile": generation_profile,
 })
 
 if enable_dns:
@@ -1974,17 +1991,24 @@ with tab4:
                 for error in check_errors:
                     st.text(f"- {error}")
             else:
-                save_user_config(
-                    current_user["id"],
-                    st.session_state.proxies_data,
-                    st.session_state.global_config,
-                    st.session_state.custom_rules,
-                    st.session_state.custom_rule_providers,
-                    selected_rule,
-                    final_config_str,
-                )
-                refreshed_config = get_user_config(current_user["id"])
-                st.success(f"配置检查通过，订阅已保存并立即生效: {get_public_base_url()}/sub/{refreshed_config['token']}")
+                mihomo_result = validate_with_mihomo(final_config_str)
+                if not mihomo_result.ok:
+                    st.error(f"mihomo 内核校验失败，订阅未保存: {mihomo_result.status}")
+                    st.code(mihomo_result.message, language="text")
+                else:
+                    save_user_config(
+                        current_user["id"],
+                        st.session_state.proxies_data,
+                        st.session_state.global_config,
+                        st.session_state.custom_rules,
+                        st.session_state.custom_rule_providers,
+                        selected_rule,
+                        final_config_str,
+                        validation_status=mihomo_result.status,
+                        validation_message=mihomo_result.message,
+                    )
+                    refreshed_config = get_user_config(current_user["id"])
+                    st.success(f"配置检查和 mihomo 校验通过，订阅已保存并立即生效: {get_public_base_url()}/sub/{refreshed_config['token']}")
 
             if check_warnings:
                 with st.expander(f"发现 {len(check_warnings)} 个警告", expanded=False):

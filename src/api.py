@@ -1,7 +1,9 @@
 import yaml
 from fastapi import FastAPI, HTTPException, Response
 
-from config_builder import build_yaml, normalize_proxies_for_mihomo, validate_config
+from config_builder import build_yaml, validate_config
+from diagnostics import build_subscription_diagnostics
+from normalizer import normalize_proxies_for_mihomo
 from storage import ensure_admin_from_env, get_config_by_token, health_snapshot, init_db
 
 
@@ -63,6 +65,22 @@ def _build_subscription_response(token: str) -> Response:
     )
 
 
+def _subscription_snapshot(token: str) -> tuple[dict, dict, str]:
+    config = get_config_by_token(token)
+    if not config:
+        raise HTTPException(status_code=404, detail="订阅不存在、用户已禁用或 Token 已失效")
+    final_yaml = config.get("final_yaml") or ""
+    if not final_yaml.strip():
+        raise HTTPException(status_code=409, detail="该用户尚未保存可用配置")
+    try:
+        loaded_config = yaml.safe_load(final_yaml)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"订阅 YAML 已损坏: {exc}") from exc
+    if not isinstance(loaded_config, dict):
+        raise HTTPException(status_code=500, detail="订阅 YAML 顶层结构不是字典")
+    return config, loaded_config, final_yaml
+
+
 @app.get("/sub/{token}")
 def get_subscription(token: str):
     return _build_subscription_response(token)
@@ -71,3 +89,9 @@ def get_subscription(token: str):
 @app.get("/sub/{token}/config.yaml")
 def get_subscription_yaml(token: str):
     return _build_subscription_response(token)
+
+
+@app.get("/sub/{token}/diagnostics")
+def get_subscription_diagnostics(token: str):
+    config, loaded_config, _final_yaml = _subscription_snapshot(token)
+    return build_subscription_diagnostics(config, loaded_config)

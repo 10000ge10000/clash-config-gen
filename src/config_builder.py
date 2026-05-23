@@ -1,25 +1,9 @@
-import re
 from typing import Any
 
 import yaml
 
 from clash_meta_gen import generate_proxy_groups
-
-
-BROWSER_CLIENT_FINGERPRINTS = {
-    "chrome",
-    "firefox",
-    "safari",
-    "ios",
-    "android",
-    "edge",
-    "360",
-    "qq",
-    "random",
-    "randomized",
-}
-
-CERTIFICATE_PIN_PATTERN = re.compile(r"^(?:[A-Fa-f0-9]{64}|(?:[A-Fa-f0-9]{2}:){31}[A-Fa-f0-9]{2})$")
+from normalizer import normalize_proxies_for_mihomo, validate_proxy_fields
 
 FAKE_IP_FILTER_LIST = [
     "+.services.googleapis.cn",
@@ -137,44 +121,6 @@ def text_to_list(text: str) -> list[str]:
     return [line.strip() for line in (text or "").splitlines() if line.strip()]
 
 
-def normalize_proxy_for_mihomo(proxy: dict[str, Any]) -> dict[str, Any]:
-    """修正容易让 mihomo/Clash Verge 直接拒绝加载的兼容字段。
-
-    `fingerprint` 在 mihomo 里表示 TLS 证书固定，不是浏览器 TLS 指纹。
-    很多旧订阅或手动配置会把 `chrome`、`firefox` 这类值写到
-    `fingerprint`，内核会报错并让整份配置加载失败。浏览器指纹必须写入
-    `client-fingerprint`；无法识别为证书 SHA256 指纹的旧字段直接移除。
-    """
-    normalized = dict(proxy)
-
-    fingerprint = normalized.get("fingerprint")
-    if fingerprint is not None:
-        raw_fingerprint = str(fingerprint).strip()
-        lower_fingerprint = raw_fingerprint.lower()
-        if lower_fingerprint == "none":
-            normalized.pop("fingerprint", None)
-        elif lower_fingerprint in BROWSER_CLIENT_FINGERPRINTS:
-            if not normalized.get("client-fingerprint"):
-                normalized["client-fingerprint"] = lower_fingerprint
-            normalized.pop("fingerprint", None)
-        elif not CERTIFICATE_PIN_PATTERN.fullmatch(raw_fingerprint):
-            normalized.pop("fingerprint", None)
-
-    client_fingerprint = normalized.get("client-fingerprint")
-    if client_fingerprint is not None:
-        raw_client_fingerprint = str(client_fingerprint).strip()
-        if not raw_client_fingerprint or raw_client_fingerprint.lower() == "none":
-            normalized.pop("client-fingerprint", None)
-        elif raw_client_fingerprint != client_fingerprint:
-            normalized["client-fingerprint"] = raw_client_fingerprint
-
-    return normalized
-
-
-def normalize_proxies_for_mihomo(proxies: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [normalize_proxy_for_mihomo(proxy) for proxy in proxies]
-
-
 def first_non_empty_list(*values: str, fallback: str = "") -> list[str]:
     for value in values:
         items = text_to_list(value)
@@ -192,9 +138,11 @@ def build_config(
 ) -> dict[str, Any]:
     """生成最终 Clash/OpenClash 配置；API 和 Web UI 都应复用这套逻辑。"""
     proxies = normalize_proxies_for_mihomo(proxies)
+    global_config = apply_generation_profile(global_config)
     custom_rules = custom_rules or []
     custom_rule_providers = custom_rule_providers or {}
-    final_proxy_groups = generate_proxy_groups(proxies)
+    generation_profile = global_config.get("generation_profile", "openclash-router")
+    final_proxy_groups = generate_minimal_proxy_groups(proxies) if generation_profile == "minimal" else generate_proxy_groups(proxies)
 
     final_config: dict[str, Any] = {
         "proxies": proxies,
@@ -348,16 +296,65 @@ def build_config(
     if auth_list:
         final_config["authentication"] = auth_list
 
-    rules, rule_providers = build_rules(
-        selected_rule_type,
-        custom_rules,
-        custom_rule_providers,
-        global_config.get("lhie1_provider_targets", {}),
-    )
+    if generation_profile == "minimal":
+        rules, rule_providers = ["MATCH,Proxy"], {}
+    else:
+        rules, rule_providers = build_rules(
+            selected_rule_type,
+            custom_rules,
+            custom_rule_providers,
+            global_config.get("lhie1_provider_targets", {}),
+        )
     if rule_providers:
         final_config["rule-providers"] = rule_providers
     final_config["rules"] = rules
     return final_config
+
+
+def apply_generation_profile(global_config: dict[str, Any]) -> dict[str, Any]:
+    config = dict(global_config or {})
+    profile = config.get("generation_profile")
+    if not profile:
+        profile = "desktop-full" if config.get("is_desktop", True) else "openclash-router"
+    config["generation_profile"] = profile
+    if profile == "openclash-router":
+        config.update({
+            "include_global_compat": False,
+            "include_inbound_ports": False,
+            "include_controller": False,
+            "enable_dns": False,
+            "enable_tun": False,
+        })
+    if profile == "minimal":
+        config.update({
+            "include_global_compat": False,
+            "include_inbound_ports": False,
+            "include_controller": False,
+            "include_router_options": False,
+            "enable_core_options": False,
+            "enable_dns": False,
+            "enable_tun": False,
+            "enable_sniffer": False,
+            "ntp_enable": False,
+            "profile_store_selected": False,
+            "profile_store_fake_ip": False,
+        })
+    return config
+
+
+def generate_minimal_proxy_groups(proxies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    node_names = [proxy["name"] for proxy in proxies if isinstance(proxy, dict) and proxy.get("name")]
+    return [
+        {
+            "name": "Auto - UrlTest",
+            "type": "url-test",
+            "proxies": node_names,
+            "url": "http://cp.cloudflare.com/generate_204",
+            "interval": 600,
+            "tolerance": 50,
+        },
+        {"name": "Proxy", "type": "select", "proxies": ["Auto - UrlTest", "DIRECT"] + node_names},
+    ]
 
 
 def build_yaml(config: dict[str, Any]) -> str:
@@ -386,6 +383,13 @@ def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
     proxy_names = [p.get("name") for p in proxies if isinstance(p, dict)]
     group_names = [g.get("name") for g in groups if isinstance(g, dict)]
     valid_targets = set(proxy_names + group_names + ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "no-resolve"])
+
+    for proxy in proxies:
+        if not isinstance(proxy, dict):
+            errors.append("存在非字典格式的节点")
+            continue
+        for proxy_error in validate_proxy_fields(proxy):
+            errors.append(f"节点 '{proxy.get('name', '未命名节点')}' {proxy_error}")
 
     for group in groups:
         for target in group.get("proxies", []):
