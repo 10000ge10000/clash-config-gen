@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from auth import generate_token, hash_password, is_valid_username, verify_password
+from config_builder import build_yaml, normalize_proxies_for_mihomo
 
 
 def get_db_path() -> str:
@@ -67,6 +70,7 @@ def init_db() -> None:
             );
             """
         )
+        _migrate_mihomo_proxy_fields(conn)
 
 
 def ensure_admin_from_env() -> None:
@@ -225,6 +229,8 @@ def save_user_config(
 ) -> None:
     ensure_user_config(user_id)
     now = utc_now()
+    proxies = normalize_proxies_for_mihomo(proxies)
+    final_yaml = _normalize_final_yaml_proxies(final_yaml)
     with _connect() as conn:
         conn.execute(
             """
@@ -249,6 +255,72 @@ def save_user_config(
                 user_id,
             ),
         )
+
+
+def _migrate_mihomo_proxy_fields(conn: sqlite3.Connection) -> None:
+    """把历史库里的错误 `fingerprint` 字段永久迁移为 mihomo 可加载格式。
+
+    仅在 API 响应时临时清洗不够彻底：OpenClash/Clash Verge 可能缓存旧文件，
+    用户重新保存时也可能从旧 `proxies_json` 继续带出脏字段。这里在服务启动
+    时直接写回数据库，让保存层和订阅层都保持同一份干净数据。
+    """
+    rows = conn.execute(
+        "SELECT id, proxies_json, final_yaml FROM subscription_configs"
+    ).fetchall()
+    for row in rows:
+        next_proxies_json = row["proxies_json"] or "[]"
+        next_final_yaml = row["final_yaml"] or ""
+        changed = False
+
+        try:
+            proxies = json.loads(next_proxies_json)
+        except Exception:
+            proxies = []
+        if isinstance(proxies, list):
+            normalized_proxies = normalize_proxies_for_mihomo(
+                [proxy for proxy in proxies if isinstance(proxy, dict)]
+            )
+            normalized_json = json.dumps(normalized_proxies, ensure_ascii=False)
+            if normalized_json != next_proxies_json:
+                next_proxies_json = normalized_json
+                changed = True
+
+        normalized_yaml = _normalize_final_yaml_proxies(next_final_yaml)
+        if normalized_yaml != next_final_yaml:
+            next_final_yaml = normalized_yaml
+            changed = True
+
+        if changed:
+            conn.execute(
+                """
+                UPDATE subscription_configs
+                SET proxies_json = ?, final_yaml = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (next_proxies_json, next_final_yaml, utc_now(), row["id"]),
+            )
+
+
+def _normalize_final_yaml_proxies(final_yaml: str) -> str:
+    if not final_yaml.strip():
+        return final_yaml
+    try:
+        loaded_config = yaml.safe_load(final_yaml)
+    except Exception:
+        return final_yaml
+    if not isinstance(loaded_config, dict):
+        return final_yaml
+    proxies = loaded_config.get("proxies")
+    if not isinstance(proxies, list):
+        return final_yaml
+
+    normalized_proxies = normalize_proxies_for_mihomo(
+        [proxy for proxy in proxies if isinstance(proxy, dict)]
+    )
+    if normalized_proxies == proxies:
+        return final_yaml
+    loaded_config["proxies"] = normalized_proxies
+    return build_yaml(loaded_config)
 
 
 def reset_subscription_token(user_id: int) -> str:
