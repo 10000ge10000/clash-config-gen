@@ -7,6 +7,7 @@ import os
 
 from auth import get_bool_env
 from config_builder import (
+    LHIE1_PROVIDERS_MAP,
     build_config as build_subscription_config,
     build_yaml as build_subscription_yaml,
     validate_config as validate_subscription_config,
@@ -15,6 +16,7 @@ from importers import normalize_subscription_content, parse_proxy_yaml, parse_sh
 from storage import (
     authenticate_user,
     create_user,
+    delete_regular_user,
     ensure_admin_from_env,
     get_public_base_url,
     get_user_config,
@@ -65,20 +67,38 @@ st.markdown("""
     }
     
     .app-hero {
-        padding: 1.15rem 1.25rem;
+        padding: 1.25rem 1.35rem 1.35rem;
         border: 1px solid #e5e7eb;
         border-radius: 8px;
         background: linear-gradient(135deg, #f8fafc 0%, #ffffff 55%, #eef6ff 100%);
         margin-bottom: 1rem;
+        overflow: visible;
     }
-    .app-hero-title {
-        font-size: clamp(1.65rem, 4vw, 2.55rem);
-        line-height: 1.18;
+    .app-brand {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        column-gap: .55rem;
+        row-gap: .15rem;
+        margin: 0 0 .55rem 0;
+        padding-top: .25rem;
+        overflow: visible;
+    }
+    .app-brand-en {
+        display: inline-block;
+        font-size: clamp(1.9rem, 3.4vw, 2.35rem);
+        line-height: 1.5;
+        font-weight: 850;
+        color: #111827;
+    }
+    .app-brand-cn {
+        display: inline-block;
+        font-size: clamp(1.55rem, 3vw, 2.1rem);
+        line-height: 1.55;
         font-weight: 800;
         color: #1f2937;
-        margin: 0 0 .45rem 0;
         white-space: normal;
-        overflow-wrap: anywhere;
+        word-break: keep-all;
     }
     .app-hero-subtitle {
         color: #4b5563;
@@ -107,13 +127,48 @@ st.markdown("""
         font-size: 1.25rem;
         flex: 0 0 auto;
     }
+    [data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapsedControl"] {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        position: fixed !important;
+        top: .85rem !important;
+        left: .85rem !important;
+        z-index: 999999 !important;
+        background: #ffffff !important;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 10px !important;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, .12) !important;
+    }
+    .auth-spacer {
+        height: clamp(1.5rem, 9vh, 6rem);
+    }
+    .auth-panel-title {
+        margin: 0 0 .35rem 0;
+        font-size: 1.6rem;
+        line-height: 1.4;
+        font-weight: 800;
+        color: #1f2937;
+        text-align: center;
+    }
+    .auth-panel-desc {
+        margin: 0 0 1rem 0;
+        color: #6b7280;
+        text-align: center;
+        line-height: 1.6;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown(
     """
 <section class="app-hero">
-  <div class="app-hero-title">OpenClash 配置文件生成器</div>
+  <div class="app-brand">
+    <span class="app-brand-en">OpenClash</span>
+    <span class="app-brand-cn">配置文件生成器</span>
+  </div>
   <p class="app-hero-subtitle">
     面向 Docker 自部署、OpenClash 软路由和 mihomo 客户端的订阅生成工具。
     导入节点、编辑规则、生成订阅、校验 YAML，一套流程直接闭环。
@@ -141,53 +196,55 @@ if "auth_user" not in st.session_state:
 
 def render_auth_gate():
     """所有配置都和用户绑定，未登录时必须提前拦截，避免匿名配置丢失。"""
-    st.divider()
-    login_tab, register_tab = st.tabs(["登录", "注册"])
+    st.markdown('<div class="auth-spacer"></div>', unsafe_allow_html=True)
+    left, middle, right = st.columns([1.15, 1, 1.15])
+    with middle:
+        st.markdown('<div class="auth-panel-title">账号中心</div>', unsafe_allow_html=True)
+        st.markdown('<div class="auth-panel-desc">登录后保存节点、规则和专属订阅 Token。</div>', unsafe_allow_html=True)
+        login_tab, register_tab = st.tabs(["登录", "注册"])
 
-    with login_tab:
-        st.subheader("用户登录")
-        with st.form("login_form"):
-            username = st.text_input("用户名", key="login_username")
-            password = st.text_input("密码", type="password", key="login_password")
-            submitted = st.form_submit_button("登录", type="primary", use_container_width=True)
-        if submitted:
-            user = authenticate_user(username, password)
-            if user:
-                st.session_state.auth_user = {
-                    "id": int(user["id"]),
-                    "username": user["username"],
-                    "is_admin": bool(user["is_admin"]),
-                }
-                st.session_state.pop("session_loaded_user_id", None)
-                st.rerun()
-            else:
-                st.error("用户名或密码错误，或账号已被禁用。")
+        with login_tab:
+            with st.form("login_form"):
+                username = st.text_input("用户名", key="login_username")
+                password = st.text_input("密码", type="password", key="login_password")
+                submitted = st.form_submit_button("登录", type="primary", use_container_width=True)
+            if submitted:
+                user = authenticate_user(username, password)
+                if user:
+                    st.session_state.auth_user = {
+                        "id": int(user["id"]),
+                        "username": user["username"],
+                        "is_admin": bool(user["is_admin"]),
+                    }
+                    st.session_state.pop("session_loaded_user_id", None)
+                    st.rerun()
+                else:
+                    st.error("用户名或密码错误，或账号已被禁用。")
 
-    with register_tab:
-        if not get_bool_env("ALLOW_REGISTRATION", True):
-            st.warning("当前部署已关闭公开注册，请联系管理员创建账号。")
-            return
-        st.subheader("注册账号")
-        with st.form("register_form"):
-            new_username = st.text_input("用户名", key="register_username", help="3-32 位字母、数字、下划线、点或短横线")
-            new_password = st.text_input("密码", type="password", key="register_password", help="至少 8 位")
-            new_password_confirm = st.text_input("确认密码", type="password", key="register_password_confirm")
-            submitted = st.form_submit_button("注册并登录", type="primary", use_container_width=True)
-        if submitted:
-            if new_password != new_password_confirm:
-                st.error("两次输入的密码不一致。")
+        with register_tab:
+            if not get_bool_env("ALLOW_REGISTRATION", True):
+                st.warning("当前部署已关闭公开注册，请联系管理员创建账号。")
                 return
-            try:
-                user = create_user(new_username, new_password, is_admin=False)
-                st.session_state.auth_user = {
-                    "id": int(user["id"]),
-                    "username": user["username"],
-                    "is_admin": bool(user["is_admin"]),
-                }
-                st.session_state.pop("session_loaded_user_id", None)
-                st.rerun()
-            except Exception as exc:
-                st.error(f"注册失败: {exc}")
+            with st.form("register_form"):
+                new_username = st.text_input("用户名", key="register_username", help="3-32 位字母、数字、下划线、点或短横线")
+                new_password = st.text_input("密码", type="password", key="register_password", help="至少 8 位")
+                new_password_confirm = st.text_input("确认密码", type="password", key="register_password_confirm")
+                submitted = st.form_submit_button("注册并登录", type="primary", use_container_width=True)
+            if submitted:
+                if new_password != new_password_confirm:
+                    st.error("两次输入的密码不一致。")
+                    return
+                try:
+                    user = create_user(new_username, new_password, is_admin=False)
+                    st.session_state.auth_user = {
+                        "id": int(user["id"]),
+                        "username": user["username"],
+                        "is_admin": bool(user["is_admin"]),
+                    }
+                    st.session_state.pop("session_loaded_user_id", None)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"注册失败: {exc}")
 
 
 if not st.session_state.auth_user:
@@ -442,7 +499,8 @@ if 'global_config' not in st.session_state:
         "ntp_write_to_system": False,
         "authentication": "",
         # 规则
-        "custom_rules": DEFAULT_DIRECT_RULES # 注入默认规则
+        "custom_rules": DEFAULT_DIRECT_RULES, # 注入默认规则
+        "lhie1_provider_targets": {},
     }
 
 current_user = st.session_state.auth_user
@@ -513,7 +571,7 @@ with st.sidebar:
     if current_user["is_admin"]:
         with st.expander("用户管理", expanded=False):
             for user in list_users():
-                cols = st.columns([2, 1, 1])
+                cols = st.columns([2.2, 1, 1, 1])
                 with cols[0]:
                     role = "管理员" if user["is_admin"] else "用户"
                     status = "启用" if user["is_enabled"] else "禁用"
@@ -529,6 +587,15 @@ with st.sidebar:
                     if st.button("重置Token", key=f"reset_token_{user['id']}"):
                         reset_subscription_token(int(user["id"]))
                         st.rerun()
+                with cols[3]:
+                    if not user["is_admin"]:
+                        if st.button("删除", key=f"delete_user_{user['id']}", type="secondary"):
+                            try:
+                                delete_regular_user(int(user["id"]))
+                                st.success(f"已删除用户 {user['username']}")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"删除失败: {exc}")
 
     st.divider()
     st.header("全局设置")
@@ -1621,6 +1688,56 @@ with tab3:
         all_groups = [group['name'] for group in proxy_groups]
         all_groups.extend(['DIRECT', 'REJECT', 'REJECT-DROP', 'Proxy'])
         all_groups = sorted(set(all_groups))
+        proxy_names = [proxy.get("name") for proxy in st.session_state.proxies_data if proxy.get("name")]
+        all_targets = sorted(set(all_groups + proxy_names + ["DIRECT", "REJECT", "REJECT-DROP", "Proxy"]))
+
+        with st.expander("lhie1 预设规则目标", expanded=False):
+            st.caption("这里可以修改 lhie1 内置规则集默认走哪个策略组或节点。例如把 Netflix 从 Netflix 策略组改成某个固定节点。")
+            if st.button("恢复 lhie1 默认策略", key="reset_lhie1_targets"):
+                st.session_state.global_config["lhie1_provider_targets"] = {}
+                for key in list(st.session_state.keys()):
+                    if key.startswith("lhie1_target_"):
+                        del st.session_state[key]
+                st.rerun()
+
+            current_overrides = dict(st.session_state.global_config.get("lhie1_provider_targets", {}))
+            next_overrides = {}
+            col_lhie1_a, col_lhie1_b = st.columns(2)
+            for idx, (provider_name, (_, default_target)) in enumerate(LHIE1_PROVIDERS_MAP.items()):
+                safe_provider_name = "".join(ch if ch.isalnum() else "_" for ch in provider_name)
+                options = list(all_targets)
+                current_target = current_overrides.get(provider_name, default_target)
+                if current_target not in options:
+                    options.insert(0, current_target)
+                target_index = options.index(current_target)
+                container = col_lhie1_a if idx % 2 == 0 else col_lhie1_b
+                with container:
+                    selected_target = st.selectbox(
+                        provider_name,
+                        options,
+                        index=target_index,
+                        key=f"lhie1_target_{safe_provider_name}",
+                        help=f"默认目标：{default_target}",
+                    )
+                if selected_target != default_target:
+                    next_overrides[provider_name] = selected_target
+
+            st.session_state.global_config["lhie1_provider_targets"] = next_overrides
+            if next_overrides:
+                st.info(f"已覆盖 {len(next_overrides)} 条 lhie1 预设规则。保存配置后订阅立即生效。")
+
+        try:
+            preview_config = build_subscription_config(
+                st.session_state.proxies_data,
+                st.session_state.global_config,
+                st.session_state.custom_rules,
+                st.session_state.custom_rule_providers,
+                rule_type,
+            )
+            proxy_groups = preview_config.get("proxy-groups", [])
+        except Exception as exc:
+            preview_config = {}
+            st.error(f"应用 lhie1 规则目标后重新生成预览失败：{exc}")
         
         st.markdown("#### 单条规则")
         col1, col2 = st.columns(2)
@@ -1632,11 +1749,10 @@ with tab3:
         with col2:
             st.write("**目标策略**")
             # 增加自定义组输入
-            group_options = ["选择现有策略组...", "手动输入..."] + all_groups
             group_mode = st.selectbox("选择目标策略组模式", ["从列表中选择", "手动输入名称"], label_visibility="collapsed", key="group_mode_select")
             
             if group_mode == "从列表中选择":
-                group_select = st.selectbox("选择目标策略组", all_groups, key="target_group_select_v3")
+                group_select = st.selectbox("选择目标策略或节点", all_targets, key="target_group_select_v3")
                 final_group = group_select
             else:
                 custom_group_input = st.text_input("输入策略组名称", placeholder="例如: MyGroup", key="custom_group_input_v3")
@@ -1724,7 +1840,7 @@ with tab3:
             rp_order = st.selectbox("规则集匹配顺序", ["优先 (覆盖)", "默认 (追加)"], key="rp_order")
             
             # 获取所有策略组名称用于下拉菜单
-            rp_target = st.selectbox("指定策略组", list(set(all_groups)), key="rp_target")
+            rp_target = st.selectbox("指定策略组或节点", all_targets, key="rp_target")
             
             if st.button("保存规则集配置", key="save_rp"):
                 if not rp_name:

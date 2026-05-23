@@ -293,7 +293,12 @@ def build_config(
     if auth_list:
         final_config["authentication"] = auth_list
 
-    rules, rule_providers = build_rules(selected_rule_type, custom_rules, custom_rule_providers)
+    rules, rule_providers = build_rules(
+        selected_rule_type,
+        custom_rules,
+        custom_rule_providers,
+        global_config.get("lhie1_provider_targets", {}),
+    )
     if rule_providers:
         final_config["rule-providers"] = rule_providers
     final_config["rules"] = rules
@@ -353,8 +358,10 @@ def build_rules(
     selected_rule_type: str,
     custom_rules: list[str],
     custom_rule_providers: dict[str, Any],
+    lhie1_provider_targets: dict[str, str] | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     rule_providers: dict[str, Any] = {}
+    lhie1_provider_targets = lhie1_provider_targets or {}
     if selected_rule_type == "lhie1规则":
         base_url = "https://testingcf.jsdelivr.net/gh/dler-io/Rules@main/Clash/Provider"
         rule_list = [
@@ -362,6 +369,7 @@ def build_rules(
             "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
         ]
         for name, (suffix, target) in LHIE1_PROVIDERS_MAP.items():
+            target = lhie1_provider_targets.get(name) or target
             rule_providers[name] = {
                 "type": "http",
                 "behavior": "classical",

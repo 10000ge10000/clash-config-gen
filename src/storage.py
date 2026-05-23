@@ -163,6 +163,17 @@ def set_user_enabled(user_id: int, enabled: bool) -> None:
         )
 
 
+def delete_regular_user(user_id: int) -> None:
+    """删除普通用户及其订阅配置；管理员账号不允许通过页面误删。"""
+    with _connect() as conn:
+        user = conn.execute("SELECT id, is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+        if user is None:
+            raise ValueError("用户不存在")
+        if int(user["is_admin"]):
+            raise ValueError("管理员账号不能在这里删除")
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
 def ensure_user_config(user_id: int) -> sqlite3.Row:
     now = utc_now()
     with _connect() as conn:
