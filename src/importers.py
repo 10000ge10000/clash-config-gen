@@ -6,6 +6,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import yaml
 
+from config_builder import BROWSER_CLIENT_FINGERPRINTS, normalize_proxy_for_mihomo
+
 
 REQUIRED_PROXY_FIELDS = {"name", "type", "server", "port"}
 SUPPORTED_SHARE_SCHEMES = ("ss://", "trojan://", "vmess://", "vless://", "hysteria2://", "hy2://", "tuic://", "anytls://")
@@ -115,8 +117,14 @@ def validate_proxies(proxies: list[Any]) -> tuple[list[dict[str, Any]], list[str
             warnings.append(f"节点 {proxy['name']} 的端口超出 1-65535，已跳过")
             continue
 
-        normalized = dict(proxy)
+        normalized = normalize_proxy_for_mihomo(proxy)
         normalized["port"] = port
+        if "fingerprint" in proxy and "fingerprint" not in normalized:
+            raw_fingerprint = str(proxy.get("fingerprint", "")).strip().lower()
+            if raw_fingerprint in BROWSER_CLIENT_FINGERPRINTS:
+                warnings.append(f"节点 {proxy['name']} 已将 fingerprint 转换为 client-fingerprint，避免 mihomo 把它当作证书固定字段")
+            else:
+                warnings.append(f"节点 {proxy['name']} 的 fingerprint 字段不符合 mihomo 证书固定格式，已移除以避免内核加载失败")
 
         name = str(normalized["name"])
         if name in seen_names:

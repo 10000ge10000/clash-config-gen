@@ -1,7 +1,7 @@
 import yaml
 from fastapi import FastAPI, HTTPException, Response
 
-from config_builder import validate_config
+from config_builder import build_yaml, normalize_proxies_for_mihomo, validate_config
 from storage import ensure_admin_from_env, get_config_by_token, health_snapshot, init_db
 
 
@@ -34,6 +34,13 @@ def _build_subscription_response(token: str) -> Response:
         raise HTTPException(status_code=500, detail=f"订阅 YAML 已损坏: {exc}") from exc
     if not isinstance(loaded_config, dict):
         raise HTTPException(status_code=500, detail="订阅 YAML 顶层结构不是字典")
+
+    proxies = loaded_config.get("proxies") or []
+    if isinstance(proxies, list):
+        loaded_config["proxies"] = normalize_proxies_for_mihomo(
+            [proxy for proxy in proxies if isinstance(proxy, dict)]
+        )
+        final_yaml = build_yaml(loaded_config)
 
     errors, _warnings = validate_config(loaded_config)
     if errors:

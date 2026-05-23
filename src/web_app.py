@@ -1315,7 +1315,7 @@ with tab2:
             value="5-25",
             help="mihomo 官方支持整数秒或范围。填写 5-25 会在每次端口切换时随机选择 5 到 25 秒；范围只支持短横线，不支持逗号。",
         )
-        hy2_fingerprint = st.selectbox("Fingerprint", ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "none"], index=0, help="TLS指纹，用于伪装客户端")
+        hy2_fingerprint = st.selectbox("Client Fingerprint", ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "none"], index=0, help="TLS 客户端指纹；mihomo 必须写入 client-fingerprint，不能写入 fingerprint。")
         hy2_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
     
     elif node_type == "tuic":
@@ -1480,7 +1480,8 @@ with tab2:
         except ValueError as exc:
             st.warning(str(exc))
             manual_node["hop-interval"] = str(hy2_hop_interval).strip() or 30
-        manual_node["fingerprint"] = hy2_fingerprint
+        if hy2_fingerprint != "none":
+            manual_node["client-fingerprint"] = hy2_fingerprint
         if hy2_ip_version != "默认":
             manual_node["ip-version"] = hy2_ip_version
             

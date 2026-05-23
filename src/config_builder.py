@@ -1,9 +1,25 @@
+import re
 from typing import Any
 
 import yaml
 
 from clash_meta_gen import generate_proxy_groups
 
+
+BROWSER_CLIENT_FINGERPRINTS = {
+    "chrome",
+    "firefox",
+    "safari",
+    "ios",
+    "android",
+    "edge",
+    "360",
+    "qq",
+    "random",
+    "randomized",
+}
+
+CERTIFICATE_PIN_PATTERN = re.compile(r"^(?:[A-Fa-f0-9]{64}|(?:[A-Fa-f0-9]{2}:){31}[A-Fa-f0-9]{2})$")
 
 FAKE_IP_FILTER_LIST = [
     "+.services.googleapis.cn",
@@ -121,6 +137,44 @@ def text_to_list(text: str) -> list[str]:
     return [line.strip() for line in (text or "").splitlines() if line.strip()]
 
 
+def normalize_proxy_for_mihomo(proxy: dict[str, Any]) -> dict[str, Any]:
+    """修正容易让 mihomo/Clash Verge 直接拒绝加载的兼容字段。
+
+    `fingerprint` 在 mihomo 里表示 TLS 证书固定，不是浏览器 TLS 指纹。
+    很多旧订阅或手动配置会把 `chrome`、`firefox` 这类值写到
+    `fingerprint`，内核会报错并让整份配置加载失败。浏览器指纹必须写入
+    `client-fingerprint`；无法识别为证书 SHA256 指纹的旧字段直接移除。
+    """
+    normalized = dict(proxy)
+
+    fingerprint = normalized.get("fingerprint")
+    if fingerprint is not None:
+        raw_fingerprint = str(fingerprint).strip()
+        lower_fingerprint = raw_fingerprint.lower()
+        if lower_fingerprint == "none":
+            normalized.pop("fingerprint", None)
+        elif lower_fingerprint in BROWSER_CLIENT_FINGERPRINTS:
+            if not normalized.get("client-fingerprint"):
+                normalized["client-fingerprint"] = lower_fingerprint
+            normalized.pop("fingerprint", None)
+        elif not CERTIFICATE_PIN_PATTERN.fullmatch(raw_fingerprint):
+            normalized.pop("fingerprint", None)
+
+    client_fingerprint = normalized.get("client-fingerprint")
+    if client_fingerprint is not None:
+        raw_client_fingerprint = str(client_fingerprint).strip()
+        if not raw_client_fingerprint or raw_client_fingerprint.lower() == "none":
+            normalized.pop("client-fingerprint", None)
+        elif raw_client_fingerprint != client_fingerprint:
+            normalized["client-fingerprint"] = raw_client_fingerprint
+
+    return normalized
+
+
+def normalize_proxies_for_mihomo(proxies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [normalize_proxy_for_mihomo(proxy) for proxy in proxies]
+
+
 def first_non_empty_list(*values: str, fallback: str = "") -> list[str]:
     for value in values:
         items = text_to_list(value)
@@ -137,6 +191,7 @@ def build_config(
     selected_rule_type: str = "自定义规则",
 ) -> dict[str, Any]:
     """生成最终 Clash/OpenClash 配置；API 和 Web UI 都应复用这套逻辑。"""
+    proxies = normalize_proxies_for_mihomo(proxies)
     custom_rules = custom_rules or []
     custom_rule_providers = custom_rule_providers or {}
     final_proxy_groups = generate_proxy_groups(proxies)
