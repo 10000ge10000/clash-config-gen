@@ -642,19 +642,11 @@ with st.sidebar:
         help="全平台客户端：适用于 Windows, macOS, Android, iOS 等独立运行的客户端，生成包含 TUN、DNS 的完整配置。\nOpenClash：精简配置，仅生成节点和策略，基础设置由插件接管。"
     )
     is_desktop = target_mode == "全平台客户端 (PC/移动端)"
-    default_profile = "desktop-full" if is_desktop else "openclash-router"
-    profile_options = ["openclash-router", "desktop-full", "minimal"]
-    current_profile = st.session_state.global_config.get("generation_profile", default_profile)
-    if current_profile not in profile_options:
-        current_profile = default_profile
-    generation_profile = st.selectbox(
-        "生成模板",
-        profile_options,
-        index=profile_options.index(current_profile),
-        help="openclash-router 只输出节点、策略组、规则，OpenClash 会接管端口、DNS、控制器等运行时字段；desktop-full 允许完整客户端字段；minimal 只输出基础代理组和 MATCH。",
-        key="gc_generation_profile",
+    generation_profile = "desktop-full" if is_desktop else "openclash-router"
+    st.caption(
+        "当前模式会自动选择生成策略：手机 / PC 客户端输出完整客户端配置；"
+        "OpenClash / 软路由只输出节点、策略组和规则，端口、DNS、控制器等由插件接管。"
     )
-    profile_allows_runtime_fields = generation_profile == "desktop-full"
 
     with st.expander("🧭 DNS 防泄露预设", expanded=True):
         st.caption("桌面客户端预设会写入 DNS/TUN；OpenClash 预设会关闭这些字段，把 DNS 劫持和上游解析交给插件统一接管。")
@@ -879,107 +871,65 @@ with st.sidebar:
         st.info("OpenClash / 软路由模式推荐让 OpenClash 插件统一接管 DNS。openclash-router 模板会强制忽略 DNS、TUN、端口、控制器、Sniffer、NTP 等运行时字段。")
 
     # --- 核心特性 ---
-    # 在非桌面模式(软路由)下直接平铺，去掉折叠框
-    core_container = st.expander("⚡ Meta 核心特性", expanded=False) if is_desktop else st.container()
-    
-    with core_container:
-        enable_core_options = st.checkbox(
-            "写入 Meta 核心特性字段",
-            value=st.session_state.global_config.get("enable_core_options", False),
-            help="未勾选时不写入 tcp-concurrent、unified-delay、geodata-mode、geodata-loader。",
-            key="gc_enable_core_options",
-        )
-        tcp_concurrent = st.checkbox("TCP 并发 (Concurrent)", value=st.session_state.global_config["tcp_concurrent"], 
-                                     help="向所有目标 IP 并发连接，使用最快的握手连接。", key="gc_tcp_conc")
-        
-        unified_delay = st.checkbox("统一延迟计算", value=st.session_state.global_config["unified_delay"], 
-                                    help="去除握手等额外的延迟时间，仅计算传输延迟。", key="gc_uni_delay")
-        
-        geodata_mode = st.checkbox("GeoData 模式", value=st.session_state.global_config["geodata_mode"], 
-                                   help="使用 .dat 文件代替 mmdb，减小内存占用。", key="gc_geodata")
-        
-        enable_sniffer = st.checkbox("启用流量嗅探 (Sniffer)", value=st.session_state.global_config["enable_sniffer"], 
-                                     help="准确识别域名，解决由 IP 访问导致的规则失效问题。", key="gc_sniffer")
-        
-        sniff_override = st.checkbox("嗅探覆盖目标", value=st.session_state.global_config["sniff_override_dest"], 
-                                     help="使用嗅探到的域名覆盖目标 IP，主要用于 Fake-IP 模式。", key="gc_sniff_override")
-
-    with st.expander("🧩 OpenClash / 软路由增强设置", expanded=not is_desktop):
-        st.caption("这些字段会被 OpenClash 插件接管。仅在生成模板为 desktop-full 时允许写入；openclash-router 会强制忽略。")
-        if not profile_allows_runtime_fields:
-            st.info("当前模板是 openclash-router，最终 YAML 不会写入本区字段，避免和 OpenClash 全局设置冲突。")
-        include_router_options = st.checkbox(
-            "写入软路由增强字段",
-            value=st.session_state.global_config.get("include_router_options", False),
-            help="未勾选时不写入 redir-port、tproxy-port、interface-name、keep-alive 等软路由增强字段。",
-            key="gc_include_router_options",
-            disabled=not profile_allows_runtime_fields,
-        )
-        openclash_preset = st.checkbox(
-            "启用软路由友好预设",
-            value=st.session_state.global_config.get("openclash_preset", False),
-            help="仅在 desktop-full 模板下生效。启用后使用更完整的 Fake-IP 过滤列表和可选 DNS 辅助字段。",
-            key="gc_openclash_preset",
-            disabled=not profile_allows_runtime_fields,
-        )
-
-        col_oc1, col_oc2 = st.columns(2)
-        with col_oc1:
-            redir_port = st.number_input("redir-port", value=st.session_state.global_config.get("redir_port", 7892), min_value=0, max_value=65535, key="gc_redir_port", disabled=not profile_allows_runtime_fields)
-            mixed_port_oc = st.number_input("mixed-port", value=st.session_state.global_config.get("mixed_port", 7893), min_value=1, max_value=65535, key="gc_mixed_port_oc", disabled=not profile_allows_runtime_fields)
-            external_controller_oc = st.text_input("external-controller", value=st.session_state.global_config.get("external_controller", "0.0.0.0:9090"), key="gc_external_controller_oc", disabled=not profile_allows_runtime_fields)
-            interface_name = st.text_input("interface-name", value=st.session_state.global_config.get("interface_name", ""), placeholder="例如 pppoe-wan，留空则不写入", key="gc_interface_name", disabled=not profile_allows_runtime_fields)
-        with col_oc2:
-            tproxy_port = st.number_input("tproxy-port", value=st.session_state.global_config.get("tproxy_port", 7895), min_value=0, max_value=65535, key="gc_tproxy_port", disabled=not profile_allows_runtime_fields)
-            keep_alive_idle = st.number_input("keep-alive-idle", value=st.session_state.global_config.get("keep_alive_idle", 600), min_value=0, key="gc_keep_alive_idle", disabled=not profile_allows_runtime_fields)
-            secret_oc = st.text_input("secret", value=st.session_state.global_config.get("secret", ""), type="password", key="gc_secret_oc", disabled=not profile_allows_runtime_fields)
-            authentication = st.text_area("authentication", value=st.session_state.global_config.get("authentication", ""), height=68, placeholder="user1:pass1\nuser2:pass2", key="gc_authentication", disabled=not profile_allows_runtime_fields)
-
-        st.markdown("##### DNS 增强")
-        col_dns_a, col_dns_b = st.columns(2)
-        with col_dns_a:
-            fake_ip_range6 = st.text_input("fake-ip-range6", value=st.session_state.global_config.get("fake_ip_range6", "fc00::/18"), key="gc_fake_ip_range6", disabled=not profile_allows_runtime_fields)
-            fake_ip_filter_mode = st.selectbox(
-                "fake-ip-filter-mode",
-                ["blacklist", "whitelist"],
-                index=["blacklist", "whitelist"].index(st.session_state.global_config.get("fake_ip_filter_mode", "blacklist")),
-                key="gc_fake_ip_filter_mode",
-                disabled=not profile_allows_runtime_fields,
+    if is_desktop:
+        with st.expander("⚡ Meta 核心特性", expanded=False):
+            enable_core_options = st.checkbox(
+                "写入 Meta 核心特性字段",
+                value=st.session_state.global_config.get("enable_core_options", False),
+                help="未勾选时不写入 tcp-concurrent、unified-delay、geodata-mode、geodata-loader。",
+                key="gc_enable_core_options",
             )
-        with col_dns_b:
-            dns_respect_rules = st.checkbox("respect-rules", value=st.session_state.global_config.get("dns_respect_rules", False), key="gc_dns_respect_rules", help="让 DNS 请求也遵守分流规则。开启后必须有 proxy-server-nameserver，否则 mihomo/Clash Verge 会启动失败。", disabled=not profile_allows_runtime_fields)
-            direct_nameserver = st.text_area("direct-nameserver", value=st.session_state.global_config.get("direct_nameserver", ""), height=88, key="gc_direct_nameserver", help="直连出口使用的 DNS。通常填国内纯 IP DNS，例如 223.5.5.5、119.29.29.29。", disabled=not profile_allows_runtime_fields)
-            proxy_server_nameserver = st.text_area(
-                "proxy-server-nameserver",
-                value=st.session_state.global_config.get("proxy_server_nameserver", ""),
-                height=68,
-                help="代理节点域名解析专用 DNS。开启 respect-rules 时必填；留空时生成器会自动使用 direct/default/nameserver 兜底。",
-                key="gc_proxy_server_nameserver",
-                disabled=not profile_allows_runtime_fields,
-            )
+            tcp_concurrent = st.checkbox("TCP 并发 (Concurrent)", value=st.session_state.global_config["tcp_concurrent"], 
+                                         help="向所有目标 IP 并发连接，使用最快的握手连接。", key="gc_tcp_conc")
+            
+            unified_delay = st.checkbox("统一延迟计算", value=st.session_state.global_config["unified_delay"], 
+                                        help="去除握手等额外的延迟时间，仅计算传输延迟。", key="gc_uni_delay")
+            
+            geodata_mode = st.checkbox("GeoData 模式", value=st.session_state.global_config["geodata_mode"], 
+                                       help="使用 .dat 文件代替 mmdb，减小内存占用。", key="gc_geodata")
+            
+            enable_sniffer = st.checkbox("启用流量嗅探 (Sniffer)", value=st.session_state.global_config["enable_sniffer"], 
+                                         help="准确识别域名，解决由 IP 访问导致的规则失效问题。", key="gc_sniffer")
+            
+            sniff_override = st.checkbox("嗅探覆盖目标", value=st.session_state.global_config["sniff_override_dest"], 
+                                         help="使用嗅探到的域名覆盖目标 IP，主要用于 Fake-IP 模式。", key="gc_sniff_override")
+    else:
+        enable_core_options = False
+        tcp_concurrent = False
+        unified_delay = False
+        geodata_mode = False
+        enable_sniffer = False
+        sniff_override = False
 
-        st.markdown("##### TUN / Sniffer / Profile")
-        col_adv1, col_adv2 = st.columns(2)
-        with col_adv1:
-            tun_dns_hijack_value = st.text_input("tun.dns-hijack", value=st.session_state.global_config.get("tun_dns_hijack_value", "127.0.0.1:53"), key="gc_tun_dns_hijack_value", disabled=not profile_allows_runtime_fields)
-            tun_endpoint_independent_nat = st.checkbox("endpoint-independent-nat", value=st.session_state.global_config.get("tun_endpoint_independent_nat", False), key="gc_tun_endpoint_nat", disabled=not profile_allows_runtime_fields)
-            tun_auto_redirect = st.checkbox("auto-redirect", value=st.session_state.global_config.get("tun_auto_redirect", False), key="gc_tun_auto_redirect", disabled=not profile_allows_runtime_fields)
-            tun_strict_route = st.checkbox("strict-route", value=st.session_state.global_config.get("tun_strict_route", False), key="gc_tun_strict_route", disabled=not profile_allows_runtime_fields)
-        with col_adv2:
-            sniffer_parse_pure_ip = st.checkbox("sniffer.parse-pure-ip", value=st.session_state.global_config.get("sniffer_parse_pure_ip", False), key="gc_sniffer_parse_pure_ip", disabled=not profile_allows_runtime_fields)
-            sniffer_force_dns_mapping = st.checkbox("sniffer.force-dns-mapping", value=st.session_state.global_config.get("sniffer_force_dns_mapping", False), key="gc_sniffer_force_dns_mapping", disabled=not profile_allows_runtime_fields)
-            profile_store_selected = st.checkbox("profile.store-selected", value=st.session_state.global_config.get("profile_store_selected", False), key="gc_profile_store_selected", disabled=not profile_allows_runtime_fields)
-            profile_store_fake_ip = st.checkbox("profile.store-fake-ip", value=st.session_state.global_config.get("profile_store_fake_ip", False), key="gc_profile_store_fake_ip", disabled=not profile_allows_runtime_fields)
-
-        st.markdown("##### NTP")
-        ntp_enable = st.checkbox("启用 ntp", value=st.session_state.global_config.get("ntp_enable", False), key="gc_ntp_enable", disabled=not profile_allows_runtime_fields)
-        col_ntp1, col_ntp2 = st.columns(2)
-        with col_ntp1:
-            ntp_server = st.text_input("ntp.server", value=st.session_state.global_config.get("ntp_server", "time.apple.com"), key="gc_ntp_server", disabled=not profile_allows_runtime_fields)
-            ntp_interval = st.number_input("ntp.interval", value=st.session_state.global_config.get("ntp_interval", 30), min_value=1, key="gc_ntp_interval", disabled=not profile_allows_runtime_fields)
-        with col_ntp2:
-            ntp_port = st.number_input("ntp.port", value=st.session_state.global_config.get("ntp_port", 123), min_value=1, max_value=65535, key="gc_ntp_port", disabled=not profile_allows_runtime_fields)
-            ntp_write_to_system = st.checkbox("ntp.write-to-system", value=st.session_state.global_config.get("ntp_write_to_system", False), key="gc_ntp_write_to_system", disabled=not profile_allows_runtime_fields)
+    # OpenClash 插件会接管下列运行时字段，UI 不再暴露重复设置。
+    include_router_options = False
+    openclash_preset = False
+    redir_port = st.session_state.global_config.get("redir_port", 7892)
+    mixed_port_oc = mixed_port
+    external_controller_oc = external_controller
+    interface_name = ""
+    tproxy_port = st.session_state.global_config.get("tproxy_port", 7895)
+    keep_alive_idle = st.session_state.global_config.get("keep_alive_idle", 600)
+    secret_oc = secret
+    authentication = ""
+    fake_ip_range6 = st.session_state.global_config.get("fake_ip_range6", "fc00::/18")
+    fake_ip_filter_mode = st.session_state.global_config.get("fake_ip_filter_mode", "blacklist")
+    dns_respect_rules = st.session_state.global_config.get("dns_respect_rules", False) if is_desktop else False
+    direct_nameserver = st.session_state.global_config.get("direct_nameserver", "")
+    proxy_server_nameserver = st.session_state.global_config.get("proxy_server_nameserver", "")
+    tun_dns_hijack_value = st.session_state.global_config.get("tun_dns_hijack_value", "127.0.0.1:53")
+    tun_endpoint_independent_nat = st.session_state.global_config.get("tun_endpoint_independent_nat", False) if is_desktop else False
+    tun_auto_redirect = st.session_state.global_config.get("tun_auto_redirect", False) if is_desktop else False
+    tun_strict_route = st.session_state.global_config.get("tun_strict_route", False) if is_desktop else False
+    sniffer_parse_pure_ip = st.session_state.global_config.get("sniffer_parse_pure_ip", False) if is_desktop else False
+    sniffer_force_dns_mapping = st.session_state.global_config.get("sniffer_force_dns_mapping", False) if is_desktop else False
+    profile_store_selected = st.session_state.global_config.get("profile_store_selected", False) if is_desktop else False
+    profile_store_fake_ip = st.session_state.global_config.get("profile_store_fake_ip", False) if is_desktop else False
+    ntp_enable = False
+    ntp_server = st.session_state.global_config.get("ntp_server", "time.apple.com")
+    ntp_port = st.session_state.global_config.get("ntp_port", 123)
+    ntp_interval = st.session_state.global_config.get("ntp_interval", 30)
+    ntp_write_to_system = False
 
 # 更新 Session State
 effective_mixed_port = mixed_port_oc if not is_desktop else mixed_port

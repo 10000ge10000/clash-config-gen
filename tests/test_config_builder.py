@@ -1,6 +1,8 @@
 import unittest
 
-from config_builder import build_config, validate_config
+import yaml
+
+from config_builder import build_config, build_yaml, validate_config
 from normalizer import normalize_proxy_for_mihomo
 
 
@@ -235,6 +237,56 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertTrue(blocked_keys.isdisjoint(config.keys()))
         self.assertIn("proxy-groups", config)
         self.assertIn("rules", config)
+
+    def test_target_mode_overrides_legacy_generation_profile(self):
+        """旧库里残留的 generation_profile 不能覆盖用户当前选择的使用场景。"""
+        config = build_config(
+            [
+                {
+                    "name": "node-1",
+                    "type": "ss",
+                    "server": "127.0.0.1",
+                    "port": 8388,
+                    "cipher": "aes-128-gcm",
+                    "password": "password",
+                }
+            ],
+            {
+                "is_desktop": False,
+                "generation_profile": "desktop-full",
+                "enable_dns": True,
+                "enable_tun": True,
+                "enable_sniffer": True,
+            },
+        )
+
+        self.assertNotIn("dns", config)
+        self.assertNotIn("tun", config)
+        self.assertNotIn("sniffer", config)
+
+    def test_generated_yaml_contains_non_sensitive_project_comments(self):
+        """订阅 YAML 可以带项目说明注释，mihomo/OpenClash 解析时会自动忽略。"""
+        config = {
+            "proxies": [
+                {
+                    "name": "node-1",
+                    "type": "ss",
+                    "server": "127.0.0.1",
+                    "port": 8388,
+                    "cipher": "aes-128-gcm",
+                    "password": "password",
+                }
+            ],
+            "proxy-groups": [{"name": "Proxy", "type": "select", "proxies": ["node-1"]}],
+            "rules": ["MATCH,Proxy"],
+        }
+
+        rendered = build_yaml(config)
+        loaded = yaml.safe_load(rendered)
+
+        self.assertTrue(rendered.startswith("# Generator: Clash-Config-Gen\n"))
+        self.assertIn("# Project: 一万AI分享 Clash/OpenClash 订阅生成器", rendered)
+        self.assertEqual(config, loaded)
 
 
 if __name__ == "__main__":

@@ -313,9 +313,10 @@ def build_config(
 
 def apply_generation_profile(global_config: dict[str, Any]) -> dict[str, Any]:
     config = dict(global_config or {})
-    profile = config.get("generation_profile")
-    if not profile:
+    if "is_desktop" in config:
         profile = "desktop-full" if config.get("is_desktop", True) else "openclash-router"
+    else:
+        profile = config.get("generation_profile") or "desktop-full"
     config["generation_profile"] = profile
     if profile == "openclash-router":
         config.update({
@@ -365,7 +366,16 @@ def generate_minimal_proxy_groups(proxies: list[dict[str, Any]]) -> list[dict[st
 
 
 def build_yaml(config: dict[str, Any]) -> str:
-    return "# Generator: Clash-Config-Gen\n" + yaml.dump(
+    header = "\n".join(
+        [
+            "# Generator: Clash-Config-Gen",
+            "# Project: 一万AI分享 Clash/OpenClash 订阅生成器",
+            "# Usage: 可直接导入 OpenClash、Clash Verge、FlClash 或 mihomo 兼容客户端",
+            "# Note: 以 # 开头的内容是 YAML 注释，mihomo/OpenClash 会忽略",
+            "",
+        ]
+    )
+    return header + yaml.dump(
         config,
         allow_unicode=True,
         sort_keys=False,
