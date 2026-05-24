@@ -49,11 +49,11 @@ class ApiDiagnosticsTest(unittest.TestCase):
                     ).items()
                 }
 
-                self.assertIn("subscription-userinfo", header_items)
-                self.assertIn("upload=0; download=0;", header_items["subscription-userinfo"])
+                self.assertNotIn("subscription-userinfo", header_items)
                 self.assertEqual("24", header_items["profile-update-interval"])
                 self.assertEqual("Clash-Config-Gen", header_items["profile-title"])
                 self.assertIn("clash-config-gen", header_items["profile-web-page-url"])
+                self.assertEqual("https://clash.910501.xyz", header_items["x-clash-config-project-url"])
             finally:
                 if previous_db_path is None:
                     os.environ.pop("APP_DB_PATH", None)
