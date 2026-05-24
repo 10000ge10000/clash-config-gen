@@ -1,9 +1,27 @@
+import base64
 from typing import Any
 
 import yaml
 
 from clash_meta_gen import generate_proxy_groups
 from normalizer import normalize_proxies_for_mihomo, validate_proxy_fields
+
+SUBSCRIPTION_GENERATOR = "Clash-Config-Gen"
+SUBSCRIPTION_PROJECT = "一万AI分享 Clash/OpenClash 订阅生成器"
+SUBSCRIPTION_USAGE = "可直接导入 OpenClash、Clash Verge、FlClash 或 mihomo 兼容客户端"
+SUBSCRIPTION_GITHUB_URL = "https://github.com/10000ge10000/clash-config-gen"
+SUBSCRIPTION_PROJECT_URL = "https://clash.910501.xyz"
+SUBSCRIPTION_ANNOUNCE = "\n".join(
+    [
+        f"Generator: {SUBSCRIPTION_GENERATOR}",
+        f"Project: {SUBSCRIPTION_PROJECT}",
+        f"Usage: {SUBSCRIPTION_USAGE}",
+    ]
+)
+
+
+def _base64_utf8(value: str) -> str:
+    return "base64:" + base64.b64encode(value.encode("utf-8")).decode("ascii")
 
 FAKE_IP_FILTER_LIST = [
     "+.services.googleapis.cn",
@@ -368,9 +386,11 @@ def generate_minimal_proxy_groups(proxies: list[dict[str, Any]]) -> list[dict[st
 def build_yaml(config: dict[str, Any]) -> str:
     header = "\n".join(
         [
-            "# Generator: Clash-Config-Gen",
-            "# Project: 一万AI分享 Clash/OpenClash 订阅生成器",
-            "# Usage: 可直接导入 OpenClash、Clash Verge、FlClash 或 mihomo 兼容客户端",
+            f"# Generator: {SUBSCRIPTION_GENERATOR}",
+            f"# Generator-URL: {SUBSCRIPTION_GITHUB_URL}",
+            f"# Project: {SUBSCRIPTION_PROJECT}",
+            f"# Project-URL: {SUBSCRIPTION_PROJECT_URL}",
+            f"# Usage: {SUBSCRIPTION_USAGE}",
             "# Note: 以 # 开头的内容是 YAML 注释，mihomo/OpenClash 会忽略",
             "",
         ]
@@ -387,15 +407,17 @@ def build_subscription_headers(proxy_count: int, group_count: int) -> dict[str, 
     """构造 Clash/OpenClash 订阅元信息响应头。
 
     Subscription-Userinfo 只能表达流量/到期信息，OpenClash 会固定渲染成
-    流量条。这里不再返回它，避免用户误以为存在流量限制。Profile-Title
-    和 Profile-Web-Page-Url 是 Clash 系客户端常见扩展头；项目中文说明
-    保留在 YAML 注释里，避免非 ASCII 响应头兼容问题。
+    流量条。这里不返回它，避免用户误以为存在流量限制。Profile-Title、
+    Profile-Web-Page-Url、Support-Url 和 Announce 是 Clash 系订阅常见
+    元信息字段；中文正文用 base64 UTF-8 包装，避免 HTTP 响应头编码问题。
     """
     return {
         "Profile-Update-Interval": "24",
-        "Profile-Title": "Clash-Config-Gen",
-        "Profile-Web-Page-Url": "https://github.com/10000ge10000/clash-config-gen",
-        "X-Clash-Config-Project-Url": "https://clash.910501.xyz",
+        "Profile-Title": SUBSCRIPTION_GENERATOR,
+        "Profile-Web-Page-Url": SUBSCRIPTION_GITHUB_URL,
+        "Support-Url": SUBSCRIPTION_PROJECT_URL,
+        "Announce": _base64_utf8(SUBSCRIPTION_ANNOUNCE),
+        "X-Clash-Config-Project-Url": SUBSCRIPTION_PROJECT_URL,
         "Content-Disposition": 'inline; filename="clash-config.yaml"',
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",

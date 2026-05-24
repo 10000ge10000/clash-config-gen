@@ -1,8 +1,9 @@
 import os
 import tempfile
 import unittest
+import base64
 
-from config_builder import build_config, build_subscription_headers, build_yaml
+from config_builder import SUBSCRIPTION_ANNOUNCE, build_config, build_subscription_headers, build_yaml
 from diagnostics import build_subscription_diagnostics
 from storage import create_user, init_db, save_user_config
 
@@ -53,7 +54,13 @@ class ApiDiagnosticsTest(unittest.TestCase):
                 self.assertEqual("24", header_items["profile-update-interval"])
                 self.assertEqual("Clash-Config-Gen", header_items["profile-title"])
                 self.assertIn("clash-config-gen", header_items["profile-web-page-url"])
+                self.assertEqual("https://clash.910501.xyz", header_items["support-url"])
                 self.assertEqual("https://clash.910501.xyz", header_items["x-clash-config-project-url"])
+                self.assertTrue(header_items["announce"].startswith("base64:"))
+                decoded_announce = base64.b64decode(
+                    header_items["announce"].removeprefix("base64:")
+                ).decode("utf-8")
+                self.assertEqual(SUBSCRIPTION_ANNOUNCE, decoded_announce)
             finally:
                 if previous_db_path is None:
                     os.environ.pop("APP_DB_PATH", None)

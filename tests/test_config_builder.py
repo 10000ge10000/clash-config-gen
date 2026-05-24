@@ -2,7 +2,16 @@ import unittest
 
 import yaml
 
-from config_builder import build_config, build_yaml, validate_config
+from config_builder import (
+    SUBSCRIPTION_GENERATOR,
+    SUBSCRIPTION_GITHUB_URL,
+    SUBSCRIPTION_PROJECT,
+    SUBSCRIPTION_PROJECT_URL,
+    SUBSCRIPTION_USAGE,
+    build_config,
+    build_yaml,
+    validate_config,
+)
 from normalizer import normalize_proxy_for_mihomo
 
 
@@ -284,9 +293,11 @@ class ValidateConfigTest(unittest.TestCase):
         rendered = build_yaml(config)
         loaded = yaml.safe_load(rendered)
 
-        self.assertTrue(rendered.startswith("# Generator: Clash-Config-Gen\n"))
-        self.assertIn("# Project: 一万AI分享 Clash/OpenClash 订阅生成器", rendered)
-        self.assertIn("# Usage: 可直接导入 OpenClash、Clash Verge、FlClash 或 mihomo 兼容客户端", rendered)
+        self.assertTrue(rendered.startswith(f"# Generator: {SUBSCRIPTION_GENERATOR}\n"))
+        self.assertIn(f"# Generator-URL: {SUBSCRIPTION_GITHUB_URL}", rendered)
+        self.assertIn(f"# Project: {SUBSCRIPTION_PROJECT}", rendered)
+        self.assertIn(f"# Project-URL: {SUBSCRIPTION_PROJECT_URL}", rendered)
+        self.assertIn(f"# Usage: {SUBSCRIPTION_USAGE}", rendered)
         self.assertEqual(config, loaded)
 
 
