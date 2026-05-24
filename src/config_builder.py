@@ -322,8 +322,15 @@ def apply_generation_profile(global_config: dict[str, Any]) -> dict[str, Any]:
             "include_global_compat": False,
             "include_inbound_ports": False,
             "include_controller": False,
+            "include_router_options": False,
+            "enable_core_options": False,
             "enable_dns": False,
             "enable_tun": False,
+            "enable_sniffer": False,
+            "profile_store_selected": False,
+            "profile_store_fake_ip": False,
+            "ntp_enable": False,
+            "authentication": "",
         })
     if profile == "minimal":
         config.update({

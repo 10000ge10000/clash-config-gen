@@ -178,6 +178,64 @@ class ValidateConfigTest(unittest.TestCase):
 
         self.assertIn("节点 'broken-ss' 缺少必填字段: cipher, password", errors)
 
+    def test_openclash_router_profile_strips_plugin_managed_runtime_fields(self):
+        """OpenClash 会接管端口、DNS、控制器等字段，订阅模板不能重复输出。"""
+        config = build_config(
+            [
+                {
+                    "name": "node-1",
+                    "type": "ss",
+                    "server": "127.0.0.1",
+                    "port": 8388,
+                    "cipher": "aes-128-gcm",
+                    "password": "password",
+                }
+            ],
+            {
+                "generation_profile": "openclash-router",
+                "include_global_compat": True,
+                "include_inbound_ports": True,
+                "include_controller": True,
+                "include_router_options": True,
+                "enable_core_options": True,
+                "enable_dns": True,
+                "enable_tun": True,
+                "enable_sniffer": True,
+                "profile_store_selected": True,
+                "profile_store_fake_ip": True,
+                "ntp_enable": True,
+                "authentication": "user:pass",
+                "redir_port": 7892,
+                "tproxy_port": 7895,
+                "external_controller": "0.0.0.0:9090",
+                "secret": "secret",
+            },
+        )
+
+        blocked_keys = {
+            "global",
+            "port",
+            "socks-port",
+            "mixed-port",
+            "redir-port",
+            "tproxy-port",
+            "external-controller",
+            "secret",
+            "dns",
+            "tun",
+            "sniffer",
+            "profile",
+            "ntp",
+            "authentication",
+            "tcp-concurrent",
+            "unified-delay",
+            "geodata-mode",
+            "geodata-loader",
+        }
+        self.assertTrue(blocked_keys.isdisjoint(config.keys()))
+        self.assertIn("proxy-groups", config)
+        self.assertIn("rules", config)
+
 
 if __name__ == "__main__":
     unittest.main()
