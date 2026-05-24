@@ -17,6 +17,7 @@ BROWSER_CLIENT_FINGERPRINTS = {
 }
 
 CERTIFICATE_PIN_PATTERN = re.compile(r"^(?:[A-Fa-f0-9]{64}|(?:[A-Fa-f0-9]{2}:){31}[A-Fa-f0-9]{2})$")
+HOP_INTERVAL_RANGE_PATTERN = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
 
 PROTOCOL_REQUIRED_FIELDS = {
     "ss": {"name", "type", "server", "port", "cipher", "password"},
@@ -62,6 +63,14 @@ def normalize_proxy(proxy: dict[str, Any]) -> NormalizationResult:
             normalized["port"] = int(normalized["port"])
         except Exception:
             errors.append("端口不是数字")
+
+    if normalized.get("type") == "hysteria2" and "hop-interval" in normalized:
+        hop_interval = _normalize_hysteria2_hop_interval(normalized.get("hop-interval"))
+        if hop_interval is None:
+            normalized.pop("hop-interval", None)
+            warnings.append("已移除无法解析为正整数秒的 hop-interval")
+        else:
+            normalized["hop-interval"] = hop_interval
 
     fingerprint = normalized.get("fingerprint")
     if fingerprint is not None:
@@ -112,6 +121,39 @@ def normalize_proxies_for_mihomo(proxies: list[dict[str, Any]]) -> list[dict[str
 
 def normalize_proxy_for_mihomo(proxy: dict[str, Any]) -> dict[str, Any]:
     return normalize_proxy(proxy).proxy
+
+
+def _normalize_hysteria2_hop_interval(value: Any) -> int | None:
+    """把 Hysteria2 端口跳跃间隔收敛为 OpenClash/mihomo 可解析的整数秒。
+
+    部分订阅源或旧版表单会写出 `5-25` 这种范围。当前 OpenClash 使用的
+    mihomo 配置解析器会把 `hop-interval` 按整数读取，范围字符串会直接导致
+    内核启动失败。因此这里取范围左侧的最小间隔，保留“较快切换端口”的原始意图，
+    同时保证输出配置可以被真实内核加载。
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        return int(value) if value.is_integer() and value > 0 else None
+
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.isdigit():
+        seconds = int(text)
+        return seconds if seconds > 0 else None
+
+    range_match = HOP_INTERVAL_RANGE_PATTERN.fullmatch(text)
+    if range_match:
+        start = int(range_match.group(1))
+        end = int(range_match.group(2))
+        if start > 0 and end > 0 and start <= end:
+            return start
+    return None
 
 
 def validate_proxy_fields(proxy: dict[str, Any]) -> list[str]:

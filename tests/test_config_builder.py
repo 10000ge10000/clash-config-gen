@@ -55,6 +55,37 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertNotIn("fingerprint", config["proxies"][0])
         self.assertEqual("firefox", config["proxies"][0]["client-fingerprint"])
 
+    def test_hysteria2_hop_interval_range_is_normalized_to_int(self):
+        """OpenClash 当前按整数解析 hop-interval，旧数据里的 5-25 必须收敛为 5。"""
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "hy2",
+                "type": "hysteria2",
+                "server": "example.com",
+                "port": 443,
+                "password": "secret",
+                "ports": "20000-50000",
+                "hop-interval": "5-25",
+            }
+        )
+
+        self.assertEqual(5, proxy["hop-interval"])
+
+    def test_invalid_hysteria2_hop_interval_is_removed(self):
+        """无法转成正整数秒的 hop-interval 直接移除，避免 mihomo 启动时硬失败。"""
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "hy2",
+                "type": "hysteria2",
+                "server": "example.com",
+                "port": 443,
+                "password": "secret",
+                "hop-interval": "fast",
+            }
+        )
+
+        self.assertNotIn("hop-interval", proxy)
+
     def test_empty_proxy_groups_are_rejected(self):
         """没有策略组的配置会让客户端只剩内置 Global，必须在保存前拦住。"""
         errors, warnings = validate_config(
