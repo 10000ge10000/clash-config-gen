@@ -2,12 +2,64 @@ import os
 import tempfile
 import unittest
 
-from config_builder import build_config, build_yaml
+from config_builder import build_config, build_subscription_headers, build_yaml
 from diagnostics import build_subscription_diagnostics
 from storage import create_user, init_db, save_user_config
 
 
 class ApiDiagnosticsTest(unittest.TestCase):
+    def test_subscription_response_exposes_clash_metadata_headers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            previous_db_path = os.environ.get("APP_DB_PATH")
+            os.environ["APP_DB_PATH"] = os.path.join(tmpdir, "app.db")
+            try:
+                init_db()
+                user = create_user("meta-user", "password123")
+                config = build_config(
+                    [
+                        {
+                            "name": "sample",
+                            "type": "ss",
+                            "server": "127.0.0.1",
+                            "port": 8388,
+                            "cipher": "aes-128-gcm",
+                            "password": "password",
+                        }
+                    ],
+                    {"generation_profile": "minimal"},
+                )
+                save_user_config(
+                    int(user["id"]),
+                    config["proxies"],
+                    {"generation_profile": "minimal"},
+                    [],
+                    {},
+                    "自定义规则",
+                    build_yaml(config),
+                    validation_status="passed",
+                    validation_message="ok",
+                )
+
+                saved_config = diagnostics_config_for_user(int(user["id"]))
+                header_items = {
+                    key.lower(): value
+                    for key, value in build_subscription_headers(
+                        len(saved_config["proxies"]),
+                        2,
+                    ).items()
+                }
+
+                self.assertIn("subscription-userinfo", header_items)
+                self.assertIn("upload=0; download=0;", header_items["subscription-userinfo"])
+                self.assertEqual("24", header_items["profile-update-interval"])
+                self.assertEqual("Clash-Config-Gen", header_items["profile-title"])
+                self.assertIn("clash-config-gen", header_items["profile-web-page-url"])
+            finally:
+                if previous_db_path is None:
+                    os.environ.pop("APP_DB_PATH", None)
+                else:
+                    os.environ["APP_DB_PATH"] = previous_db_path
+
     def test_diagnostics_returns_non_sensitive_subscription_stats(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             previous_db_path = os.environ.get("APP_DB_PATH")

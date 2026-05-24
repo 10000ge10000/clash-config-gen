@@ -1,7 +1,7 @@
 import yaml
 from fastapi import FastAPI, HTTPException, Response
 
-from config_builder import build_yaml, validate_config
+from config_builder import build_subscription_headers, build_yaml, validate_config
 from diagnostics import build_subscription_diagnostics
 from normalizer import normalize_proxies_for_mihomo
 from storage import ensure_admin_from_env, get_config_by_token, health_snapshot, init_db
@@ -21,7 +21,7 @@ def health_check():
     return health_snapshot()
 
 
-def _build_subscription_response(token: str) -> Response:
+def _build_subscription_response(token: str, include_body: bool = True) -> Response:
     config = get_config_by_token(token)
     if not config:
         raise HTTPException(status_code=404, detail="订阅不存在、用户已禁用或 Token 已失效")
@@ -52,16 +52,9 @@ def _build_subscription_response(token: str) -> Response:
     group_count = len(loaded_config.get("proxy-groups") or [])
 
     return Response(
-        content=final_yaml,
+        content=final_yaml if include_body else "",
         media_type="application/x-yaml; charset=utf-8",
-        headers={
-            "Profile-Update-Interval": "24",
-            "Content-Disposition": 'inline; filename="clash-config.yaml"',
-            "Cache-Control": "no-store",
-            "X-Content-Type-Options": "nosniff",
-            "X-Clash-Proxy-Count": str(proxy_count),
-            "X-Clash-Proxy-Group-Count": str(group_count),
-        },
+        headers=build_subscription_headers(proxy_count, group_count),
     )
 
 
@@ -86,9 +79,19 @@ def get_subscription(token: str):
     return _build_subscription_response(token)
 
 
+@app.head("/sub/{token}")
+def head_subscription(token: str):
+    return _build_subscription_response(token, include_body=False)
+
+
 @app.get("/sub/{token}/config.yaml")
 def get_subscription_yaml(token: str):
     return _build_subscription_response(token)
+
+
+@app.head("/sub/{token}/config.yaml")
+def head_subscription_yaml(token: str):
+    return _build_subscription_response(token, include_body=False)
 
 
 @app.get("/sub/{token}/diagnostics")

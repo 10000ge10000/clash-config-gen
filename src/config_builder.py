@@ -5,6 +5,10 @@ import yaml
 from clash_meta_gen import generate_proxy_groups
 from normalizer import normalize_proxies_for_mihomo, validate_proxy_fields
 
+SUBSCRIPTION_TOTAL_BYTES = 1024 * 1024 * 1024 * 1024
+SUBSCRIPTION_EXPIRE_TS = 4102444800
+SUBSCRIPTION_USERINFO = f"upload=0; download=0; total={SUBSCRIPTION_TOTAL_BYTES}; expire={SUBSCRIPTION_EXPIRE_TS}"
+
 FAKE_IP_FILTER_LIST = [
     "+.services.googleapis.cn",
     "+.googleapis.cn",
@@ -368,6 +372,7 @@ def generate_minimal_proxy_groups(proxies: list[dict[str, Any]]) -> list[dict[st
 def build_yaml(config: dict[str, Any]) -> str:
     header = "\n".join(
         [
+            f"# {SUBSCRIPTION_USERINFO};",
             "# Generator: Clash-Config-Gen",
             "# Project: 一万AI分享 Clash/OpenClash 订阅生成器",
             "# Usage: 可直接导入 OpenClash、Clash Verge、FlClash 或 mihomo 兼容客户端",
@@ -381,6 +386,26 @@ def build_yaml(config: dict[str, Any]) -> str:
         sort_keys=False,
         default_flow_style=False,
     )
+
+
+def build_subscription_headers(proxy_count: int, group_count: int) -> dict[str, str]:
+    """构造 Clash/OpenClash 订阅元信息响应头。
+
+    OpenClash 的“订阅信息”读取 Subscription-Userinfo 响应头；YAML
+    注释只适合作为配置文件内部说明。Profile-Title 等扩展头保持 ASCII，
+    避免部分 HTTP 客户端对非 ASCII 响应头兼容性不好。
+    """
+    return {
+        "Profile-Update-Interval": "24",
+        "Profile-Title": "Clash-Config-Gen",
+        "Profile-Web-Page-Url": "https://github.com/10000ge10000/clash-config-gen",
+        "Subscription-Userinfo": SUBSCRIPTION_USERINFO,
+        "Content-Disposition": 'inline; filename="clash-config.yaml"',
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "X-Clash-Proxy-Count": str(proxy_count),
+        "X-Clash-Proxy-Group-Count": str(group_count),
+    }
 
 
 def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
