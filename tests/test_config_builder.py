@@ -3,15 +3,18 @@ import unittest
 import yaml
 
 from config_builder import (
+    LHIE1_PROVIDERS_MAP,
     SUBSCRIPTION_GENERATOR,
     SUBSCRIPTION_GITHUB_URL,
     SUBSCRIPTION_PROJECT,
     SUBSCRIPTION_PROJECT_URL,
     SUBSCRIPTION_USAGE,
     build_config,
+    build_rules,
     build_yaml,
     validate_config,
 )
+from clash_meta_gen import generate_proxy_groups
 from normalizer import normalize_proxy_for_mihomo
 
 
@@ -272,6 +275,43 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertNotIn("dns", config)
         self.assertNotIn("tun", config)
         self.assertNotIn("sniffer", config)
+
+    def test_lhie1_media_defaults_use_aggregate_policy_groups(self):
+        """国外流媒体默认走 Global TV，大陆/亚洲流媒体走对应聚合组。"""
+        rules, _providers = build_rules("lhie1规则", [], {})
+        expected_rules = {
+            "RULE-SET,Netflix,Global TV",
+            "RULE-SET,Disney Plus,Global TV",
+            "RULE-SET,Max,Global TV",
+            "RULE-SET,YouTube,Global TV",
+            "RULE-SET,Bilibili,CN Mainland TV",
+            "RULE-SET,IQIYI,CN Mainland TV",
+            "RULE-SET,Abema TV,Asian TV",
+            "RULE-SET,Bahamut,Asian TV",
+            "RULE-SET,Apple TV,Apple TV",
+            "RULE-SET,Telegram,Telegram",
+        }
+
+        for expected_rule in expected_rules:
+            self.assertIn(expected_rule, rules)
+
+    def test_lhie1_default_targets_exist_in_generated_proxy_groups(self):
+        """LHIE1 默认目标必须是内置动作或生成器实际存在的策略组。"""
+        proxies = [
+            {
+                "name": "node-1",
+                "type": "ss",
+                "server": "127.0.0.1",
+                "port": 8388,
+                "cipher": "aes-128-gcm",
+                "password": "password",
+            }
+        ]
+        group_names = {group["name"] for group in generate_proxy_groups(proxies)}
+        builtin_targets = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "Proxy"}
+
+        for provider_name, (_suffix, target) in LHIE1_PROVIDERS_MAP.items():
+            self.assertIn(target, group_names | builtin_targets, provider_name)
 
     def test_generated_yaml_contains_non_sensitive_project_comments(self):
         """订阅 YAML 可以带项目说明注释，mihomo/OpenClash 解析时会自动忽略。"""
