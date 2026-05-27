@@ -313,6 +313,27 @@ class ValidateConfigTest(unittest.TestCase):
         for provider_name, (_suffix, target) in LHIE1_PROVIDERS_MAP.items():
             self.assertIn(target, group_names | builtin_targets, provider_name)
 
+    def test_media_policy_groups_default_to_aggregate_selectors(self):
+        """独立流媒体策略组的默认选中项要和 LHIE1 聚合规则目标一致。"""
+        proxies = [
+            {
+                "name": "node-1",
+                "type": "ss",
+                "server": "127.0.0.1",
+                "port": 8388,
+                "cipher": "aes-128-gcm",
+                "password": "password",
+            }
+        ]
+        groups = {group["name"]: group for group in generate_proxy_groups(proxies)}
+
+        for group_name in ["Netflix", "Disney Plus", "Discovery Plus", "DAZN", "Spotify", "HBO Max", "Youtube"]:
+            self.assertEqual("Global TV", groups[group_name]["proxies"][0], group_name)
+        self.assertEqual("CN Mainland TV", groups["Bilibili"]["proxies"][0])
+        self.assertEqual("Asian TV", groups["Bahamut"]["proxies"][0])
+        self.assertEqual("Proxy", groups["Steam"]["proxies"][0])
+        self.assertEqual("Proxy", groups["Pornhub"]["proxies"][0])
+
     def test_generated_yaml_contains_non_sensitive_project_comments(self):
         """订阅 YAML 可以带项目说明注释，mihomo/OpenClash 解析时会自动忽略。"""
         config = {

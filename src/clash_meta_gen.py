@@ -157,9 +157,22 @@ def generate_proxy_groups(all_proxies):
         "DAZN", "Spotify", "Steam", "TikTok", "miHoYo",
         "Telegram", "Crypto", "Discord", "Speedtest", "PayPal"
     ]
+    global_tv_apps = {
+        "HBO Max",
+        "Netflix",
+        "Disney Plus",
+        "Discovery Plus",
+        "DAZN",
+        "Spotify",
+    }
+    asian_tv_apps = {"Bahamut"}
+    mainland_tv_apps = {"Bilibili"}
     for app in app_groups:
-        # Bilibili 特殊处理：默认直连
-        if app == "Bilibili":
+        if app in global_tv_apps:
+            groups.append(create_group(app, "select", all_proxies, extra_proxies=["Global TV", "DIRECT", "Proxy"]))
+        elif app in asian_tv_apps:
+            groups.append(create_group(app, "select", all_proxies, extra_proxies=["Asian TV", "DIRECT", "Proxy"]))
+        elif app in mainland_tv_apps:
             groups.append(create_group(app, "select", all_proxies, extra_proxies=["CN Mainland TV", "DIRECT", "Proxy"]))
         else:
             groups.append(create_group(app, "select", all_proxies, extra_proxies=["Proxy", "DIRECT"]))
