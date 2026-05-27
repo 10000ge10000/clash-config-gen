@@ -1,6 +1,10 @@
 import yaml
 import os
 
+DEFAULT_URL_TEST_URL = "http://cp.cloudflare.com/generate_204"
+DEFAULT_URL_TEST_INTERVAL = 60
+DEFAULT_URL_TEST_TOLERANCE = 50
+
 # ==========================================
 # 安全警告 / Security Warning
 # ==========================================
@@ -134,12 +138,17 @@ def create_group(name, type_name, proxies_list, extra_proxies=None, url=None, in
     if tolerance and type_name == "url-test": group["tolerance"] = tolerance
     return group
 
-def generate_proxy_groups(all_proxies):
+def generate_proxy_groups(
+    all_proxies,
+    url_test_url=DEFAULT_URL_TEST_URL,
+    url_test_interval=DEFAULT_URL_TEST_INTERVAL,
+    url_test_tolerance=DEFAULT_URL_TEST_TOLERANCE,
+):
     groups = []
     
     # 1. 自动测速
     groups.append(create_group("Auto - UrlTest", "url-test", all_proxies, 
-                               url="http://cp.cloudflare.com/generate_204", interval=600, tolerance=50))
+                               url=url_test_url, interval=url_test_interval, tolerance=url_test_tolerance))
     
     # 2. 手动选择
     groups.append(create_group("Proxy", "select", all_proxies, 

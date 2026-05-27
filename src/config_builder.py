@@ -3,7 +3,12 @@ from typing import Any
 
 import yaml
 
-from clash_meta_gen import generate_proxy_groups
+from clash_meta_gen import (
+    DEFAULT_URL_TEST_INTERVAL,
+    DEFAULT_URL_TEST_TOLERANCE,
+    DEFAULT_URL_TEST_URL,
+    generate_proxy_groups,
+)
 from normalizer import normalize_proxies_for_mihomo, validate_proxy_fields
 
 SUBSCRIPTION_GENERATOR = "Clash-Config-Gen"
@@ -147,6 +152,14 @@ def first_non_empty_list(*values: str, fallback: str = "") -> list[str]:
     return text_to_list(fallback)
 
 
+def int_config(value: Any, default: int, minimum: int = 1) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= minimum else default
+
+
 def build_config(
     proxies: list[dict[str, Any]],
     global_config: dict[str, Any],
@@ -160,7 +173,23 @@ def build_config(
     custom_rules = custom_rules or []
     custom_rule_providers = custom_rule_providers or {}
     generation_profile = global_config.get("generation_profile", "openclash-router")
-    final_proxy_groups = generate_minimal_proxy_groups(proxies) if generation_profile == "minimal" else generate_proxy_groups(proxies)
+    url_test_url = str(global_config.get("url_test_url") or DEFAULT_URL_TEST_URL).strip() or DEFAULT_URL_TEST_URL
+    url_test_interval = int_config(global_config.get("url_test_interval"), DEFAULT_URL_TEST_INTERVAL)
+    url_test_tolerance = int_config(global_config.get("url_test_tolerance"), DEFAULT_URL_TEST_TOLERANCE, minimum=0)
+    if generation_profile == "minimal":
+        final_proxy_groups = generate_minimal_proxy_groups(
+            proxies,
+            url_test_url=url_test_url,
+            url_test_interval=url_test_interval,
+            url_test_tolerance=url_test_tolerance,
+        )
+    else:
+        final_proxy_groups = generate_proxy_groups(
+            proxies,
+            url_test_url=url_test_url,
+            url_test_interval=url_test_interval,
+            url_test_tolerance=url_test_tolerance,
+        )
 
     final_config: dict[str, Any] = {
         "proxies": proxies,
@@ -368,16 +397,21 @@ def apply_generation_profile(global_config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def generate_minimal_proxy_groups(proxies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def generate_minimal_proxy_groups(
+    proxies: list[dict[str, Any]],
+    url_test_url: str = DEFAULT_URL_TEST_URL,
+    url_test_interval: int = DEFAULT_URL_TEST_INTERVAL,
+    url_test_tolerance: int = DEFAULT_URL_TEST_TOLERANCE,
+) -> list[dict[str, Any]]:
     node_names = [proxy["name"] for proxy in proxies if isinstance(proxy, dict) and proxy.get("name")]
     return [
         {
             "name": "Auto - UrlTest",
             "type": "url-test",
             "proxies": node_names,
-            "url": "http://cp.cloudflare.com/generate_204",
-            "interval": 600,
-            "tolerance": 50,
+            "url": url_test_url,
+            "interval": url_test_interval,
+            "tolerance": url_test_tolerance,
         },
         {"name": "Proxy", "type": "select", "proxies": ["Auto - UrlTest", "DIRECT"] + node_names},
     ]

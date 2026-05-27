@@ -334,6 +334,52 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertEqual("Proxy", groups["Steam"]["proxies"][0])
         self.assertEqual("Proxy", groups["Pornhub"]["proxies"][0])
 
+    def test_url_test_defaults_are_written_to_proxy_group(self):
+        """默认 URL-Test 参数应写入订阅 YAML，供 Nikki/OpenClash 等客户端读取。"""
+        config = build_config(
+            [
+                {
+                    "name": "node-1",
+                    "type": "ss",
+                    "server": "127.0.0.1",
+                    "port": 8388,
+                    "cipher": "aes-128-gcm",
+                    "password": "password",
+                }
+            ],
+            {},
+        )
+        groups = {group["name"]: group for group in config["proxy-groups"]}
+
+        self.assertEqual("http://cp.cloudflare.com/generate_204", groups["Auto - UrlTest"]["url"])
+        self.assertEqual(60, groups["Auto - UrlTest"]["interval"])
+        self.assertEqual(50, groups["Auto - UrlTest"]["tolerance"])
+
+    def test_url_test_settings_can_be_overridden_by_global_config(self):
+        """全局设置里的 URL-Test 参数必须覆盖默认值。"""
+        config = build_config(
+            [
+                {
+                    "name": "node-1",
+                    "type": "ss",
+                    "server": "127.0.0.1",
+                    "port": 8388,
+                    "cipher": "aes-128-gcm",
+                    "password": "password",
+                }
+            ],
+            {
+                "url_test_url": "https://www.gstatic.com/generate_204",
+                "url_test_interval": 120,
+                "url_test_tolerance": 30,
+            },
+        )
+        groups = {group["name"]: group for group in config["proxy-groups"]}
+
+        self.assertEqual("https://www.gstatic.com/generate_204", groups["Auto - UrlTest"]["url"])
+        self.assertEqual(120, groups["Auto - UrlTest"]["interval"])
+        self.assertEqual(30, groups["Auto - UrlTest"]["tolerance"])
+
     def test_generated_yaml_contains_non_sensitive_project_comments(self):
         """订阅 YAML 可以带项目说明注释，mihomo/OpenClash 解析时会自动忽略。"""
         config = {

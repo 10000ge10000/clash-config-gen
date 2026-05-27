@@ -447,6 +447,9 @@ def build_default_global_config() -> dict:
         # 性能与网络
         "keep_alive_interval": 15,
         "keep_alive_idle": 600,
+        "url_test_url": "http://cp.cloudflare.com/generate_204",
+        "url_test_interval": 60,
+        "url_test_tolerance": 50,
         "tcp_concurrent": False,
         "unified_delay": False,
         "find_process_mode": "strict",
@@ -497,6 +500,14 @@ def build_default_global_config() -> dict:
         "custom_rules": DEFAULT_DIRECT_RULES,
         "lhie1_provider_targets": {},
     }
+
+
+def int_global_config(name: str, default: int, minimum: int = 0) -> int:
+    try:
+        value = int(st.session_state.global_config.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= minimum else default
 
 
 def normalize_hy2_hop_interval(raw_value: str) -> int:
@@ -750,6 +761,34 @@ with st.sidebar:
         secret = st.session_state.global_config["secret"]
         find_process_mode = st.session_state.global_config["find_process_mode"]
 
+    with st.expander("📈 策略组测速", expanded=False):
+        st.caption("写入 Auto - UrlTest 策略组，OpenClash、Nikki、Clash Verge、FlClash 会直接读取订阅 YAML 中的这些参数。")
+        url_test_url = st.text_input(
+            "测速地址",
+            value=st.session_state.global_config.get("url_test_url", "http://cp.cloudflare.com/generate_204"),
+            help="用于 url-test 连通性检测。推荐使用稳定、响应快的 204 地址。",
+            key="gc_url_test_url",
+        )
+        col_urltest_1, col_urltest_2 = st.columns(2)
+        with col_urltest_1:
+            url_test_interval = st.number_input(
+                "测速间隔 interval (秒)",
+                min_value=1,
+                max_value=86400,
+                value=int_global_config("url_test_interval", 60, minimum=1),
+                help="多久重新测速一次。60 表示每 60 秒测试一次节点连通性。",
+                key="gc_url_test_interval",
+            )
+        with col_urltest_2:
+            url_test_tolerance = st.number_input(
+                "切换灵敏度 tolerance (毫秒)",
+                min_value=0,
+                max_value=10000,
+                value=int_global_config("url_test_tolerance", 50, minimum=0),
+                help="延迟差超过该值时才更倾向切换，值越小越灵敏。",
+                key="gc_url_test_tolerance",
+            )
+
     # --- TUN 模式 ---
     if is_desktop:
         with st.expander("🛡️ TUN 模式 (虚拟网卡)", expanded=False):
@@ -946,6 +985,9 @@ st.session_state.global_config.update({
     "log_level": log_level, "ipv6_support": ipv6_support,
     "external_controller": effective_external_controller, "secret": updated_secret,
     "keep_alive_interval": keep_alive, "tcp_concurrent": tcp_concurrent,
+    "url_test_url": url_test_url,
+    "url_test_interval": int(url_test_interval),
+    "url_test_tolerance": int(url_test_tolerance),
     "enable_tun": enable_tun, "unified_delay": unified_delay, "find_process_mode": find_process_mode,
     "geodata_mode": geodata_mode, "enable_sniffer": enable_sniffer, "sniff_override_dest": sniff_override,
     "openclash_preset": openclash_preset, "is_desktop": is_desktop,
