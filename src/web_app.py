@@ -574,6 +574,17 @@ def target_mode_from_global_config(global_config: dict) -> str:
     return "全平台客户端 (PC/移动端)"
 
 
+def migrate_global_defaults(global_config: dict, saved_global_config: dict) -> dict:
+    """把旧默认值迁移到当前推荐值，避免老账号继续显示旧 UI 默认。"""
+    migrated = dict(global_config)
+    if saved_global_config.get("url_test_tolerance") in (None, 50):
+        migrated["url_test_tolerance"] = 30
+    if not saved_global_config.get("target_mode_user_selected"):
+        migrated["generation_profile"] = "openclash-router"
+        migrated["is_desktop"] = False
+    return migrated
+
+
 def autosave_current_subscription(selected_rule_type: str, reason: str) -> tuple[bool, str]:
     """规则源或预设目标变更后立即刷新数据库中的订阅 YAML。"""
     if not st.session_state.proxies_data:
@@ -661,10 +672,10 @@ if st.session_state.get("session_loaded_user_id") != current_user["id"]:
     # 切换账号时必须先回到干净默认态，再加载当前用户配置。
     # 否则新用户空配置会继续沿用上一位用户的 session_state，下载到错误账号的 YAML。
     st.session_state.proxies_data = saved_config.get("proxies") or []
+    saved_global_config = saved_config.get("global_config") or {}
     st.session_state.global_config = build_default_global_config()
-    st.session_state.global_config.update(saved_config.get("global_config") or {})
-    if "url_test_tolerance" not in (saved_config.get("global_config") or {}):
-        st.session_state.global_config["url_test_tolerance"] = 30
+    st.session_state.global_config.update(saved_global_config)
+    st.session_state.global_config = migrate_global_defaults(st.session_state.global_config, saved_global_config)
     if not st.session_state.global_config.get("optional_globals_v2"):
         st.session_state.global_config.update({
             "include_global_compat": False,
@@ -693,6 +704,16 @@ if st.session_state.get("session_loaded_user_id") != current_user["id"]:
     )
     reset_global_widget_keys()
     st.session_state.session_loaded_user_id = current_user["id"]
+
+if not st.session_state.get("ui_defaults_v3_applied"):
+    st.session_state.global_config = migrate_global_defaults(
+        st.session_state.global_config,
+        st.session_state.global_config,
+    )
+    st.session_state["target_mode"] = target_mode_from_global_config(st.session_state.global_config)
+    if st.session_state.get("gc_url_test_tolerance") == 50:
+        del st.session_state["gc_url_test_tolerance"]
+    st.session_state.ui_defaults_v3_applied = True
 
 # ==========================================
 # 2. 侧边栏：认证 + 高级全局设置
@@ -766,8 +787,8 @@ with st.sidebar:
     st.info("💡 **请根据您的使用场景选择模式**")
     target_mode = st.radio(
         "生成模式", 
-        ("全平台客户端 (PC/移动端)", "OpenClash / 软路由"),
-        horizontal=True,
+        ("OpenClash / 软路由", "全平台客户端 (PC/移动端)"),
+        horizontal=False,
         key="target_mode",
         help="全平台客户端：适用于 Windows, macOS, Android, iOS 等独立运行的客户端，生成包含 TUN、DNS 的完整配置。\nOpenClash：精简配置，仅生成节点和策略，基础设置由插件接管。"
     )
@@ -903,7 +924,7 @@ with st.sidebar:
                 "切换灵敏度 tolerance (毫秒)",
                 min_value=0,
                 max_value=10000,
-                value=int_global_config("url_test_tolerance", 30, minimum=0),
+                value=30 if int_global_config("url_test_tolerance", 30, minimum=0) == 50 else int_global_config("url_test_tolerance", 30, minimum=0),
                 help="延迟差超过该值时才更倾向切换，值越小越灵敏。",
                 key="gc_url_test_tolerance",
             )
@@ -1134,6 +1155,7 @@ st.session_state.global_config.update({
     "ntp_interval": ntp_interval,
     "ntp_write_to_system": ntp_write_to_system,
     "generation_profile": generation_profile,
+    "target_mode_user_selected": True,
 })
 
 if enable_dns:
@@ -1861,7 +1883,6 @@ with tab3:
         "设置分流",
         "选择基础规则源并调整预设目标，保存后订阅会立即刷新，不需要等到生成页手动保存。",
     )
-    st.header("分流规则配置")
     
     if not st.session_state.proxies_data:
         st.warning("请先在“快速填入”或“节点管理”标签页添加节点，才能配置分流规则。")
