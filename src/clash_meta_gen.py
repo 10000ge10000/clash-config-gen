@@ -3,7 +3,7 @@ import os
 
 DEFAULT_URL_TEST_URL = "http://cp.cloudflare.com/generate_204"
 DEFAULT_URL_TEST_INTERVAL = 60
-DEFAULT_URL_TEST_TOLERANCE = 50
+DEFAULT_URL_TEST_TOLERANCE = 30
 
 # ==========================================
 # 安全警告 / Security Warning

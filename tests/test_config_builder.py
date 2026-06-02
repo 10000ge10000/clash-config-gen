@@ -393,7 +393,7 @@ class ValidateConfigTest(unittest.TestCase):
 
         self.assertEqual("http://cp.cloudflare.com/generate_204", groups["Auto - UrlTest"]["url"])
         self.assertEqual(60, groups["Auto - UrlTest"]["interval"])
-        self.assertEqual(50, groups["Auto - UrlTest"]["tolerance"])
+        self.assertEqual(30, groups["Auto - UrlTest"]["tolerance"])
 
     def test_url_test_settings_can_be_overridden_by_global_config(self):
         """全局设置里的 URL-Test 参数必须覆盖默认值。"""

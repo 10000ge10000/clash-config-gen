@@ -161,6 +161,61 @@ st.markdown("""
         text-align: center;
         line-height: 1.6;
     }
+    div[data-baseweb="tab-list"] {
+        gap: .9rem;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    button[data-baseweb="tab"] {
+        padding: .9rem .25rem .95rem !important;
+        min-width: auto;
+    }
+    button[data-baseweb="tab"] p {
+        font-size: 1.14rem;
+        line-height: 1.45;
+        font-weight: 750;
+        color: #1f2937;
+        letter-spacing: 0;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] p {
+        color: #ef4444;
+    }
+    .workflow-step {
+        display: flex;
+        align-items: flex-start;
+        gap: .75rem;
+        padding: .85rem 1rem;
+        margin: .35rem 0 1rem;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #eff6ff;
+        color: #1e3a8a;
+    }
+    .workflow-step-number {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 1.8rem;
+        width: 1.8rem;
+        height: 1.8rem;
+        border-radius: 50%;
+        background: #2563eb;
+        color: #fff;
+        font-weight: 800;
+        font-size: .95rem;
+    }
+    .workflow-step-title {
+        margin: 0 0 .1rem;
+        font-size: 1.08rem;
+        line-height: 1.45;
+        font-weight: 800;
+        color: #172554;
+    }
+    .workflow-step-desc {
+        margin: 0;
+        font-size: .98rem;
+        line-height: 1.6;
+        color: #1e40af;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -450,7 +505,7 @@ def build_default_global_config() -> dict:
         "keep_alive_idle": 600,
         "url_test_url": "http://cp.cloudflare.com/generate_204",
         "url_test_interval": 60,
-        "url_test_tolerance": 50,
+        "url_test_tolerance": 30,
         "tcp_concurrent": False,
         "unified_delay": False,
         "find_process_mode": "strict",
@@ -497,9 +552,11 @@ def build_default_global_config() -> dict:
         "ntp_write_to_system": False,
         "authentication": "",
         # 规则
-        "generation_profile": "desktop-full",
+        "generation_profile": "openclash-router",
+        "is_desktop": False,
         "custom_rules": DEFAULT_DIRECT_RULES,
         "lhie1_provider_targets": {},
+        "dustinwin_provider_targets": {},
     }
 
 
@@ -509,6 +566,58 @@ def int_global_config(name: str, default: int, minimum: int = 0) -> int:
     except (TypeError, ValueError):
         return default
     return value if value >= minimum else default
+
+
+def target_mode_from_global_config(global_config: dict) -> str:
+    if global_config.get("is_desktop") is False or global_config.get("generation_profile") == "openclash-router":
+        return "OpenClash / 软路由"
+    return "全平台客户端 (PC/移动端)"
+
+
+def autosave_current_subscription(selected_rule_type: str, reason: str) -> tuple[bool, str]:
+    """规则源或预设目标变更后立即刷新数据库中的订阅 YAML。"""
+    if not st.session_state.proxies_data:
+        return False, "当前还没有节点，规则设置已暂存，添加节点并生成后才会发布订阅。"
+
+    final_config = build_subscription_config(
+        st.session_state.proxies_data,
+        st.session_state.global_config,
+        st.session_state.custom_rules,
+        st.session_state.custom_rule_providers,
+        selected_rule_type,
+    )
+    check_errors, check_warnings = validate_subscription_config(final_config)
+    if check_errors:
+        return False, "自动保存失败：" + "；".join(check_errors)
+
+    final_config_str = build_subscription_yaml(final_config)
+    validation_message = reason
+    if check_warnings:
+        validation_message = f"{reason}；警告：{'；'.join(check_warnings[:3])}"
+    save_user_config(
+        current_user["id"],
+        st.session_state.proxies_data,
+        st.session_state.global_config,
+        st.session_state.custom_rules,
+        st.session_state.custom_rule_providers,
+        selected_rule_type,
+        final_config_str,
+        validation_status="auto-saved",
+        validation_message=validation_message,
+    )
+    return True, "分流设置已自动保存，订阅链接已立即生效。"
+
+
+def rule_settings_signature(selected_rule_type: str, global_config: dict) -> str:
+    return yaml.dump(
+        {
+            "selected_rule_type": selected_rule_type,
+            "dustinwin_provider_targets": global_config.get("dustinwin_provider_targets", {}),
+            "lhie1_provider_targets": global_config.get("lhie1_provider_targets", {}),
+        },
+        allow_unicode=True,
+        sort_keys=True,
+    )
 
 
 def normalize_hy2_hop_interval(raw_value: str) -> int:
@@ -554,6 +663,8 @@ if st.session_state.get("session_loaded_user_id") != current_user["id"]:
     st.session_state.proxies_data = saved_config.get("proxies") or []
     st.session_state.global_config = build_default_global_config()
     st.session_state.global_config.update(saved_config.get("global_config") or {})
+    if "url_test_tolerance" not in (saved_config.get("global_config") or {}):
+        st.session_state.global_config["url_test_tolerance"] = 30
     if not st.session_state.global_config.get("optional_globals_v2"):
         st.session_state.global_config.update({
             "include_global_compat": False,
@@ -573,6 +684,13 @@ if st.session_state.get("session_loaded_user_id") != current_user["id"]:
     st.session_state.custom_rule_providers = saved_config.get("custom_rule_providers") or {}
     if saved_config.get("selected_rule_type"):
         st.session_state.selected_rule_type = saved_config["selected_rule_type"]
+    elif "selected_rule_type" not in st.session_state:
+        st.session_state.selected_rule_type = "dustinwin规则"
+    st.session_state["target_mode"] = target_mode_from_global_config(st.session_state.global_config)
+    st.session_state.last_published_rule_signature = rule_settings_signature(
+        st.session_state.selected_rule_type,
+        st.session_state.global_config,
+    )
     reset_global_widget_keys()
     st.session_state.session_loaded_user_id = current_user["id"]
 
@@ -642,7 +760,7 @@ with st.sidebar:
     st.divider()
     st.header("全局设置")
     if "target_mode" not in st.session_state:
-        st.session_state["target_mode"] = "全平台客户端 (PC/移动端)"
+        st.session_state["target_mode"] = target_mode_from_global_config(st.session_state.global_config)
     
     # 目标环境选择
     st.info("💡 **请根据您的使用场景选择模式**")
@@ -785,7 +903,7 @@ with st.sidebar:
                 "切换灵敏度 tolerance (毫秒)",
                 min_value=0,
                 max_value=10000,
-                value=int_global_config("url_test_tolerance", 50, minimum=0),
+                value=int_global_config("url_test_tolerance", 30, minimum=0),
                 help="延迟差超过该值时才更倾向切换，值越小越灵敏。",
                 key="gc_url_test_tolerance",
             )
@@ -1057,9 +1175,29 @@ if enable_dns:
 # ==========================================
 # 3. 主界面：节点录入 (完整功能)
 # ==========================================
-tab1, tab2, tab3, tab4 = st.tabs(["快速填入 (YAML/链接)", "节点管理", "分流规则", "生成与检查"])
+def render_workflow_step(step: int, title: str, description: str) -> None:
+    st.markdown(
+        f"""
+<div class="workflow-step">
+  <span class="workflow-step-number">{step}</span>
+  <div>
+    <p class="workflow-step-title">{title}</p>
+    <p class="workflow-step-desc">{description}</p>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+tab1, tab2, tab3, tab4 = st.tabs(["1 快速填入 (YAML/链接)", "2 节点管理", "3 分流规则", "4 生成与检查"])
 
 with tab1:
+    render_workflow_step(
+        1,
+        "导入节点",
+        "粘贴 YAML、订阅链接或分享链接，系统会统一解析、去重并校验节点字段。",
+    )
     st.info(
         "这里统一处理完整 config.yaml、proxies: 片段、纯节点列表、onekey 输出片段、"
         "Base64 订阅内容和 URI 链接列表。订阅链接和分享链接保留独立入口，避免把远程拉取和本地粘贴混在一起。"
@@ -1150,6 +1288,11 @@ with tab1:
                 st.error(f"导入失败: {e}")
 
 with tab2:
+    render_workflow_step(
+        2,
+        "整理节点",
+        "检查节点名称、协议字段和手动补充节点，后续策略组会自动引用这里的节点。",
+    )
     st.write("手动添加单个节点：")
     
     # 节点类型选择
@@ -1713,6 +1856,11 @@ with tab2:
                     st.error(f"YAML解析错误: {e}")
 
 with tab3:
+    render_workflow_step(
+        3,
+        "设置分流",
+        "选择基础规则源并调整预设目标，保存后订阅会立即刷新，不需要等到生成页手动保存。",
+    )
     st.header("分流规则配置")
     
     if not st.session_state.proxies_data:
@@ -1841,6 +1989,18 @@ with tab3:
         else:
             st.session_state.global_config["dustinwin_provider_targets"] = {}
             st.session_state.global_config["lhie1_provider_targets"] = {}
+
+        current_rule_signature = rule_settings_signature(rule_type, st.session_state.global_config)
+        if current_rule_signature != st.session_state.get("last_published_rule_signature"):
+            saved_ok, save_message = autosave_current_subscription(
+                rule_type,
+                "分流规则源或预设目标已变更，系统自动刷新订阅",
+            )
+            if saved_ok:
+                st.session_state.last_published_rule_signature = current_rule_signature
+                st.success(save_message)
+            else:
+                st.warning(save_message)
 
         try:
             preview_config = build_subscription_config(
@@ -2000,6 +2160,11 @@ with tab3:
                         st.rerun()
 
 with tab4:
+    render_workflow_step(
+        4,
+        "生成订阅",
+        "最终生成 YAML、执行配置检查和 mihomo 内核校验，通过后写入订阅接口。",
+    )
     st.header("配置生成与检查")
     
     # 上传旧配置 (仅当无节点时显示，方便修改)
@@ -2027,7 +2192,7 @@ with tab4:
         if not st.session_state.proxies_data:
             st.error("❌ 错误: 未添加任何节点！无法生成配置。")
         else:
-            selected_rule = st.session_state.get("selected_rule_type", "lhie1规则")
+            selected_rule = st.session_state.get("selected_rule_type", "dustinwin规则")
             final_config = build_subscription_config(
                 st.session_state.proxies_data,
                 st.session_state.global_config,
@@ -2179,7 +2344,7 @@ with tab4:
                 }
 
             # 处理规则 (Rules)
-            selected_rule = st.session_state.get("selected_rule_type", "自定义规则")
+            selected_rule = st.session_state.get("selected_rule_type", "dustinwin规则")
             rule_list = []
             
             # 为了简化逻辑，这里重复部分规则生成逻辑，实际项目中应封装函数
