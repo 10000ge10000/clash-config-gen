@@ -7,6 +7,7 @@ import os
 
 from auth import get_bool_env
 from config_builder import (
+    DUSTINWIN_PROVIDERS_MAP,
     LHIE1_PROVIDERS_MAP,
     build_config as build_subscription_config,
     build_yaml as build_subscription_yaml,
@@ -1720,8 +1721,31 @@ with tab3:
         # ==========================
         # 1. 准备配置上下文
         # ==========================
-        rule_type = "lhie1规则"
+        rule_options = ["dustinwin规则", "lhie1规则", "自定义规则"]
+        rule_labels = {
+            "dustinwin规则": "DustinWin 规则集（推荐，含 AI/Gemini 增强）",
+            "lhie1规则": "lhie1 规则集（兼容旧配置）",
+            "自定义规则": "基础自定义规则",
+        }
+        current_rule_type = st.session_state.get("selected_rule_type", "dustinwin规则")
+        if current_rule_type not in rule_options:
+            current_rule_type = "dustinwin规则"
+        if (
+            current_rule_type == "自定义规则"
+            and not saved_config.get("final_yaml")
+            and not st.session_state.get("rule_type_allow_custom")
+        ):
+            current_rule_type = "dustinwin规则"
+        rule_type = st.selectbox(
+            "基础规则源",
+            rule_options,
+            index=rule_options.index(current_rule_type),
+            format_func=lambda value: rule_labels.get(value, value),
+            help="只切换规则内容，不改变现有策略组数量。自定义单条规则和自定义规则集仍保持最高优先级。",
+        )
         st.session_state.selected_rule_type = rule_type
+        if rule_type == "自定义规则":
+            st.session_state.rule_type_allow_custom = True
         try:
             preview_config = build_subscription_config(
                 st.session_state.proxies_data,
@@ -1737,10 +1761,14 @@ with tab3:
             st.error(f"预览配置生成失败：{exc}")
 
         # ==========================
-        # 2. 规则集选择 (仅保留 lhie1)
+        # 2. 规则集选择说明
         # ==========================
-        # 默认选中 lhie1 且不展示下拉框 (或者展示但不可选)
-        st.info("💡 默认使用 lhie1 规则集进行基础分流。您可以在下方添加自定义规则或规则集。")
+        if rule_type == "dustinwin规则":
+            st.info("默认使用 DustinWin 的 mihomo-ruleset 进行基础分流，规则集由 OpenClash/mihomo 按周自动更新。")
+        elif rule_type == "lhie1规则":
+            st.info("当前使用 lhie1 规则集，适合兼容旧配置。您可以在下方添加自定义规则或规则集。")
+        else:
+            st.info("当前只使用基础自定义规则。您可以在下方添加单条规则或规则集。")
 
         # ==========================
         # 3. 可视化规则编辑
@@ -1754,40 +1782,65 @@ with tab3:
         proxy_names = [proxy.get("name") for proxy in st.session_state.proxies_data if proxy.get("name")]
         all_targets = sorted(set(all_groups + proxy_names + ["DIRECT", "REJECT", "REJECT-DROP", "Proxy"]))
 
-        with st.expander("lhie1 预设规则目标", expanded=False):
-            st.caption("这里可以修改 lhie1 内置规则集默认走哪个策略组或节点。例如把 Netflix 从 Netflix 策略组改成某个固定节点。")
-            if st.button("恢复 lhie1 默认策略", key="reset_lhie1_targets"):
-                st.session_state.global_config["lhie1_provider_targets"] = {}
-                for key in list(st.session_state.keys()):
-                    if key.startswith("lhie1_target_"):
-                        del st.session_state[key]
-                st.rerun()
+        if rule_type in {"dustinwin规则", "lhie1规则"}:
+            if rule_type == "dustinwin规则":
+                provider_targets_key = "dustinwin_provider_targets"
+                widget_prefix = "dustinwin_target_"
+                expander_title = "DustinWin 预设规则目标"
+                reset_label = "恢复 DustinWin 默认策略"
+                provider_items = [
+                    (name, str(config["target"]))
+                    for name, config in DUSTINWIN_PROVIDERS_MAP.items()
+                ]
+                caption = "这里可以修改 DustinWin 内置规则集默认走哪个策略组或节点。例如把 ai 从 AI Suite 改成某个固定节点。"
+            else:
+                provider_targets_key = "lhie1_provider_targets"
+                widget_prefix = "lhie1_target_"
+                expander_title = "lhie1 预设规则目标"
+                reset_label = "恢复 lhie1 默认策略"
+                provider_items = [
+                    (provider_name, default_target)
+                    for provider_name, (_, default_target) in LHIE1_PROVIDERS_MAP.items()
+                ]
+                caption = "这里可以修改 lhie1 内置规则集默认走哪个策略组或节点。例如把 Netflix 改成某个固定节点。"
 
-            current_overrides = dict(st.session_state.global_config.get("lhie1_provider_targets", {}))
-            next_overrides = {}
-            col_lhie1_a, col_lhie1_b = st.columns(2)
-            for idx, (provider_name, (_, default_target)) in enumerate(LHIE1_PROVIDERS_MAP.items()):
-                safe_provider_name = "".join(ch if ch.isalnum() else "_" for ch in provider_name)
-                options = list(all_targets)
-                current_target = current_overrides.get(provider_name, default_target)
-                if current_target not in options:
-                    options.insert(0, current_target)
-                target_index = options.index(current_target)
-                container = col_lhie1_a if idx % 2 == 0 else col_lhie1_b
-                with container:
-                    selected_target = st.selectbox(
-                        provider_name,
-                        options,
-                        index=target_index,
-                        key=f"lhie1_target_{safe_provider_name}",
-                        help=f"默认目标：{default_target}",
-                    )
-                if selected_target != default_target:
-                    next_overrides[provider_name] = selected_target
+            with st.expander(expander_title, expanded=False):
+                st.caption(caption)
+                if st.button(reset_label, key=f"reset_{provider_targets_key}"):
+                    st.session_state.global_config[provider_targets_key] = {}
+                    for key in list(st.session_state.keys()):
+                        if key.startswith(widget_prefix):
+                            del st.session_state[key]
+                    st.rerun()
 
-            st.session_state.global_config["lhie1_provider_targets"] = next_overrides
-            if next_overrides:
-                st.info(f"已覆盖 {len(next_overrides)} 条 lhie1 预设规则。保存配置后订阅立即生效。")
+                current_overrides = dict(st.session_state.global_config.get(provider_targets_key, {}))
+                next_overrides = {}
+                col_provider_a, col_provider_b = st.columns(2)
+                for idx, (provider_name, default_target) in enumerate(provider_items):
+                    safe_provider_name = "".join(ch if ch.isalnum() else "_" for ch in provider_name)
+                    options = list(all_targets)
+                    current_target = current_overrides.get(provider_name, default_target)
+                    if current_target not in options:
+                        options.insert(0, current_target)
+                    target_index = options.index(current_target)
+                    container = col_provider_a if idx % 2 == 0 else col_provider_b
+                    with container:
+                        selected_target = st.selectbox(
+                            provider_name,
+                            options,
+                            index=target_index,
+                            key=f"{widget_prefix}{safe_provider_name}",
+                            help=f"默认目标：{default_target}",
+                        )
+                    if selected_target != default_target:
+                        next_overrides[provider_name] = selected_target
+
+                st.session_state.global_config[provider_targets_key] = next_overrides
+                if next_overrides:
+                    st.info(f"已覆盖 {len(next_overrides)} 条预设规则。保存配置后订阅立即生效。")
+        else:
+            st.session_state.global_config["dustinwin_provider_targets"] = {}
+            st.session_state.global_config["lhie1_provider_targets"] = {}
 
         try:
             preview_config = build_subscription_config(
@@ -1800,7 +1853,7 @@ with tab3:
             proxy_groups = preview_config.get("proxy-groups", [])
         except Exception as exc:
             preview_config = {}
-            st.error(f"应用 lhie1 规则目标后重新生成预览失败：{exc}")
+            st.error(f"应用预设规则目标后重新生成预览失败：{exc}")
         
         st.markdown("#### 单条规则")
         col1, col2 = st.columns(2)
@@ -1868,7 +1921,7 @@ with tab3:
                 rp_type = st.selectbox("规则集类型", ["http", "file"], key="rp_type")
                 rp_behavior = st.selectbox("规则类型", ["domain", "ipcidr", "classical"], key="rp_behavior")
             with col_rp2:
-                rp_format = st.selectbox("规则格式", ["yaml", "text"], key="rp_format")
+                rp_format = st.selectbox("规则格式", ["yaml", "text", "mrs"], key="rp_format")
                 rp_interval = st.number_input("规则集更新时间 (秒)", value=86400, key="rp_interval")
             
             rp_path_or_url = ""
@@ -1887,7 +1940,7 @@ with tab3:
                              st.error(f"❌ 连接失败: {e}")
                 
             elif rp_type == "file":
-                uploaded_file = st.file_uploader("上传规则文件", type=["yaml", "yml", "txt", "list"], key="rp_file_upload")
+                uploaded_file = st.file_uploader("上传规则文件", type=["yaml", "yml", "txt", "list", "mrs"], key="rp_file_upload")
                 if uploaded_file:
                     # 保存文件逻辑
                     ruleset_dir = "ruleset"

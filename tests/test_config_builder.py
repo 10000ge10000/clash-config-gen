@@ -3,6 +3,8 @@ import unittest
 import yaml
 
 from config_builder import (
+    DUSTINWIN_PROVIDERS_MAP,
+    DUSTINWIN_RULESET_INTERVAL,
     LHIE1_PROVIDERS_MAP,
     SUBSCRIPTION_GENERATOR,
     SUBSCRIPTION_GITHUB_URL,
@@ -312,6 +314,44 @@ class ValidateConfigTest(unittest.TestCase):
 
         for provider_name, (_suffix, target) in LHIE1_PROVIDERS_MAP.items():
             self.assertIn(target, group_names | builtin_targets, provider_name)
+
+    def test_dustinwin_ai_ruleset_targets_ai_suite(self):
+        """DustinWin 的 ai.mrs 必须进入 AI Suite，避免 Gemini 等 AI 域名漏分流。"""
+        rules, providers = build_rules("dustinwin规则", [], {})
+
+        self.assertIn("RULE-SET,ai,AI Suite", rules)
+        self.assertEqual("domain", providers["ai"]["behavior"])
+        self.assertEqual("mrs", providers["ai"]["format"])
+        self.assertEqual(DUSTINWIN_RULESET_INTERVAL, providers["ai"]["interval"])
+        self.assertTrue(providers["ai"]["url"].endswith("/ruleset/dustinwin/ai.mrs"))
+        self.assertEqual("./ruleset/dustinwin/ai.mrs", providers["ai"]["path"])
+
+    def test_dustinwin_default_targets_exist_in_generated_proxy_groups(self):
+        """DustinWin 默认目标必须是内置动作或生成器实际存在的策略组。"""
+        proxies = [
+            {
+                "name": "node-1",
+                "type": "ss",
+                "server": "127.0.0.1",
+                "port": 8388,
+                "cipher": "aes-128-gcm",
+                "password": "password",
+            }
+        ]
+        group_names = {group["name"] for group in generate_proxy_groups(proxies)}
+        builtin_targets = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "Proxy"}
+
+        for provider_name, provider_config in DUSTINWIN_PROVIDERS_MAP.items():
+            self.assertIn(provider_config["target"], group_names | builtin_targets, provider_name)
+
+    def test_dustinwin_ipcidr_rules_use_no_resolve(self):
+        """ipcidr 规则集应显式 no-resolve，减少 DNS 侧副作用。"""
+        rules, providers = build_rules("dustinwin规则", [], {})
+
+        self.assertIn("RULE-SET,telegramip,Telegram,no-resolve", rules)
+        self.assertIn("RULE-SET,privateip,DIRECT,no-resolve", rules)
+        self.assertEqual("ipcidr", providers["telegramip"]["behavior"])
+        self.assertEqual("mrs", providers["telegramip"]["format"])
 
     def test_media_policy_groups_default_to_aggregate_selectors(self):
         """独立流媒体策略组的默认选中项要和 LHIE1 聚合规则目标一致。"""

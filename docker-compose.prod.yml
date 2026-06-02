@@ -12,6 +12,9 @@ services:
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
       - ADMIN_USERNAME=${ADMIN_USERNAME}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - RULESET_CACHE_ENABLED=${RULESET_CACHE_ENABLED:-true}
+      - RULESET_UPDATE_INTERVAL=${RULESET_UPDATE_INTERVAL:-604800}
+      - RULESET_CACHE_DIR=ruleset/dustinwin
     volumes:
       - ./data:/app/data
       - ./ruleset:/app/ruleset

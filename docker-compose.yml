@@ -12,6 +12,9 @@ services:
       - ALLOW_REGISTRATION=true
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=change-this-admin-password
+      - RULESET_CACHE_ENABLED=true
+      - RULESET_UPDATE_INTERVAL=604800
+      - RULESET_CACHE_DIR=ruleset/dustinwin
     volumes:
       - ./data:/app/data # 持久化用户、节点与订阅 Token
       - ./ruleset:/app/ruleset # 持久化自定义规则集（可选）

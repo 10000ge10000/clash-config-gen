@@ -13,6 +13,8 @@
 | 用户系统 | 支持普通用户注册登录，管理员账号由 Docker 环境变量初始化 |
 | onekey 适配 | 支持导入 `onekey.sh` 打印的 OpenClash YAML 节点片段 |
 | 手动节点 | 保留手动添加 SS、VLESS、VMess、TUIC、AnyTLS、Hysteria2 等节点 |
+| 增强分流 | 默认使用 DustinWin `mihomo-ruleset`，补全 AI、流媒体、国内外域名与 IP 规则 |
+| 规则自动更新 | OpenClash/mihomo 按订阅中的 `rule-providers.interval` 每周更新，服务端也会缓存一份规则集 |
 | Docker 部署 | 使用 GHCR 镜像和 Docker Compose 运行，数据通过 volume 持久化 |
 | 自动构建 | 推送到 `main` 后由 GitHub Actions 自动构建并发布镜像 |
 
@@ -42,6 +44,12 @@ services:
       - ADMIN_PASSWORD=please-change-this-password
       # SQLite 数据库存储位置，保持默认即可。
       - APP_DB_PATH=/app/data/app.db
+      # 是否启用 DustinWin 规则集服务端缓存。默认开启。
+      - RULESET_CACHE_ENABLED=true
+      # 规则集服务端缓存更新间隔，604800 秒 = 7 天。
+      - RULESET_UPDATE_INTERVAL=604800
+      # 规则集缓存目录。保持默认即可，会落到下方 ./ruleset 挂载中。
+      - RULESET_CACHE_DIR=ruleset/dustinwin
     volumes:
       # 保存用户、节点、订阅 Token 和最终配置。不要删除这个目录。
       - ./data:/app/data
@@ -76,7 +84,7 @@ https://clash.910501.xyz/sub/用户自己的随机Token
 4. 在“快速填入”中选择 `OpenClash/onekey YAML`。
 5. 粘贴 `onekey.sh` 输出的 OpenClash YAML 片段，或粘贴完整 `config.yaml`。
 6. 点击“导入节点”，节点会进入当前用户的配置列表。
-7. 按需调整手动节点、分流规则和全局配置。
+7. 按需调整手动节点、分流规则和全局配置。分流默认使用 DustinWin 规则集，也可以切回 lhie1 兼容规则。
 8. 在“生成与检查”中点击生成，配置会保存到数据库，订阅立即生效。
 9. 将侧边栏展示的订阅链接填入 OpenClash。
 
@@ -106,9 +114,9 @@ https://clash.910501.xyz/sub/用户自己的随机Token/diagnostics
 
 本服务包含两个独立的 Web 服务：
 - **Streamlit Web UI**：端口 8501，用于管理界面
-- **FastAPI 订阅 API**：端口 8000，用于 `/sub/` 和 `/health` 接口
+- **FastAPI 订阅 API**：端口 8000，用于 `/sub/`、`/ruleset/` 和 `/health` 接口
 
-Nginx 必须将 `/sub/` 和 `/health` 路径转发到 FastAPI 端口（8000），其他路径转发到 Streamlit 端口（8501）。
+Nginx 必须将 `/sub/`、`/ruleset/` 和 `/health` 路径转发到 FastAPI 端口（8000），其他路径转发到 Streamlit 端口（8501）。
 
 ### Nginx 配置示例
 
@@ -140,6 +148,13 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
     }
 
+    # DustinWin 规则集缓存接口 (端口 8000)
+    location /ruleset/ {
+        proxy_pass http://127.0.0.1:8000/ruleset/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
     # FastAPI 健康检查
     location /health {
         proxy_pass http://127.0.0.1:8000/health;
@@ -152,6 +167,8 @@ server {
 | 问题 | 原因 | 解决方案 |
 | --- | --- | --- |
 | 订阅链接返回 HTML 页面 | `/sub/` 被转发到 8501 | 确保 `/sub/` 转发到 8000 端口 |
+| 规则集链接返回 HTML 页面 | `/ruleset/` 被转发到 8501 | 确保 `/ruleset/` 转发到 8000 端口 |
+| 规则集链接返回 503 | 服务端缓存尚未下载完成 | 等待后台更新完成，或检查容器网络能否访问 GitHub Release |
 | OpenClash 无法拉取订阅 | 反代配置错误 | 检查 Nginx 日志，确认 `/sub/` 返回 `application/x-yaml` |
 | 普通脚本测试返回 403 / Cloudflare 1010 | CDN 浏览器完整性检查拦截了默认脚本 User-Agent | 用 OpenClash、mihomo、浏览器或显式设置 User-Agent 测试；真实 OpenClash 拉取应返回 `application/x-yaml` |
 | 客户端只看到内置 Global | 订阅内容不是有效 YAML，或 YAML 缺少 `proxy-groups` | 重新在“生成与检查”中保存；新版本会拒绝继续提供没有策略组的坏配置 |
@@ -171,6 +188,42 @@ MIHOMO_VALIDATE_ENABLED=false streamlit run src/web_app.py
 生产环境不建议关闭该选项，否则 OpenClash 只能在导入后才暴露配置错误。
 
 如果修改了 docker-compose.yml 中的端口映射（例如将 8000 映射到 8502），需要同步修改 Nginx 配置中的 `proxy_pass` 地址。
+
+## 分流规则与自动更新
+
+项目默认使用 [DustinWin/ruleset_geodata](https://github.com/DustinWin/ruleset_geodata) 的 `mihomo-ruleset` 规则集增强分流，不改变现有策略组数量，只把更完整的规则内容映射到现有策略组。例如：
+
+| DustinWin 规则集 | 默认目标策略 |
+| --- | --- |
+| `ai.mrs` | `AI Suite` |
+| `netflix.mrs`、`disney.mrs`、`youtube.mrs`、`media.mrs` | `Global TV` |
+| `bilibili.mrs`、`cn.mrs`、`cnip.mrs` | `Domestic` |
+| `telegramip.mrs` | `Telegram` |
+| `ads.mrs` | `AdBlock` |
+| `gfw.mrs`、`proxy.mrs`、`tld-proxy.mrs` | `Proxy` |
+
+自动更新分两层：
+
+- 客户端更新：订阅 YAML 会写入 `rule-providers.interval: 604800`，OpenClash/mihomo 每 7 天自动更新规则集。
+- 服务端缓存：容器启动后会在后台下载规则集到 `ruleset/dustinwin/`，并按 `RULESET_UPDATE_INTERVAL` 周期刷新。
+
+生成订阅时默认优先引用本服务缓存地址：
+
+```text
+https://你的域名/ruleset/dustinwin/ai.mrs
+```
+
+如果缓存文件尚未下载完成，该接口会返回 `503`，不会生成空文件。已有缓存不会因为后续下载失败被覆盖。
+
+相关环境变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `RULESET_CACHE_ENABLED` | `true` | 是否启用服务端规则集缓存 |
+| `RULESET_UPDATE_INTERVAL` | `604800` | 服务端缓存更新间隔，单位秒 |
+| `RULESET_CACHE_DIR` | `ruleset/dustinwin` | 容器内规则集缓存目录 |
+
+如果你不想让订阅引用本服务缓存，可以把 `RULESET_CACHE_ENABLED=false`，订阅会直接引用 DustinWin GitHub Release 地址。
 
 ## onekey 协议兼容
 

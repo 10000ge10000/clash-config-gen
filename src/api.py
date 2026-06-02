@@ -1,9 +1,11 @@
 import yaml
 from fastapi import FastAPI, HTTPException, Response
 
+from config_builder import DUSTINWIN_PROVIDERS_MAP
 from config_builder import build_subscription_headers, build_yaml, validate_config
 from diagnostics import build_subscription_diagnostics
 from normalizer import normalize_proxies_for_mihomo
+from ruleset_updater import get_ruleset_cache_path, start_ruleset_update_worker
 from storage import ensure_admin_from_env, get_config_by_token, health_snapshot, init_db
 
 
@@ -14,11 +16,34 @@ app = FastAPI(title="Clash-Config-Gen Subscription API")
 def startup() -> None:
     init_db()
     ensure_admin_from_env()
+    start_ruleset_update_worker()
 
 
 @app.get("/health")
 def health_check():
     return health_snapshot()
+
+
+@app.get("/ruleset/dustinwin/{name}")
+def get_dustinwin_ruleset(name: str):
+    expected_files = {str(config["file"]) for config in DUSTINWIN_PROVIDERS_MAP.values()}
+    if name not in expected_files:
+        raise HTTPException(status_code=404, detail="规则集不存在")
+
+    ruleset_path = get_ruleset_cache_path(name)
+    if not ruleset_path.is_file():
+        raise HTTPException(status_code=503, detail="规则集缓存尚未就绪，请稍后重试")
+
+    media_type = "application/octet-stream" if name.endswith(".mrs") else "text/plain; charset=utf-8"
+    return Response(
+        content=ruleset_path.read_bytes(),
+        media_type=media_type,
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Content-Disposition": f'inline; filename="{name}"',
+            "X-Clash-Ruleset-Source": "DustinWin/ruleset_geodata",
+        },
+    )
 
 
 def _build_subscription_response(token: str, include_body: bool = True) -> Response:

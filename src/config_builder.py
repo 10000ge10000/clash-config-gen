@@ -1,4 +1,5 @@
 import base64
+import os
 from typing import Any
 
 import yaml
@@ -23,6 +24,9 @@ SUBSCRIPTION_ANNOUNCE = "\n".join(
         f"Usage: {SUBSCRIPTION_USAGE}",
     ]
 )
+DUSTINWIN_RULESET_BASE_URL = "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset"
+DUSTINWIN_RULESET_INTERVAL = 604800
+DUSTINWIN_RULESET_PATH_PREFIX = "./ruleset/dustinwin"
 
 
 def _base64_utf8(value: str) -> str:
@@ -139,6 +143,38 @@ LHIE1_PROVIDERS_MAP = {
     "miHoYo": ("miHoYo", "miHoYo"),
 }
 
+DUSTINWIN_PROVIDERS_MAP = {
+    "private": {"file": "private.mrs", "behavior": "domain", "format": "mrs", "target": "DIRECT"},
+    "ads": {"file": "ads.mrs", "behavior": "domain", "format": "mrs", "target": "AdBlock"},
+    "applications": {"file": "applications.list", "behavior": "classical", "format": "text", "target": "DIRECT"},
+    "microsoft-cn": {"file": "microsoft-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Microsoft"},
+    "apple-cn": {"file": "apple-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Apple"},
+    "google-cn": {"file": "google-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Google FCM"},
+    "games-cn": {"file": "games-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Steam"},
+    "games": {"file": "games.mrs", "behavior": "domain", "format": "mrs", "target": "Steam"},
+    "netflix": {"file": "netflix.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "disney": {"file": "disney.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "max": {"file": "max.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "primevideo": {"file": "primevideo.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "appletv": {"file": "appletv.mrs", "behavior": "domain", "format": "mrs", "target": "Apple TV"},
+    "youtube": {"file": "youtube.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "tiktok": {"file": "tiktok.mrs", "behavior": "domain", "format": "mrs", "target": "TikTok"},
+    "bilibili": {"file": "bilibili.mrs", "behavior": "domain", "format": "mrs", "target": "Domestic"},
+    "spotify": {"file": "spotify.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "media": {"file": "media.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "ai": {"file": "ai.mrs", "behavior": "domain", "format": "mrs", "target": "AI Suite"},
+    "networktest": {"file": "networktest.mrs", "behavior": "domain", "format": "mrs", "target": "Speedtest"},
+    "tld-proxy": {"file": "tld-proxy.mrs", "behavior": "domain", "format": "mrs", "target": "Proxy"},
+    "gfw": {"file": "gfw.mrs", "behavior": "domain", "format": "mrs", "target": "Proxy"},
+    "proxy": {"file": "proxy.mrs", "behavior": "domain", "format": "mrs", "target": "Proxy"},
+    "cn": {"file": "cn.mrs", "behavior": "domain", "format": "mrs", "target": "Domestic"},
+    "privateip": {"file": "privateip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "DIRECT", "no_resolve": True},
+    "cnip": {"file": "cnip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Domestic", "no_resolve": True},
+    "telegramip": {"file": "telegramip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Telegram", "no_resolve": True},
+    "netflixip": {"file": "netflixip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Global TV", "no_resolve": True},
+    "mediaip": {"file": "mediaip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Global TV", "no_resolve": True},
+}
+
 
 def text_to_list(text: str) -> list[str]:
     return [line.strip() for line in (text or "").splitlines() if line.strip()]
@@ -158,6 +194,24 @@ def int_config(value: Any, default: int, minimum: int = 1) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed >= minimum else default
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def get_dustinwin_provider_url(file_name: str) -> str:
+    if _bool_env("RULESET_CACHE_ENABLED", True):
+        public_base_url = os.getenv("PUBLIC_BASE_URL", "https://clash.910501.xyz").rstrip("/")
+        return f"{public_base_url}/ruleset/dustinwin/{file_name}"
+    return f"{DUSTINWIN_RULESET_BASE_URL}/{file_name}"
+
+
+def get_ruleset_update_interval() -> int:
+    return int_config(os.getenv("RULESET_UPDATE_INTERVAL"), DUSTINWIN_RULESET_INTERVAL)
 
 
 def build_config(
@@ -351,6 +405,7 @@ def build_config(
             custom_rules,
             custom_rule_providers,
             global_config.get("lhie1_provider_targets", {}),
+            global_config.get("dustinwin_provider_targets", {}),
         )
     if rule_providers:
         final_config["rule-providers"] = rule_providers
@@ -518,10 +573,32 @@ def build_rules(
     custom_rules: list[str],
     custom_rule_providers: dict[str, Any],
     lhie1_provider_targets: dict[str, str] | None = None,
+    dustinwin_provider_targets: dict[str, str] | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     rule_providers: dict[str, Any] = {}
     lhie1_provider_targets = lhie1_provider_targets or {}
-    if selected_rule_type == "lhie1规则":
+    dustinwin_provider_targets = dustinwin_provider_targets or {}
+    if selected_rule_type == "dustinwin规则":
+        rule_list = [
+            "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
+            "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
+        ]
+        interval = get_ruleset_update_interval()
+        for name, provider_config in DUSTINWIN_PROVIDERS_MAP.items():
+            file_name = str(provider_config["file"])
+            target = dustinwin_provider_targets.get(name) or str(provider_config["target"])
+            rule_providers[name] = {
+                "type": "http",
+                "behavior": provider_config["behavior"],
+                "format": provider_config["format"],
+                "url": get_dustinwin_provider_url(file_name),
+                "path": f"{DUSTINWIN_RULESET_PATH_PREFIX}/{file_name}",
+                "interval": interval,
+            }
+            suffix = ",no-resolve" if provider_config.get("no_resolve") else ""
+            rule_list.append(f"RULE-SET,{name},{target}{suffix}")
+        rule_list.append("MATCH,Others")
+    elif selected_rule_type == "lhie1规则":
         base_url = "https://testingcf.jsdelivr.net/gh/dler-io/Rules@main/Clash/Provider"
         rule_list = [
             "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",

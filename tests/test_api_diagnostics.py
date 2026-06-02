@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 import base64
+from pathlib import Path
 
 from config_builder import SUBSCRIPTION_ANNOUNCE, build_config, build_subscription_headers, build_yaml
 from diagnostics import build_subscription_diagnostics
@@ -9,6 +10,46 @@ from storage import create_user, init_db, save_user_config
 
 
 class ApiDiagnosticsTest(unittest.TestCase):
+    def test_dustinwin_ruleset_endpoint_returns_cached_file(self):
+        try:
+            from fastapi import HTTPException  # noqa: F401
+        except ModuleNotFoundError:
+            self.skipTest("fastapi 未安装，跳过 API 路由测试")
+        import ruleset_updater
+        from api import get_dustinwin_ruleset
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            previous_cache_dir = ruleset_updater.RULESET_CACHE_DIR
+            ruleset_updater.RULESET_CACHE_DIR = Path(tmpdir)
+            try:
+                Path(tmpdir, "ai.mrs").write_bytes(b"mrs-data")
+                response = get_dustinwin_ruleset("ai.mrs")
+
+                self.assertEqual(b"mrs-data", response.body)
+                self.assertEqual("application/octet-stream", response.media_type)
+                self.assertEqual("DustinWin/ruleset_geodata", response.headers["x-clash-ruleset-source"])
+            finally:
+                ruleset_updater.RULESET_CACHE_DIR = previous_cache_dir
+
+    def test_dustinwin_ruleset_endpoint_rejects_missing_cache(self):
+        try:
+            from fastapi import HTTPException
+        except ModuleNotFoundError:
+            self.skipTest("fastapi 未安装，跳过 API 路由测试")
+        import ruleset_updater
+        from api import get_dustinwin_ruleset
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            previous_cache_dir = ruleset_updater.RULESET_CACHE_DIR
+            ruleset_updater.RULESET_CACHE_DIR = Path(tmpdir)
+            try:
+                with self.assertRaises(HTTPException) as context:
+                    get_dustinwin_ruleset("ai.mrs")
+
+                self.assertEqual(503, context.exception.status_code)
+            finally:
+                ruleset_updater.RULESET_CACHE_DIR = previous_cache_dir
+
     def test_subscription_response_exposes_clash_metadata_headers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             previous_db_path = os.environ.get("APP_DB_PATH")
