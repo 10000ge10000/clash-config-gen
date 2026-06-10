@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 from auth import generate_token, hash_password, is_valid_username, verify_password
-from config_builder import build_yaml
+from config_builder import DEFAULT_RULE_TYPE, build_yaml
 from normalizer import normalize_proxies_for_mihomo
 
 
@@ -63,7 +63,7 @@ def init_db() -> None:
                 global_config_json TEXT NOT NULL DEFAULT '{}',
                 custom_rules_json TEXT NOT NULL DEFAULT '[]',
                 custom_rule_providers_json TEXT NOT NULL DEFAULT '{}',
-                selected_rule_type TEXT NOT NULL DEFAULT '自定义规则',
+                selected_rule_type TEXT NOT NULL DEFAULT 'dustinwin规则',
                 final_yaml TEXT NOT NULL DEFAULT '',
                 validation_status TEXT NOT NULL DEFAULT 'unknown',
                 validation_message TEXT NOT NULL DEFAULT '',
@@ -75,6 +75,7 @@ def init_db() -> None:
             """
         )
         _ensure_subscription_config_columns(conn)
+        _migrate_default_rule_type(conn)
         _migrate_mihomo_proxy_fields(conn)
 
 
@@ -131,10 +132,10 @@ def create_user(username: str, password: str, is_admin: bool = False) -> sqlite3
         user_id = int(cursor.lastrowid)
         conn.execute(
             """
-            INSERT INTO subscription_configs (user_id, token, created_at, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO subscription_configs (user_id, token, selected_rule_type, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (user_id, generate_token(), now, now),
+            (user_id, generate_token(), DEFAULT_RULE_TYPE, now, now),
         )
     user = get_user_by_id(user_id)
     if user is None:
@@ -194,10 +195,10 @@ def ensure_user_config(user_id: int) -> sqlite3.Row:
             return row
         conn.execute(
             """
-            INSERT INTO subscription_configs (user_id, token, created_at, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO subscription_configs (user_id, token, selected_rule_type, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (user_id, generate_token(), now, now),
+            (user_id, generate_token(), DEFAULT_RULE_TYPE, now, now),
         )
     return ensure_user_config(user_id)
 
@@ -281,6 +282,21 @@ def _ensure_subscription_config_columns(conn: sqlite3.Connection) -> None:
     }.items():
         if column not in existing_columns:
             conn.execute(f"ALTER TABLE subscription_configs ADD COLUMN {column} {definition}")
+
+
+def _migrate_default_rule_type(conn: sqlite3.Connection) -> None:
+    """老库里未生成过配置的空白账号默认切到 DustinWin，避免新订阅漏掉 AI/Gemini。"""
+    conn.execute(
+        """
+        UPDATE subscription_configs
+        SET selected_rule_type = ?, updated_at = ?
+        WHERE selected_rule_type = '自定义规则'
+          AND final_yaml = ''
+          AND custom_rules_json = '[]'
+          AND custom_rule_providers_json = '{}'
+        """,
+        (DEFAULT_RULE_TYPE, utc_now()),
+    )
 
 
 def _migrate_mihomo_proxy_fields(conn: sqlite3.Connection) -> None:

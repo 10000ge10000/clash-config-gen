@@ -9,12 +9,12 @@ services:
     environment:
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
       - APP_DB_PATH=/app/data/app.db
-      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-false}
       - ADMIN_USERNAME=${ADMIN_USERNAME}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - RULESET_CACHE_ENABLED=${RULESET_CACHE_ENABLED:-true}
       - RULESET_UPDATE_INTERVAL=${RULESET_UPDATE_INTERVAL:-604800}
-      - RULESET_CACHE_DIR=ruleset/dustinwin
+      - RULESET_CACHE_DIR=/app/ruleset/dustinwin
     volumes:
       - ./data:/app/data
       - ./ruleset:/app/ruleset

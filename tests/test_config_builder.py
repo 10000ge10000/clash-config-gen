@@ -4,6 +4,7 @@ import yaml
 
 from config_builder import (
     DUSTINWIN_PROVIDERS_MAP,
+    DEFAULT_RULE_TYPE,
     DUSTINWIN_RULESET_INTERVAL,
     LHIE1_PROVIDERS_MAP,
     SUBSCRIPTION_GENERATOR,
@@ -122,7 +123,8 @@ class ValidateConfigTest(unittest.TestCase):
         )
 
         self.assertIn("Proxy Groups 为空", errors)
-        self.assertIn("规则 'MATCH,Proxy' 指向了不存在的策略组: 'Proxy'", warnings)
+        self.assertIn("规则 'MATCH,Proxy' 指向了不存在的策略组: 'Proxy'", errors)
+        self.assertEqual([], warnings)
 
     def test_no_resolve_rule_target_uses_penultimate_field(self):
         """带 no-resolve 的规则，策略组目标在倒数第二段，不能误读成 no-resolve。"""
@@ -145,8 +147,8 @@ class ValidateConfigTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual([], errors)
-        self.assertIn("规则 'GEOIP,CN,Domestic,no-resolve' 指向了不存在的策略组: 'Domestic'", warnings)
+        self.assertIn("规则 'GEOIP,CN,Domestic,no-resolve' 指向了不存在的策略组: 'Domestic'", errors)
+        self.assertEqual([], warnings)
 
     def test_no_resolve_rule_accepts_existing_target(self):
         """策略组存在时，GEOIP/CIDR 这类 no-resolve 规则不应产生误报。"""
@@ -278,18 +280,18 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertNotIn("tun", config)
         self.assertNotIn("sniffer", config)
 
-    def test_lhie1_media_defaults_use_aggregate_policy_groups(self):
-        """国外流媒体默认走 Global TV，大陆/亚洲流媒体走对应聚合组。"""
+    def test_lhie1_media_defaults_use_specific_policy_groups_when_available(self):
+        """已有独立策略组的媒体规则必须先进独立组，手动选择节点才会生效。"""
         rules, _providers = build_rules("lhie1规则", [], {})
         expected_rules = {
-            "RULE-SET,Netflix,Global TV",
-            "RULE-SET,Disney Plus,Global TV",
-            "RULE-SET,Max,Global TV",
-            "RULE-SET,YouTube,Global TV",
-            "RULE-SET,Bilibili,CN Mainland TV",
+            "RULE-SET,Netflix,Netflix",
+            "RULE-SET,Disney Plus,Disney Plus",
+            "RULE-SET,Max,HBO Max",
+            "RULE-SET,YouTube,Youtube",
+            "RULE-SET,Bilibili,Bilibili",
             "RULE-SET,IQIYI,CN Mainland TV",
             "RULE-SET,Abema TV,Asian TV",
-            "RULE-SET,Bahamut,Asian TV",
+            "RULE-SET,Bahamut,Bahamut",
             "RULE-SET,Apple TV,Apple TV",
             "RULE-SET,Telegram,Telegram",
         }
@@ -325,6 +327,44 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertEqual(DUSTINWIN_RULESET_INTERVAL, providers["ai"]["interval"])
         self.assertTrue(providers["ai"]["url"].endswith("/ruleset/dustinwin/ai.mrs"))
         self.assertEqual("./ruleset/dustinwin/ai.mrs", providers["ai"]["path"])
+
+    def test_dustinwin_media_rules_target_specific_policy_groups_when_available(self):
+        """YouTube/Netflix 等规则应进入同名策略组，未手动选择时由该组默认回落到 Global TV。"""
+        rules, _providers = build_rules("dustinwin规则", [], {})
+        expected_rules = {
+            "RULE-SET,youtube,Youtube",
+            "RULE-SET,netflix,Netflix",
+            "RULE-SET,netflixip,Netflix,no-resolve",
+            "RULE-SET,disney,Disney Plus",
+            "RULE-SET,max,HBO Max",
+            "RULE-SET,spotify,Spotify",
+            "RULE-SET,bilibili,Bilibili",
+            "RULE-SET,media,Global TV",
+            "RULE-SET,mediaip,Global TV,no-resolve",
+        }
+
+        for expected_rule in expected_rules:
+            self.assertIn(expected_rule, rules)
+
+    def test_build_config_defaults_to_dustinwin_ruleset(self):
+        """默认生成路径必须使用 DustinWin，避免新用户跳过分流页时漏掉 AI/Gemini。"""
+        config = build_config(
+            [
+                {
+                    "name": "node-1",
+                    "type": "ss",
+                    "server": "127.0.0.1",
+                    "port": 8388,
+                    "cipher": "aes-128-gcm",
+                    "password": "password",
+                }
+            ],
+            {},
+        )
+
+        self.assertEqual("dustinwin规则", DEFAULT_RULE_TYPE)
+        self.assertIn("RULE-SET,ai,AI Suite", config["rules"])
+        self.assertIn("ai", config["rule-providers"])
 
     def test_dustinwin_default_targets_exist_in_generated_proxy_groups(self):
         """DustinWin 默认目标必须是内置动作或生成器实际存在的策略组。"""

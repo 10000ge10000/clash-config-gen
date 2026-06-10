@@ -11,6 +11,38 @@ from config_builder import build_yaml
 
 
 class StorageMigrationTest(unittest.TestCase):
+    def test_init_db_migrates_blank_legacy_rule_type_to_dustinwin(self):
+        """未生成过配置的旧空白账号应迁移到 DustinWin 默认规则源。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "app.db")
+            previous_db_path = os.environ.get("APP_DB_PATH")
+            os.environ["APP_DB_PATH"] = db_path
+            try:
+                storage.init_db()
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO users (id, username, password_hash, is_admin, is_enabled, created_at, updated_at)
+                        VALUES (1, 'legacy', 'hash', 0, 1, 'now', 'now')
+                        """
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO subscription_configs
+                            (user_id, token, selected_rule_type, final_yaml, custom_rules_json, custom_rule_providers_json, created_at, updated_at)
+                        VALUES (1, 'token', '自定义规则', '', '[]', '{}', 'now', 'now')
+                        """
+                    )
+
+                storage.init_db()
+
+                self.assertEqual("dustinwin规则", storage.get_user_config(1)["selected_rule_type"])
+            finally:
+                if previous_db_path is None:
+                    os.environ.pop("APP_DB_PATH", None)
+                else:
+                    os.environ["APP_DB_PATH"] = previous_db_path
+
     def test_init_db_persistently_migrates_legacy_fingerprint_fields(self):
         """服务启动时必须把历史数据库里的错误 fingerprint 永久写回干净值。"""
         with tempfile.TemporaryDirectory() as tmpdir:

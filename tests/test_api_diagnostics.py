@@ -10,6 +10,11 @@ from storage import create_user, init_db, save_user_config
 
 
 class ApiDiagnosticsTest(unittest.TestCase):
+    def test_ruleset_cache_default_path_is_under_app_ruleset(self):
+        import ruleset_updater
+
+        self.assertEqual("/app/ruleset/dustinwin", str(ruleset_updater.RULESET_CACHE_DIR))
+
     def test_dustinwin_ruleset_endpoint_returns_cached_file(self):
         try:
             from fastapi import HTTPException  # noqa: F401

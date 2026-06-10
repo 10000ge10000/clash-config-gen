@@ -14,7 +14,7 @@ from config_builder import (
 )
 
 LOGGER = logging.getLogger(__name__)
-RULESET_CACHE_DIR = Path(os.getenv("RULESET_CACHE_DIR", "ruleset/dustinwin"))
+RULESET_CACHE_DIR = Path(os.getenv("RULESET_CACHE_DIR", "/app/ruleset/dustinwin"))
 _STARTED = False
 
 

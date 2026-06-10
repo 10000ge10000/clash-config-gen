@@ -36,8 +36,8 @@ services:
     environment:
       # 改成你的公网访问地址。订阅链接会基于这个地址生成。
       - PUBLIC_BASE_URL=https://clash.910501.xyz
-      # 是否允许普通用户自行注册。只给自己用可以改成 false。
-      - ALLOW_REGISTRATION=true
+      # 是否允许普通用户自行注册。公网部署建议保持 false，需要多人自助注册时再改 true。
+      - ALLOW_REGISTRATION=false
       # 初始化管理员账号。首次启动时自动创建。
       - ADMIN_USERNAME=admin
       # 必须改成强密码，不要使用示例值。
@@ -49,7 +49,7 @@ services:
       # 规则集服务端缓存更新间隔，604800 秒 = 7 天。
       - RULESET_UPDATE_INTERVAL=604800
       # 规则集缓存目录。保持默认即可，会落到下方 ./ruleset 挂载中。
-      - RULESET_CACHE_DIR=ruleset/dustinwin
+      - RULESET_CACHE_DIR=/app/ruleset/dustinwin
     volumes:
       # 保存用户、节点、订阅 Token 和最终配置。不要删除这个目录。
       - ./data:/app/data
@@ -196,8 +196,14 @@ MIHOMO_VALIDATE_ENABLED=false streamlit run src/web_app.py
 | DustinWin 规则集 | 默认目标策略 |
 | --- | --- |
 | `ai.mrs` | `AI Suite` |
-| `netflix.mrs`、`disney.mrs`、`youtube.mrs`、`media.mrs` | `Global TV` |
-| `bilibili.mrs`、`cn.mrs`、`cnip.mrs` | `Domestic` |
+| `youtube.mrs` | `Youtube` |
+| `netflix.mrs`、`netflixip.mrs` | `Netflix` |
+| `disney.mrs` | `Disney Plus` |
+| `max.mrs` | `HBO Max` |
+| `spotify.mrs` | `Spotify` |
+| `bilibili.mrs` | `Bilibili` |
+| `media.mrs`、`mediaip.mrs` | `Global TV` |
+| `cn.mrs`、`cnip.mrs` | `Domestic` |
 | `telegramip.mrs` | `Telegram` |
 | `ads.mrs` | `AdBlock` |
 | `gfw.mrs`、`proxy.mrs`、`tld-proxy.mrs` | `Proxy` |
@@ -221,7 +227,7 @@ https://你的域名/ruleset/dustinwin/ai.mrs
 | --- | --- | --- |
 | `RULESET_CACHE_ENABLED` | `true` | 是否启用服务端规则集缓存 |
 | `RULESET_UPDATE_INTERVAL` | `604800` | 服务端缓存更新间隔，单位秒 |
-| `RULESET_CACHE_DIR` | `ruleset/dustinwin` | 容器内规则集缓存目录 |
+| `RULESET_CACHE_DIR` | `/app/ruleset/dustinwin` | 容器内规则集缓存目录 |
 
 如果你不想让订阅引用本服务缓存，可以把 `RULESET_CACHE_ENABLED=false`，订阅会直接引用 DustinWin GitHub Release 地址。
 

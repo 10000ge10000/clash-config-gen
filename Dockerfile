@@ -47,8 +47,8 @@ EXPOSE 8501 8000
 # 赋予启动脚本执行权限
 RUN chmod +x start.sh
 
-# 健康检查 (检查 Streamlit)
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
+# 健康检查同时覆盖 Web UI 和订阅 API，任一服务异常都让容器进入 unhealthy。
+HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health && curl --fail http://localhost:8000/health
 
 # 启动命令
 CMD ["./start.sh"]

@@ -3,10 +3,15 @@ import yaml
 import requests
 import json
 import uuid
-import os
+import ipaddress
+import re
+import socket
+from pathlib import Path
+from urllib.parse import urlparse
 
 from auth import get_bool_env
 from config_builder import (
+    DEFAULT_RULE_TYPE,
     DUSTINWIN_PROVIDERS_MAP,
     LHIE1_PROVIDERS_MAP,
     build_config as build_subscription_config,
@@ -28,6 +33,73 @@ from storage import (
     save_user_config,
     set_user_enabled,
 )
+
+MAX_REMOTE_SUBSCRIPTION_BYTES = 5 * 1024 * 1024
+SAFE_RULESET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def validate_external_url(url: str) -> str:
+    """限制服务端主动访问目标，避免公开注册场景下被用来探测内网。"""
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("只支持 http/https URL")
+
+    host = parsed.hostname
+    try:
+        addresses = {info[4][0] for info in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)}
+    except OSError as exc:
+        raise ValueError(f"无法解析 URL 主机: {host}") from exc
+
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError("URL 解析到内网、本机或保留地址，已拒绝服务端访问")
+    return parsed.geturl()
+
+
+def fetch_text_from_external_url(url: str, timeout: int = 15) -> tuple[str, str]:
+    safe_url = validate_external_url(url)
+    response = requests.get(safe_url, timeout=timeout, stream=True, allow_redirects=False)
+    if 300 <= response.status_code < 400:
+        response.close()
+        raise ValueError("远程 URL 返回重定向，出于安全原因已拒绝")
+    response.raise_for_status()
+    content_type = response.headers.get("content-type", "")
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=65536):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > MAX_REMOTE_SUBSCRIPTION_BYTES:
+            raise ValueError("远程订阅内容超过 5MB，已停止下载")
+        chunks.append(chunk)
+    response.close()
+    return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace"), content_type
+
+
+def validate_ruleset_alias(name: str) -> str:
+    alias = (name or "").strip()
+    if not SAFE_RULESET_NAME_PATTERN.fullmatch(alias):
+        raise ValueError("规则集别名只能使用 1-64 位字母、数字、点、下划线或短横线")
+    return alias
+
+
+def safe_ruleset_file_path(alias: str, rule_format: str, ruleset_dir: str = "ruleset") -> Path:
+    safe_alias = validate_ruleset_alias(alias)
+    safe_format = validate_ruleset_alias(rule_format)
+    base_dir = Path(ruleset_dir).resolve()
+    target_path = (base_dir / f"{safe_alias}.{safe_format}").resolve()
+    if base_dir != target_path.parent:
+        raise ValueError("规则集文件路径越界")
+    return target_path
 
 # ==========================================
 # 1. 页面基础设置 (必须位于所有 Streamlit 命令之前)
@@ -279,7 +351,7 @@ def render_auth_gate():
                     st.error("用户名或密码错误，或账号已被禁用。")
 
         with register_tab:
-            if not get_bool_env("ALLOW_REGISTRATION", True):
+            if not get_bool_env("ALLOW_REGISTRATION", False):
                 st.warning("当前部署已关闭公开注册，请联系管理员创建账号。")
                 return
             with st.form("register_form"):
@@ -307,69 +379,6 @@ def render_auth_gate():
 if not st.session_state.auth_user:
     render_auth_gate()
     st.stop()
-
-
-# ==========================================
-# 0. 生产环境级配置常量 (提取自你的 Config)
-# ==========================================
-# 1. 强力直连兜底规则
-DEFAULT_DIRECT_RULES = """## 基础直连规则
-DOMAIN-SUFFIX,weather.com,DIRECT
-DOMAIN-KEYWORD,testipv6,DIRECT
-DOMAIN-KEYWORD,kuxueyun,DIRECT
-GEOSITE,category-public-tracker,DIRECT
-DOMAIN-SUFFIX,microsoft.com,DIRECT
-DOMAIN-SUFFIX,apple.com,DIRECT
-DOMAIN,gateway.icloud.com,DIRECT
-DOMAIN,metrics.icloud.com,DIRECT
-DOMAIN-SUFFIX,dbankcdn.com,DIRECT
-DOMAIN-SUFFIX,dbankcloud.cn,DIRECT
-DOMAIN-SUFFIX,vsallcity.awsdns-cn-north-1.com.cn,DIRECT
-
-## 国内流媒体与应用直连
-DOMAIN-SUFFIX,bilibili.com,DIRECT
-DOMAIN-SUFFIX,bilivideo.com,DIRECT
-DOMAIN-SUFFIX,douyin.com,DIRECT
-DOMAIN-SUFFIX,douyincdn.com,DIRECT
-DOMAIN-SUFFIX,huya.com,DIRECT
-DOMAIN-SUFFIX,iqiyi.com,DIRECT
-DOMAIN-SUFFIX,qq.com,DIRECT
-DOMAIN-SUFFIX,tencent.com,DIRECT
-DOMAIN-SUFFIX,alicdn.com,DIRECT
-DOMAIN-SUFFIX,taobao.com,DIRECT
-DOMAIN-SUFFIX,jd.com,DIRECT
-DOMAIN-SUFFIX,163.com,DIRECT
-DOMAIN-SUFFIX,126.net,DIRECT
-DOMAIN-SUFFIX,mgtv.com,DIRECT
-DOMAIN-SUFFIX,zhihu.com,DIRECT
-DOMAIN-SUFFIX,xhscdn.com,DIRECT
-
-## 下载工具进程直连
-PROCESS-NAME,aria2c,DIRECT
-PROCESS-NAME,BitComet,DIRECT
-PROCESS-NAME,fdm,DIRECT
-PROCESS-NAME,NetTransport,DIRECT
-PROCESS-NAME,qbittorrent,DIRECT
-PROCESS-NAME,Thunder,DIRECT
-PROCESS-NAME,transmission-daemon,DIRECT
-PROCESS-NAME,transmission-qt,DIRECT
-PROCESS-NAME,uTorrent,DIRECT
-PROCESS-NAME,WebTorrent,DIRECT
-PROCESS-NAME,Folx,DIRECT
-PROCESS-NAME,v2ray,DIRECT
-PROCESS-NAME,ss-local,DIRECT
-PROCESS-NAME,ssr-local,DIRECT
-PROCESS-NAME,ss-redir,DIRECT
-PROCESS-NAME,trojan-go,DIRECT
-PROCESS-NAME,xray,DIRECT
-PROCESS-NAME,hysteria,DIRECT
-PROCESS-NAME,singbox,DIRECT
-PROCESS-NAME,UUBooster,DIRECT
-
-## 局域网与GeoIP
-GEOIP,CN,DIRECT,no-resolve
-MATCH,Proxy
-"""
 
 
 def reset_global_widget_keys() -> None:
@@ -554,7 +563,6 @@ def build_default_global_config() -> dict:
         # 规则
         "generation_profile": "openclash-router",
         "is_desktop": False,
-        "custom_rules": DEFAULT_DIRECT_RULES,
         "lhie1_provider_targets": {},
         "dustinwin_provider_targets": {},
     }
@@ -602,6 +610,10 @@ def autosave_current_subscription(selected_rule_type: str, reason: str) -> tuple
         return False, "自动保存失败：" + "；".join(check_errors)
 
     final_config_str = build_subscription_yaml(final_config)
+    mihomo_result = validate_with_mihomo(final_config_str)
+    if not mihomo_result.ok:
+        return False, f"自动保存失败：mihomo 校验未通过 ({mihomo_result.status})"
+
     validation_message = reason
     if check_warnings:
         validation_message = f"{reason}；警告：{'；'.join(check_warnings[:3])}"
@@ -613,18 +625,25 @@ def autosave_current_subscription(selected_rule_type: str, reason: str) -> tuple
         st.session_state.custom_rule_providers,
         selected_rule_type,
         final_config_str,
-        validation_status="auto-saved",
-        validation_message=validation_message,
+        validation_status=mihomo_result.status,
+        validation_message=f"{validation_message}\n{mihomo_result.message}"[:2000],
     )
     return True, "分流设置已自动保存，订阅链接已立即生效。"
 
 
-def rule_settings_signature(selected_rule_type: str, global_config: dict) -> str:
+def rule_settings_signature(
+    selected_rule_type: str,
+    global_config: dict,
+    custom_rules: list[str] | None = None,
+    custom_rule_providers: dict | None = None,
+) -> str:
     return yaml.dump(
         {
             "selected_rule_type": selected_rule_type,
             "dustinwin_provider_targets": global_config.get("dustinwin_provider_targets", {}),
             "lhie1_provider_targets": global_config.get("lhie1_provider_targets", {}),
+            "custom_rules": custom_rules or [],
+            "custom_rule_providers": custom_rule_providers or {},
         },
         allow_unicode=True,
         sort_keys=True,
@@ -696,11 +715,13 @@ if st.session_state.get("session_loaded_user_id") != current_user["id"]:
     if saved_config.get("selected_rule_type"):
         st.session_state.selected_rule_type = saved_config["selected_rule_type"]
     elif "selected_rule_type" not in st.session_state:
-        st.session_state.selected_rule_type = "dustinwin规则"
+        st.session_state.selected_rule_type = DEFAULT_RULE_TYPE
     st.session_state["target_mode"] = target_mode_from_global_config(st.session_state.global_config)
     st.session_state.last_published_rule_signature = rule_settings_signature(
         st.session_state.selected_rule_type,
         st.session_state.global_config,
+        st.session_state.custom_rules,
+        st.session_state.custom_rule_providers,
     )
     reset_global_widget_keys()
     st.session_state.session_loaded_user_id = current_user["id"]
@@ -1256,11 +1277,10 @@ with tab1:
         )
         if subscription_url:
             try:
-                response = requests.get(subscription_url, timeout=15)
-                response.raise_for_status()
+                response_text, content_type = fetch_text_from_external_url(subscription_url, timeout=15)
                 raw_yaml_input = normalize_subscription_content(
-                    response.text,
-                    response.headers.get("content-type", ""),
+                    response_text,
+                    content_type,
                 )
                 st.success("订阅内容获取成功，已进入统一解析管线。")
             except Exception as e:
@@ -1896,15 +1916,15 @@ with tab3:
             "lhie1规则": "lhie1 规则集（兼容旧配置）",
             "自定义规则": "基础自定义规则",
         }
-        current_rule_type = st.session_state.get("selected_rule_type", "dustinwin规则")
+        current_rule_type = st.session_state.get("selected_rule_type", DEFAULT_RULE_TYPE)
         if current_rule_type not in rule_options:
-            current_rule_type = "dustinwin规则"
+            current_rule_type = DEFAULT_RULE_TYPE
         if (
             current_rule_type == "自定义规则"
             and not saved_config.get("final_yaml")
             and not st.session_state.get("rule_type_allow_custom")
         ):
-            current_rule_type = "dustinwin规则"
+            current_rule_type = DEFAULT_RULE_TYPE
         rule_type = st.selectbox(
             "基础规则源",
             rule_options,
@@ -2011,7 +2031,12 @@ with tab3:
             st.session_state.global_config["dustinwin_provider_targets"] = {}
             st.session_state.global_config["lhie1_provider_targets"] = {}
 
-        current_rule_signature = rule_settings_signature(rule_type, st.session_state.global_config)
+        current_rule_signature = rule_settings_signature(
+            rule_type,
+            st.session_state.global_config,
+            st.session_state.custom_rules,
+            st.session_state.custom_rule_providers,
+        )
         if current_rule_signature != st.session_state.get("last_published_rule_signature"):
             saved_ok, save_message = autosave_current_subscription(
                 rule_type,
@@ -2070,6 +2095,7 @@ with tab3:
                 if new_rule not in st.session_state.custom_rules:
                     st.session_state.custom_rules.append(new_rule)
                     st.success(f"规则已添加: {new_rule}")
+                    st.rerun()
                 else:
                     st.warning("该规则已存在")
         
@@ -2112,7 +2138,11 @@ with tab3:
                 if rp_url:
                     if st.button("测试链接可用性", key="test_rp_url"):
                          try:
-                             resp = requests.head(rp_url, timeout=5)
+                             safe_url = validate_external_url(rp_url)
+                             resp = requests.head(safe_url, timeout=5, allow_redirects=False)
+                             if 300 <= resp.status_code < 400:
+                                 st.warning("⚠️ 链接返回重定向，出于安全原因已拒绝自动跟随")
+                                 st.stop()
                              if resp.status_code == 200:
                                  st.success("✅ 链接可用")
                              else:
@@ -2123,16 +2153,18 @@ with tab3:
             elif rp_type == "file":
                 uploaded_file = st.file_uploader("上传规则文件", type=["yaml", "yml", "txt", "list", "mrs"], key="rp_file_upload")
                 if uploaded_file:
-                    # 保存文件逻辑
-                    ruleset_dir = "ruleset"
-                    if not os.path.exists(ruleset_dir):
-                        os.makedirs(ruleset_dir)
-                    # 使用别名或原文件名
-                    safe_filename = f"{rp_name}.{rp_format}" if rp_name else uploaded_file.name
-                    file_path = os.path.join(ruleset_dir, safe_filename)
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    st.success(f"已保存到: {file_path}")
+                    if not rp_name:
+                        st.warning("请先填写规则集别名，再上传文件。")
+                    else:
+                        try:
+                            file_path = safe_ruleset_file_path(rp_name, rp_format)
+                            file_path.parent.mkdir(parents=True, exist_ok=True)
+                            file_path.write_bytes(uploaded_file.getbuffer())
+                            safe_filename = file_path.name
+                            st.success(f"已保存到: {file_path}")
+                        except Exception as exc:
+                            safe_filename = ""
+                            st.error(f"规则文件保存失败: {exc}")
             
             rp_order = st.selectbox("规则集匹配顺序", ["优先 (覆盖)", "默认 (追加)"], key="rp_order")
             
@@ -2142,6 +2174,8 @@ with tab3:
             if st.button("保存规则集配置", key="save_rp"):
                 if not rp_name:
                     st.error("请输入规则集别名")
+                elif not SAFE_RULESET_NAME_PATTERN.fullmatch(rp_name.strip()):
+                    st.error("规则集别名只能使用字母、数字、点、下划线或短横线")
                 elif rp_name in st.session_state.custom_rule_providers:
                     st.error("该别名已存在")
                 elif rp_type == "http" and not rp_url:
@@ -2149,6 +2183,7 @@ with tab3:
                 elif rp_type == "file" and not uploaded_file:
                      st.error("请上传规则文件")
                 else:
+                    safe_rp_name = validate_ruleset_alias(rp_name)
                     provider_config = {
                         "type": rp_type,
                         "behavior": rp_behavior,
@@ -2159,13 +2194,18 @@ with tab3:
                     }
                     
                     if rp_type == "http":
-                        provider_config["url"] = rp_url
-                        provider_config["path"] = f"./ruleset/{rp_name}.{rp_format}"
+                        provider_config["url"] = validate_external_url(rp_url)
+                        provider_config["path"] = f"./ruleset/{safe_rp_name}.{rp_format}"
                     elif rp_type == "file":
-                         provider_config["path"] = f"./ruleset/{safe_filename}" # 使用刚才保存的路径
+                         file_path = safe_ruleset_file_path(safe_rp_name, rp_format)
+                         if not file_path.is_file():
+                             file_path.parent.mkdir(parents=True, exist_ok=True)
+                             file_path.write_bytes(uploaded_file.getbuffer())
+                         provider_config["path"] = f"./ruleset/{file_path.name}"
 
-                    st.session_state.custom_rule_providers[rp_name] = provider_config
-                    st.success(f"规则集 {rp_name} 已添加")
+                    st.session_state.custom_rule_providers[safe_rp_name] = provider_config
+                    st.success(f"规则集 {safe_rp_name} 已添加")
+                    st.rerun()
         
         st.subheader("已添加规则")
 
@@ -2197,13 +2237,14 @@ with tab4:
             else:
                 try:
                     content = uploaded_yaml.read().decode("utf-8")
-                    # 检查标记 (简单的字符串检查)
-                    if "# Generator: Clash-Config-Gen" in content or True: # 暂时放开 True 以便测试，实际应严格检查
+                    if "# Generator: Clash-Config-Gen" in content:
                         data = yaml.safe_load(content)
-                        if "proxies" in data:
+                        if isinstance(data, dict) and "proxies" in data:
                             st.session_state.proxies_data = data["proxies"]
                             st.success(f"已恢复 {len(data['proxies'])} 个节点！")
                             st.rerun()
+                        else:
+                            st.error("配置文件中没有找到 proxies 列表。")
                     else:
                         st.error("此文件不是由本工具生成的，或版本太旧，无法还原编辑。")
                 except Exception as e:
@@ -2213,7 +2254,7 @@ with tab4:
         if not st.session_state.proxies_data:
             st.error("❌ 错误: 未添加任何节点！无法生成配置。")
         else:
-            selected_rule = st.session_state.get("selected_rule_type", "dustinwin规则")
+            selected_rule = st.session_state.get("selected_rule_type", DEFAULT_RULE_TYPE)
             final_config = build_subscription_config(
                 st.session_state.proxies_data,
                 st.session_state.global_config,
@@ -2267,369 +2308,3 @@ with tab4:
                     use_container_width=True,
                 )
             st.stop()
-
-            # 1. 重新构建配置 (复用逻辑)
-            try:
-                final_proxy_groups = generate_proxy_groups(st.session_state.proxies_data)
-            except Exception as e:
-                final_proxy_groups = []
-                st.error(f"策略组生成失败: {e}")
-
-            # 构建基础配置
-            final_config = {
-                "global": { # 兼容不同Clash版本的字段结构，这里我们混合输出，Clash Meta会自动识别一级key
-                    "port": st.session_state.global_config["port"],
-                    "socks-port": st.session_state.global_config["socks_port"],
-                    "mixed-port": st.session_state.global_config["mixed_port"],
-                    "allow-lan": st.session_state.global_config["allow_lan"],
-                    "bind-address": st.session_state.global_config["bind_address"],
-                    "mode": st.session_state.global_config["mode"],
-                    "log-level": st.session_state.global_config["log_level"],
-                    "ipv6": st.session_state.global_config["ipv6_support"],
-                    "external-controller": st.session_state.global_config["external_controller"],
-                    "find-process-mode": st.session_state.global_config["find_process_mode"]
-                },
-                # 直接展开到根节点
-                "port": st.session_state.global_config["port"],
-                "socks-port": st.session_state.global_config["socks_port"],
-                "mixed-port": st.session_state.global_config["mixed_port"],
-                "allow-lan": st.session_state.global_config["allow_lan"],
-                "bind-address": st.session_state.global_config["bind_address"],
-                "mode": st.session_state.global_config["mode"],
-                "log-level": st.session_state.global_config["log_level"],
-                "ipv6": st.session_state.global_config["ipv6_support"],
-                "external-controller": st.session_state.global_config["external_controller"],
-                "find-process-mode": st.session_state.global_config["find_process_mode"],
-                
-                "proxies": st.session_state.proxies_data,
-                "proxy-groups": final_proxy_groups
-            }
-            
-            # TUN
-            if st.session_state.global_config["enable_tun"]:
-                final_config["tun"] = {
-                    "enable": True,
-                    "stack": st.session_state.global_config["tun_stack"],
-                    "device": st.session_state.global_config["tun_device"],
-                    "auto-route": st.session_state.global_config["tun_auto_route"],
-                    "auto-detect-interface": st.session_state.global_config["tun_auto_detect_interface"],
-                    "dns-hijack": ["any:53"] if st.session_state.global_config["tun_dns_hijack"] else []
-                }
-            
-            # DNS
-            if st.session_state.global_config["enable_dns"]:
-                 final_config["dns"] = {
-                    "enable": True,
-                    "listen": st.session_state.global_config["dns_listen"],
-                    "ipv6": st.session_state.global_config["dns_ipv6"],
-                    "enhanced-mode": st.session_state.global_config["enhanced_mode"],
-                    "fake-ip-range": st.session_state.global_config["fake_ip_range"],
-                    "fake-ip-filter": ["*.lan", "*.local", "time.windows.com"] + FAKE_IP_FILTER_LIST,
-                    "default-nameserver": text_to_list(st.session_state.global_config["default_nameserver"]),
-                    "nameserver": text_to_list(st.session_state.global_config["nameserver"]),
-                    "fallback": text_to_list(st.session_state.global_config["fallback"]),
-                    "fallback-filter": {"geoip": True, "geoip-code": "CN", "ipcidr": ["240.0.0.0/4"]}
-                }
-                 # Nameserver Policy
-                 if "nameserver_policy" in st.session_state.global_config and st.session_state.global_config["nameserver_policy"]:
-                    try:
-                        policy_dict = {}
-                        lines = st.session_state.global_config["nameserver_policy"].split('\n')
-                        for line in lines:
-                            if ':' in line:
-                                k, v = line.split(':', 1)
-                                policy_dict[k.strip()] = v.strip()
-                        if policy_dict:
-                            final_config["dns"]["nameserver-policy"] = policy_dict
-                    except:
-                        pass
-            
-            # Secret
-            if st.session_state.global_config["secret"]:
-                final_config["secret"] = st.session_state.global_config["secret"]
-            
-            # Meta Core Features
-            final_config["tcp-concurrent"] = st.session_state.global_config["tcp_concurrent"]
-            final_config["unified-delay"] = st.session_state.global_config["unified_delay"]
-            final_config["geodata-mode"] = st.session_state.global_config["geodata_mode"]
-            final_config["geodata-loader"] = st.session_state.global_config["geodata_loader"]
-            if st.session_state.global_config["enable_sniffer"]:
-                final_config["sniffer"] = {
-                    "enable": True,
-                    "sniff": {
-                        "TLS": {"ports": [443]},
-                        "HTTP": {"ports": [80], "override-destination": True}
-                    },
-                    "force-domain": SNIFFER_FORCE_DOMAIN,
-                    "skip-domain": SNIFFER_SKIP_DOMAIN
-                }
-
-            # 处理规则 (Rules)
-            selected_rule = st.session_state.get("selected_rule_type", "dustinwin规则")
-            rule_list = []
-            
-            # 为了简化逻辑，这里重复部分规则生成逻辑，实际项目中应封装函数
-            if selected_rule == "lhie1规则":
-                # 按照 config.yaml 的 dler-io 规则集重构 (用户习惯称之为 lhie1)
-                final_config["rule-providers"] = {}
-                base_url = "https://testingcf.jsdelivr.net/gh/dler-io/Rules@main/Clash/Provider"
-                
-                # 定义规则集与Target策略组的映射关系
-                # Key: Provider Name (也是文件名的一部分)
-                # Value: (Path Suffix, Target Group)
-                # Path Suffix 如果为 None，则默认与 Key 相同
-                
-                providers_map = {
-                    "AdBlock": ("AdBlock", "AdBlock"),
-                    "HTTPDNS": ("HTTPDNS", "HTTPDNS"),
-                    "Special": ("Special", "DIRECT"),
-                    "PROXY": ("Proxy", "Proxy"),
-                    "Domestic": ("Domestic", "Domestic"),
-                    "Domestic IPs": ("Domestic%20IPs", "Domestic"),
-                    "LAN": ("LAN", "DIRECT"),
-                    "Netflix": ("Media/Netflix", "Netflix"),
-                    "Spotify": ("Media/Spotify", "Spotify"),
-                    "YouTube": ("Media/YouTube", "Youtube"), # 注意 Group 是 Youtube
-                    "Max": ("Media/Max", "HBO Max"),
-                    "Bilibili": ("Media/Bilibili", "Bilibili"),
-                    "IQ": ("Media/IQ", "Asian TV"),
-                    "IQIYI": ("Media/IQIYI", "Asian TV"),
-                    "Letv": ("Media/Letv", "Asian TV"),
-                    "Netease Music": ("Media/Netease%20Music", "Asian TV"),
-                    "Tencent Video": ("Media/Tencent%20Video", "Asian TV"),
-                    "Youku": ("Media/Youku", "Asian TV"),
-                    "WeTV": ("Media/WeTV", "Global TV"),
-                    "ABC": ("Media/ABC", "Global TV"),
-                    "Abema TV": ("Media/Abema%20TV", "Asian TV"),
-                    "Amazon": ("Media/Amazon", "Global TV"),
-                    "Apple Music": ("Media/Apple%20Music", "Apple"),
-                    "Apple News": ("Media/Apple%20News", "Apple"),
-                    "Apple TV": ("Media/Apple%20TV", "Apple TV"),
-                    "Bahamut": ("Media/Bahamut", "Bahamut"),
-                    "BBC iPlayer": ("Media/BBC%20iPlayer", "Global TV"),
-                    "DAZN": ("Media/DAZN", "DAZN"),
-                    "Discovery Plus": ("Media/Discovery%20Plus", "Discovery Plus"),
-                    "Disney Plus": ("Media/Disney%20Plus", "Disney Plus"),
-                    "DMM": ("Media/DMM", "Asian TV"),
-                    "encoreTVB": ("Media/encoreTVB", "Global TV"),
-                    "F1 TV": ("Media/F1%20TV", "Global TV"),
-                    "Fox Now": ("Media/Fox%20Now", "Global TV"),
-                    "Fox+": ("Media/Fox%2B", "Asian TV"),
-                    "Hulu Japan": ("Media/Hulu%20Japan", "Asian TV"),
-                    "Hulu": ("Media/Hulu", "Global TV"),
-                    "Japonx": ("Media/Japonx", "Asian TV"),
-                    "JOOX": ("Media/JOOX", "Asian TV"),
-                    "KKBOX": ("Media/KKBOX", "Asian TV"),
-                    "KKTV": ("Media/KKTV", "Asian TV"),
-                    "Line TV": ("Media/Line%20TV", "Asian TV"),
-                    "myTV SUPER": ("Media/myTV%20SUPER", "Asian TV"),
-                    "Niconico": ("Media/Niconico", "Asian TV"),
-                    "Pandora": ("Media/Pandora", "Global TV"),
-                    "PBS": ("Media/PBS", "Global TV"),
-                    "Pornhub": ("Media/Pornhub", "Pornhub"),
-                    "Soundcloud": ("Media/Soundcloud", "Global TV"),
-                    "ViuTV": ("Media/ViuTV", "Asian TV"),
-                    "Telegram": ("Telegram", "Telegram"),
-                    "Crypto": ("Crypto", "Crypto"),
-                    "Discord": ("Discord", "Discord"),
-                    "Steam": ("Steam", "Steam"),
-                    "TikTok": ("TikTok", "TikTok"),
-                    "Speedtest": ("Speedtest", "Speedtest"),
-                    "PayPal": ("PayPal", "PayPal"),
-                    "Microsoft": ("Microsoft", "Microsoft"),
-                    "AI Suite": ("AI%20Suite", "AI Suite"),
-                    "Apple": ("Apple", "Apple"),
-                    "Google FCM": ("Google%20FCM", "Google FCM"),
-                    "Scholar": ("Scholar", "Scholar"),
-                    "miHoYo": (None, "miHoYo") # URL in root
-                }
-                
-                rule_list = []
-                
-                for name, (suffix, target) in providers_map.items():
-                    # 1. Add Provider
-                    real_suffix = suffix if suffix else name
-                    final_config["rule-providers"][name] = {
-                        "type": "http",
-                        "behavior": "classical",
-                        "url": f"{base_url}/{real_suffix}.yaml",
-                        "path": f"./ruleset/{name.replace(' ', '_')}.yaml",
-                        "interval": 86400
-                    }
-                    # 2. Add Rule
-                    rule_list.append(f"RULE-SET,{name},{target}")
-
-                # 添加 Google 特殊域名代理 (防止 DNS 泄露)
-                rule_list = [
-                    "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
-                    "DOMAIN-SUFFIX,services.googleapis.cn,Proxy"
-                ] + rule_list
-
-                # 添加通用规则
-                rule_list.extend([
-                    "GEOIP,CN,Domestic,no-resolve",
-                    "MATCH,Others"
-                ])
-            elif selected_rule == "自定义规则":
-                rule_list = [
-                    "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
-                    "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
-                    "DOMAIN-SUFFIX,google.com,Proxy", 
-                    "DOMAIN-SUFFIX,youtube.com,Proxy", 
-                    "GEOIP,CN,DIRECT,no-resolve", 
-                    "MATCH,Proxy"
-                ]
-            else:
-                rule_list = [
-                    "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
-                    "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
-                    "GEOIP,CN,DIRECT,no-resolve", 
-                    "MATCH,Proxy"
-                ]
-                
-            # 处理自定义规则集 (Rule Providers)
-            provider_rules_prepend = []
-            provider_rules_append = []
-            
-            if "custom_rule_providers" in st.session_state and st.session_state.custom_rule_providers:
-                if "rule-providers" not in final_config:
-                    final_config["rule-providers"] = {}
-                
-                for name, config in st.session_state.custom_rule_providers.items():
-                    # 添加到 rule-providers
-                    provider = {
-                        "type": config["type"],
-                        "behavior": config["behavior"],
-                        "path": config["path"],
-                        "interval": config["interval"]
-                    }
-                    if config["type"] == "http":
-                        provider["url"] = config["url"]
-                    elif config["type"] == "file":
-                        # 对于 file 类型，这里简单处理，实际可能需要处理文件路径
-                         pass 
-                         
-                    if config["format"]:
-                         provider["format"] = config["format"]
-
-                    final_config["rule-providers"][name] = provider
-                    
-                    # 生成对应的规则
-                    target_group = config.get('target', 'Proxy')
-                    new_rule = f"RULE-SET,{name},{target_group}"
-                    if config.get("order") == "优先 (覆盖)":
-                        provider_rules_prepend.append(new_rule)
-                    else:
-                        provider_rules_append.append(new_rule)
-            
-            # 合并所有规则: 
-            # 顺序: 自定义规则(单条) -> 优先覆盖的规则集 -> 选定的预设规则集(lhie1) -> 追加的规则集 -> 兜底
-            # 注意：实际顺序取决于用户的预期，这里假设单条自定义规则优先级最高
-            
-            # 修正 lhie1 的 MATCH,Proxy，避免被中间插入的规则截断（如果有 MATCH）
-            # 通常预设规则最后一条是 MATCH，所以追加的规则可能无法生效。
-            # 如果是 lhie1，它最后是 MATCH,Proxy。
-            
-            # 策略调整：
-            # 1. 自定义单条规则 (最优先)
-            # 2. 规则集 (优先覆盖)
-            # 3. 预设规则 (lhie1) [除了最后的 MATCH]
-            # 4. 规则集 (默认追加)
-            # 5. 兜底 MATCH (如果预设里有)
-            
-            def split_rules(rules):
-                """分离普通规则和兜底规则(MATCH)"""
-                normal = []
-                match = []
-                for r in rules:
-                    if r.startswith("MATCH,"):
-                        match.append(r)
-                    else:
-                        normal.append(r)
-                return normal, match
-
-            preset_normal, preset_match = split_rules(rule_list)
-            
-            final_rules = []
-            final_rules.extend(st.session_state.custom_rules)
-            final_rules.extend(provider_rules_prepend)
-            final_rules.extend(preset_normal)
-            final_rules.extend(provider_rules_append)
-            final_rules.extend(preset_match)
-            
-            # 如果没有兜底，添加默认兜底
-            if not any(r.startswith("MATCH,") for r in final_rules):
-                final_rules.append("MATCH,Proxy")
-
-            final_config["rules"] = final_rules
-
-            # --------------------------
-            # 执行检查逻辑
-            # --------------------------
-            check_errors = []
-            check_warnings = []
-            
-            # 1. 节点检查
-            if not final_config["proxies"]:
-                check_errors.append("Proxies 为空")
-            
-            # 2. 策略组检查
-            all_proxy_names = [p['name'] for p in final_config["proxies"]]
-            all_group_names = [g['name'] for g in final_config["proxy-groups"]]
-            all_valid_targets = all_proxy_names + all_group_names + ["DIRECT", "REJECT", "no-resolve"]
-            
-            for group in final_config["proxy-groups"]:
-                for p in group["proxies"]:
-                    if p not in all_valid_targets:
-                        check_warnings.append(f"策略组 '{group['name']}' 引用了不存在的节点/组: '{p}' (可能是正则筛选或其他)")
-                        
-            # 3. 规则检查 (简单检查)
-            for r in final_config["rules"]:
-                parts = r.split(',')
-                if len(parts) >= 2:
-                    target = parts[-1]
-                    if target not in all_valid_targets:
-                       check_warnings.append(f"规则 '{r}' 指向了不存在的策略组: '{target}'")
-
-            # 显示结果
-            if check_errors:
-                st.error(f"❌ 检查发现 {len(check_errors)} 个错误:")
-                for e in check_errors:
-                    st.text(f"- {e}")
-            else:
-                st.success("✅ 基础配置检查通过！")
-                
-            if check_warnings:
-                with st.expander(f"⚠️ 发现 {len(check_warnings)} 个潜在警告 (点击查看)", expanded=False):
-                    for w in check_warnings:
-                        st.warning(w)
-
-            # 生成 YAML
-            final_config_str = build_subscription_yaml(final_config)
-            if not check_errors:
-                save_user_config(
-                    current_user["id"],
-                    st.session_state.proxies_data,
-                    st.session_state.global_config,
-                    st.session_state.custom_rules,
-                    st.session_state.custom_rule_providers,
-                    selected_rule,
-                    final_config_str,
-                )
-                refreshed_config = get_user_config(current_user["id"])
-                st.success(f"订阅已保存并立即生效: {get_public_base_url()}/sub/{refreshed_config['token']}")
-            
-            st.divider()
-            col_d1, col_d2 = st.columns([3, 1])
-            with col_d1:
-                st.text_area("配置预览 (全文)", value=final_config_str, height=600)
-            with col_d2:
-                st.download_button(
-                    label="📥 下载 config.yaml",
-                    data=final_config_str,
-                    file_name="config.yaml",
-                    mime="application/x-yaml",
-                    type="primary",
-                    use_container_width=True,
-                    help="下载最终生成的配置文件"
-                )

@@ -27,6 +27,7 @@ SUBSCRIPTION_ANNOUNCE = "\n".join(
 DUSTINWIN_RULESET_BASE_URL = "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset"
 DUSTINWIN_RULESET_INTERVAL = 604800
 DUSTINWIN_RULESET_PATH_PREFIX = "./ruleset/dustinwin"
+DEFAULT_RULE_TYPE = "dustinwin规则"
 
 
 def _base64_utf8(value: str) -> str:
@@ -87,11 +88,11 @@ LHIE1_PROVIDERS_MAP = {
     "Domestic": ("Domestic", "Domestic"),
     "Domestic IPs": ("Domestic%20IPs", "Domestic"),
     "LAN": ("LAN", "DIRECT"),
-    "Netflix": ("Media/Netflix", "Global TV"),
-    "Spotify": ("Media/Spotify", "Global TV"),
-    "YouTube": ("Media/YouTube", "Global TV"),
-    "Max": ("Media/Max", "Global TV"),
-    "Bilibili": ("Media/Bilibili", "CN Mainland TV"),
+    "Netflix": ("Media/Netflix", "Netflix"),
+    "Spotify": ("Media/Spotify", "Spotify"),
+    "YouTube": ("Media/YouTube", "Youtube"),
+    "Max": ("Media/Max", "HBO Max"),
+    "Bilibili": ("Media/Bilibili", "Bilibili"),
     "IQ": ("Media/IQ", "CN Mainland TV"),
     "IQIYI": ("Media/IQIYI", "CN Mainland TV"),
     "Letv": ("Media/Letv", "CN Mainland TV"),
@@ -105,11 +106,11 @@ LHIE1_PROVIDERS_MAP = {
     "Apple Music": ("Media/Apple%20Music", "Apple"),
     "Apple News": ("Media/Apple%20News", "Apple"),
     "Apple TV": ("Media/Apple%20TV", "Apple TV"),
-    "Bahamut": ("Media/Bahamut", "Asian TV"),
+    "Bahamut": ("Media/Bahamut", "Bahamut"),
     "BBC iPlayer": ("Media/BBC%20iPlayer", "Global TV"),
-    "DAZN": ("Media/DAZN", "Global TV"),
-    "Discovery Plus": ("Media/Discovery%20Plus", "Global TV"),
-    "Disney Plus": ("Media/Disney%20Plus", "Global TV"),
+    "DAZN": ("Media/DAZN", "DAZN"),
+    "Discovery Plus": ("Media/Discovery%20Plus", "Discovery Plus"),
+    "Disney Plus": ("Media/Disney%20Plus", "Disney Plus"),
     "DMM": ("Media/DMM", "Asian TV"),
     "encoreTVB": ("Media/encoreTVB", "Global TV"),
     "F1 TV": ("Media/F1%20TV", "Global TV"),
@@ -152,15 +153,15 @@ DUSTINWIN_PROVIDERS_MAP = {
     "google-cn": {"file": "google-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Google FCM"},
     "games-cn": {"file": "games-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Steam"},
     "games": {"file": "games.mrs", "behavior": "domain", "format": "mrs", "target": "Steam"},
-    "netflix": {"file": "netflix.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
-    "disney": {"file": "disney.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
-    "max": {"file": "max.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "netflix": {"file": "netflix.mrs", "behavior": "domain", "format": "mrs", "target": "Netflix"},
+    "disney": {"file": "disney.mrs", "behavior": "domain", "format": "mrs", "target": "Disney Plus"},
+    "max": {"file": "max.mrs", "behavior": "domain", "format": "mrs", "target": "HBO Max"},
     "primevideo": {"file": "primevideo.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
     "appletv": {"file": "appletv.mrs", "behavior": "domain", "format": "mrs", "target": "Apple TV"},
-    "youtube": {"file": "youtube.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "youtube": {"file": "youtube.mrs", "behavior": "domain", "format": "mrs", "target": "Youtube"},
     "tiktok": {"file": "tiktok.mrs", "behavior": "domain", "format": "mrs", "target": "TikTok"},
-    "bilibili": {"file": "bilibili.mrs", "behavior": "domain", "format": "mrs", "target": "Domestic"},
-    "spotify": {"file": "spotify.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
+    "bilibili": {"file": "bilibili.mrs", "behavior": "domain", "format": "mrs", "target": "Bilibili"},
+    "spotify": {"file": "spotify.mrs", "behavior": "domain", "format": "mrs", "target": "Spotify"},
     "media": {"file": "media.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
     "ai": {"file": "ai.mrs", "behavior": "domain", "format": "mrs", "target": "AI Suite"},
     "networktest": {"file": "networktest.mrs", "behavior": "domain", "format": "mrs", "target": "Speedtest"},
@@ -171,7 +172,7 @@ DUSTINWIN_PROVIDERS_MAP = {
     "privateip": {"file": "privateip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "DIRECT", "no_resolve": True},
     "cnip": {"file": "cnip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Domestic", "no_resolve": True},
     "telegramip": {"file": "telegramip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Telegram", "no_resolve": True},
-    "netflixip": {"file": "netflixip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Global TV", "no_resolve": True},
+    "netflixip": {"file": "netflixip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Netflix", "no_resolve": True},
     "mediaip": {"file": "mediaip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Global TV", "no_resolve": True},
 }
 
@@ -219,7 +220,7 @@ def build_config(
     global_config: dict[str, Any],
     custom_rules: list[str] | None = None,
     custom_rule_providers: dict[str, Any] | None = None,
-    selected_rule_type: str = "自定义规则",
+    selected_rule_type: str = DEFAULT_RULE_TYPE,
 ) -> dict[str, Any]:
     """生成最终 Clash/OpenClash 配置；API 和 Web UI 都应复用这套逻辑。"""
     proxies = normalize_proxies_for_mihomo(proxies)
@@ -543,7 +544,7 @@ def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
     for group in groups:
         for target in group.get("proxies", []):
             if target not in valid_targets:
-                warnings.append(f"策略组 '{group.get('name')}' 引用了不存在的节点/组: '{target}'")
+                errors.append(f"策略组 '{group.get('name')}' 引用了不存在的节点/组: '{target}'")
 
     for rule in rules:
         parts = str(rule).split(",")
@@ -554,7 +555,7 @@ def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
             # Domestic 这类缺失策略组，坏配置就会被误判为可用。
             target = parts[-2] if parts[-1] == "no-resolve" and len(parts) >= 3 else parts[-1]
             if target not in valid_targets and target != "no-resolve":
-                warnings.append(f"规则 '{rule}' 指向了不存在的策略组: '{target}'")
+                errors.append(f"规则 '{rule}' 指向了不存在的策略组: '{target}'")
 
     dns_config = config.get("dns") or {}
     if dns_config.get("respect-rules") and not dns_config.get("proxy-server-nameserver"):
