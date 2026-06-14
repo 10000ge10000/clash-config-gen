@@ -1369,6 +1369,33 @@ st.markdown("""
         color: var(--ui-muted);
         font-size: .66rem;
     }
+    .sidebar-section-label {
+        margin: .15rem .15rem .45rem;
+        color: var(--ui-muted);
+        font-size: .66rem;
+        font-weight: 700;
+    }
+    [data-testid="stSidebar"] .workspace-nav {
+        margin-bottom: .9rem;
+    }
+    [data-testid="stSidebar"] .workspace-nav + div [data-testid="stButton"] {
+        margin-bottom: .22rem;
+    }
+    [data-testid="stSidebar"] .workspace-nav + div [data-testid="stButton"] > button {
+        justify-content: flex-start;
+        min-height: 38px;
+        padding: .45rem .7rem;
+        border-color: transparent !important;
+        box-shadow: none;
+    }
+    [data-testid="stSidebar"] .workspace-nav + div [data-testid="stButton"] > button[kind="primary"] {
+        border-color: rgba(36, 104, 242, .3) !important;
+        color: #1456cf !important;
+        background: rgba(226, 240, 255, .92) !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:has(.sidebar-settings-collapsed) ~ div {
+        display: none;
+    }
     [data-testid="stSidebar"] .stHeadingContainer h1,
     [data-testid="stSidebar"] .stHeadingContainer h2,
     [data-testid="stSidebar"] .stHeadingContainer h3 {
@@ -1483,6 +1510,166 @@ st.markdown("""
         border-radius: 50%;
         background: var(--ui-green);
         animation: status-pulse 1.6s ease-in-out infinite;
+    }
+    .dashboard-workflow,
+    .dashboard-panel,
+    .dashboard-activity {
+        border: 1px solid var(--ui-line);
+        border-radius: 10px;
+        background: var(--ui-glass);
+        box-shadow: 0 12px 30px rgba(41, 77, 105, .06);
+        backdrop-filter: blur(18px);
+    }
+    .dashboard-workflow {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: .4rem;
+        margin-bottom: .85rem;
+        padding: .7rem;
+    }
+    .dashboard-step {
+        position: relative;
+        min-height: 58px;
+        padding: .55rem .65rem;
+        border: 1px solid transparent;
+        border-radius: 8px;
+    }
+    .dashboard-step.active {
+        border-color: rgba(13, 184, 107, .5);
+        background: rgba(229, 249, 239, .74);
+    }
+    .dashboard-step small {
+        margin-right: .55rem;
+        color: var(--ui-muted);
+        font-weight: 750;
+    }
+    .dashboard-step strong {
+        color: var(--ui-ink);
+        font-size: .78rem;
+    }
+    .dashboard-step span {
+        display: block;
+        margin: .3rem 0 0 2rem;
+        color: var(--ui-muted);
+        font-size: .67rem;
+    }
+    .dashboard-panel {
+        min-height: 270px;
+        padding: 1rem;
+    }
+    .dashboard-panel h3,
+    .dashboard-activity h3 {
+        margin: 0;
+        color: var(--ui-ink);
+        font-size: .96rem;
+    }
+    .dashboard-panel-subtitle {
+        margin: .3rem 0 .9rem;
+        color: var(--ui-muted);
+        font-size: .68rem;
+    }
+    .dashboard-node-head,
+    .dashboard-node-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1.7fr) 1fr .55fr .45fr;
+        align-items: center;
+        gap: .5rem;
+    }
+    .dashboard-node-head {
+        padding: 0 .6rem .4rem;
+        color: var(--ui-muted);
+        font-size: .65rem;
+    }
+    .dashboard-node-row {
+        min-height: 48px;
+        margin-bottom: .35rem;
+        padding: .45rem .6rem;
+        border-radius: 7px;
+        background: rgba(244, 249, 253, .8);
+        font-size: .7rem;
+    }
+    .dashboard-node-name {
+        display: flex;
+        align-items: center;
+        gap: .55rem;
+        min-width: 0;
+        color: var(--ui-ink);
+        font-weight: 700;
+    }
+    .dashboard-node-name::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        flex: 0 0 7px;
+        border-radius: 50%;
+        background: var(--ui-green);
+    }
+    .dashboard-node-source {
+        overflow: hidden;
+        color: var(--ui-muted);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .dashboard-node-status {
+        color: #087747;
+        font-weight: 700;
+    }
+    .dashboard-node-protocol {
+        color: var(--ui-muted);
+        text-align: right;
+    }
+    .dashboard-publish-state {
+        margin: .7rem 0 .9rem;
+        padding: .75rem;
+        border: 1px solid rgba(13, 184, 107, .28);
+        border-radius: 8px;
+        color: #087747;
+        background: rgba(231, 250, 241, .72);
+        font-size: .72rem;
+        font-weight: 700;
+    }
+    .dashboard-diff-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: .45rem;
+        margin-top: .65rem;
+    }
+    .dashboard-diff {
+        padding: .6rem;
+        border-radius: 7px;
+        background: rgba(239, 246, 251, .9);
+    }
+    .dashboard-diff span {
+        display: block;
+        color: var(--ui-muted);
+        font-size: .64rem;
+    }
+    .dashboard-diff strong {
+        display: block;
+        margin-top: .25rem;
+        color: var(--ui-blue);
+        font-size: .95rem;
+    }
+    .dashboard-activity {
+        margin-top: .85rem;
+        padding: 1rem;
+    }
+    .dashboard-activity-row {
+        display: grid;
+        grid-template-columns: 9rem 1fr 1.4fr;
+        gap: .75rem;
+        padding: .42rem 0;
+        color: var(--ui-muted);
+        font-size: .7rem;
+    }
+    .dashboard-activity-row strong {
+        color: var(--ui-ink);
+    }
+    .dashboard-empty {
+        padding: 2.8rem 1rem;
+        color: var(--ui-muted);
+        text-align: center;
+        font-size: .75rem;
     }
     div[data-baseweb="tab-list"] {
         gap: .25rem;
@@ -1909,6 +2096,31 @@ st.markdown("""
         }
         button[data-baseweb="tab"] p {
             font-size: .78rem;
+        }
+        .dashboard-workflow {
+            grid-template-columns: 1fr;
+        }
+        .dashboard-step {
+            min-height: 46px;
+        }
+        .dashboard-node-head {
+            display: none;
+        }
+        .dashboard-node-row {
+            grid-template-columns: minmax(0, 1fr) auto;
+        }
+        .dashboard-node-source,
+        .dashboard-node-protocol {
+            display: none;
+        }
+        .dashboard-activity-row {
+            grid-template-columns: 1fr;
+            gap: .18rem;
+        }
+    }
+    @media (min-width: 821px) {
+        .st-key-workspace_tabs [data-baseweb="tab-list"] {
+            display: none;
         }
     }
 </style>
@@ -2463,6 +2675,21 @@ if not st.session_state.get("ui_defaults_v3_applied"):
         del st.session_state["gc_url_test_tolerance"]
     st.session_state.ui_defaults_v3_applied = True
 
+WORKSPACE_TABS = {
+    "控制台": "▦  控制台",
+    "导入节点": "↓  导入节点",
+    "节点管理": "◇  节点管理",
+    "分流规则": "⌘  分流规则",
+    "生成与检查": "✓  生成与检查",
+}
+if "workspace_tabs" not in st.session_state:
+    st.session_state.workspace_tabs = "控制台"
+
+
+def switch_workspace(tab_name: str) -> None:
+    st.session_state.workspace_tabs = tab_name
+
+
 # ==========================================
 # 2. 侧边栏：认证 + 高级全局设置
 # ==========================================
@@ -2479,6 +2706,21 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
+    st.markdown(
+        '<div class="sidebar-section-label workspace-nav">工作空间</div>',
+        unsafe_allow_html=True,
+    )
+    for workspace_name, workspace_label in WORKSPACE_TABS.items():
+        st.button(
+            workspace_label,
+            key=f"workspace_nav_{workspace_name}",
+            type="primary" if st.session_state.workspace_tabs == workspace_name else "secondary",
+            use_container_width=True,
+            on_click=switch_workspace,
+            args=(workspace_name,),
+        )
+
+    st.divider()
     st.header("账号")
     st.caption(f"当前用户: {current_user['username']}")
     subscription_url = f"{get_public_base_url()}/sub/{saved_config['token']}"
@@ -2544,6 +2786,20 @@ with st.sidebar:
                                 st.error(f"删除失败: {exc}")
 
     st.divider()
+    show_global_settings = st.toggle(
+        "⚙  全局设置",
+        value=False,
+        key="show_global_settings",
+        help="按需展开生成模式、DNS、TUN 和控制器等高级设置。",
+    )
+    st.markdown(
+        (
+            '<div class="sidebar-settings-expanded"></div>'
+            if show_global_settings
+            else '<div class="sidebar-settings-collapsed"></div>'
+        ),
+        unsafe_allow_html=True,
+    )
     st.header("全局设置")
     if "target_mode" not in st.session_state:
         st.session_state["target_mode"] = target_mode_from_global_config(st.session_state.global_config)
@@ -2977,6 +3233,53 @@ def render_workflow_step(step: int, title: str, description: str) -> None:
     )
 
 
+selected_rule = st.session_state.get("selected_rule_type", DEFAULT_RULE_TYPE)
+try:
+    workspace_draft_config = build_subscription_config(
+        st.session_state.proxies_data,
+        st.session_state.global_config,
+        st.session_state.custom_rules,
+        st.session_state.custom_rule_providers,
+        selected_rule,
+    ) if st.session_state.proxies_data else {}
+    workspace_draft_yaml = (
+        build_subscription_yaml(workspace_draft_config)
+        if workspace_draft_config
+        else ""
+    )
+    workspace_draft_error = ""
+except Exception as exc:
+    workspace_draft_config = {}
+    workspace_draft_yaml = ""
+    workspace_draft_error = str(exc)
+
+try:
+    workspace_published_config = yaml.safe_load(saved_config.get("final_yaml") or "") or {}
+except Exception:
+    workspace_published_config = {}
+
+workspace_draft_stats = config_summary(workspace_draft_config)
+workspace_published_stats = config_summary(workspace_published_config)
+workspace_has_changes = workspace_draft_yaml != (saved_config.get("final_yaml") or "")
+workspace_checked = (
+    st.session_state.get("checked_draft_signature") == current_draft_signature()
+    and bool(st.session_state.get("checked_draft_yaml"))
+)
+workspace_status = (
+    "待检查"
+    if workspace_draft_error
+    else "已通过"
+    if workspace_checked
+    else "有变更"
+    if workspace_has_changes
+    else "已同步"
+)
+workspace_published_at = (
+    saved_config.get("published_at")
+    or saved_config.get("validated_at")
+    or "尚未发布"
+)
+
 st.markdown(
     """
     <section class="app-hero">
@@ -2992,7 +3295,170 @@ st.markdown(
 )
 
 
-tab1, tab2, tab3, tab4 = st.tabs(["1 导入节点", "2 节点管理", "3 分流规则", "4 生成与检查"])
+dashboard_tab, tab1, tab2, tab3, tab4 = st.tabs(
+    list(WORKSPACE_TABS),
+    default=st.session_state.workspace_tabs,
+    key="workspace_tabs",
+    on_change="rerun",
+)
+
+with dashboard_tab:
+    dashboard_action, dashboard_spacer = st.columns([1, 4])
+    with dashboard_action:
+        st.button(
+            "＋ 导入新节点",
+            type="primary",
+            use_container_width=True,
+            key="dashboard_import_nodes",
+            on_click=switch_workspace,
+            args=("导入节点",),
+        )
+
+    workflow_active_step = 3 if workspace_checked else 4 if not workspace_has_changes else 1
+    workflow_steps = (
+        ("01", "导入节点", f"{len(st.session_state.import_sources)} 个来源"),
+        ("02", "整理节点", f"{len(st.session_state.proxies_data)} 个可用"),
+        ("03", "检查草稿", workspace_status),
+        ("04", "发布订阅", "已同步" if not workspace_has_changes else "待确认"),
+    )
+    workflow_html = "".join(
+        (
+            f'<div class="dashboard-step{" active" if index == workflow_active_step else ""}">'
+            f"<small>{number}</small><strong>{html.escape(title)}</strong>"
+            f"<span>{html.escape(detail)}</span></div>"
+        )
+        for index, (number, title, detail) in enumerate(workflow_steps, start=1)
+    )
+    st.markdown(
+        f'<div class="dashboard-workflow">{workflow_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+    dashboard_metrics = st.columns(4)
+    dashboard_metrics[0].metric("节点", workspace_draft_stats["nodes"])
+    dashboard_metrics[1].metric("策略组", workspace_draft_stats["groups"])
+    dashboard_metrics[2].metric("规则", workspace_draft_stats["rules"])
+    dashboard_metrics[3].metric(
+        "发布状态",
+        "草稿" if workspace_has_changes else "已发布",
+    )
+
+    nodes_column, publish_column = st.columns([1.6, 1])
+    with nodes_column:
+        node_rows = []
+        for proxy in st.session_state.proxies_data[:5]:
+            node_name = html.escape(str(proxy.get("name") or "未命名节点"))
+            source_name = html.escape(str(proxy.get("_source_name") or "历史节点"))
+            protocol = html.escape(str(proxy.get("type") or "unknown"))
+            node_rows.append(
+                '<div class="dashboard-node-row">'
+                f'<div class="dashboard-node-name">{node_name}</div>'
+                f'<div class="dashboard-node-source">{source_name}</div>'
+                '<div class="dashboard-node-status">可用</div>'
+                f'<div class="dashboard-node-protocol">{protocol}</div>'
+                '</div>'
+            )
+        node_content = "".join(node_rows) or (
+            '<div class="dashboard-empty">暂无节点，请先导入节点。</div>'
+        )
+        st.markdown(
+            '<section class="dashboard-panel">'
+            '<h3>节点与来源</h3>'
+            '<div class="dashboard-panel-subtitle">显示当前草稿中的代理节点与导入来源</div>'
+            '<div class="dashboard-node-head">'
+            '<span>节点</span><span>来源</span><span>状态</span><span>协议</span>'
+            '</div>'
+            f'{node_content}'
+            '</section>',
+            unsafe_allow_html=True,
+        )
+        if len(st.session_state.proxies_data) > 5:
+            st.caption(f"另有 {len(st.session_state.proxies_data) - 5} 个节点，请进入节点管理查看。")
+
+    with publish_column:
+        node_delta = workspace_draft_stats["nodes"] - workspace_published_stats["nodes"]
+        rule_delta = workspace_draft_stats["rules"] - workspace_published_stats["rules"]
+        provider_delta = (
+            workspace_draft_stats["providers"]
+            - workspace_published_stats["providers"]
+        )
+        publish_state = (
+            "草稿与线上一致"
+            if not workspace_has_changes
+            else "草稿等待检查"
+            if not workspace_checked
+            else "草稿已检查，可以发布"
+        )
+        st.markdown(
+            f"""
+            <section class="dashboard-panel">
+              <h3>草稿与发布</h3>
+              <div class="dashboard-panel-subtitle">线上版本与当前草稿严格分离</div>
+              <div class="dashboard-publish-state">{html.escape(publish_state)}</div>
+              <strong>发布差异</strong>
+              <div class="dashboard-diff-grid">
+                <div class="dashboard-diff"><span>节点</span><strong>{node_delta:+d}</strong></div>
+                <div class="dashboard-diff"><span>规则</span><strong>{rule_delta:+d}</strong></div>
+                <div class="dashboard-diff"><span>规则集</span><strong>{provider_delta:+d}</strong></div>
+              </div>
+            </section>
+            """,
+            unsafe_allow_html=True,
+        )
+        publish_actions = st.columns(2)
+        publish_actions[0].button(
+            "检查草稿",
+            use_container_width=True,
+            key="dashboard_check_draft",
+            on_click=switch_workspace,
+            args=("生成与检查",),
+        )
+        publish_actions[1].button(
+            "前往发布",
+            type="primary",
+            use_container_width=True,
+            key="dashboard_publish_draft",
+            on_click=switch_workspace,
+            args=("生成与检查",),
+        )
+
+    activity_rows = [
+        (
+            "当前草稿",
+            workspace_status,
+            f"{workspace_draft_stats['nodes']} 个节点 · {workspace_draft_stats['rules']} 条规则",
+        ),
+        (
+            "最近发布",
+            "线上订阅",
+            str(workspace_published_at),
+        ),
+        (
+            "导入来源",
+            f"{len(st.session_state.import_sources)} 个来源",
+            f"{len(st.session_state.proxies_data)} 个节点",
+        ),
+    ]
+    activity_html = "".join(
+        (
+            '<div class="dashboard-activity-row">'
+            f"<span>{html.escape(label)}</span>"
+            f"<strong>{html.escape(value)}</strong>"
+            f"<span>{html.escape(detail)}</span>"
+            "</div>"
+        )
+        for label, value, detail in activity_rows
+    )
+    st.markdown(
+        f"""
+        <section class="dashboard-activity">
+          <h3>状态摘要</h3>
+          <div class="dashboard-panel-subtitle">仅显示当前配置流程的真实状态</div>
+          {activity_html}
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
 
 with tab1:
     render_workflow_step(
