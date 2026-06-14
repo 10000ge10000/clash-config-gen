@@ -1124,12 +1124,79 @@ st.markdown("""
         color: #06111b !important;
         background: #45ff7b !important;
     }
+    .stButton > button *,
+    .stDownloadButton > button *,
+    [data-testid="stFormSubmitButton"] > button * {
+        color: inherit !important;
+        -webkit-text-fill-color: currentColor !important;
+    }
+    button:disabled,
+    button[disabled],
     .stButton > button:disabled,
     .stDownloadButton > button:disabled,
     [data-testid="stFormSubmitButton"] > button:disabled {
         border-color: #263847 !important;
-        color: #708390 !important;
-        background: rgba(14, 25, 37, .86) !important;
+        color: #8fa3af !important;
+        background: #111b27 !important;
+        opacity: 1 !important;
+    }
+    button:disabled *,
+    button[disabled] * {
+        color: #8fa3af !important;
+        -webkit-text-fill-color: #8fa3af !important;
+    }
+    [data-testid="stSidebar"] .stButton > button,
+    [data-testid="stSidebar"] .stDownloadButton > button,
+    [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] > button {
+        border-color: #31495c !important;
+        color: #e9f5f8 !important;
+        background: #142231 !important;
+    }
+    [data-testid="stSidebar"] .stButton > button *,
+    [data-testid="stSidebar"] .stDownloadButton > button *,
+    [data-testid="stSidebar"] [data-testid="stFormSubmitButton"] > button * {
+        color: inherit !important;
+        -webkit-text-fill-color: currentColor !important;
+    }
+    [data-testid="stSidebar"] button:disabled,
+    [data-testid="stSidebar"] button[disabled],
+    [data-testid="stSidebar"] button[aria-disabled="true"] {
+        border-color: #263a4a !important;
+        color: #91a7b4 !important;
+        background: #101b27 !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stSidebar"] button:disabled *,
+    [data-testid="stSidebar"] button[disabled] *,
+    [data-testid="stSidebar"] button[aria-disabled="true"] * {
+        color: #91a7b4 !important;
+        -webkit-text-fill-color: #91a7b4 !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="input"],
+    [data-testid="stSidebar"] [data-baseweb="input"][aria-disabled="true"],
+    [data-testid="stSidebar"] [data-baseweb="base-input"] {
+        border-color: #2b4356 !important;
+        background: #0d1925 !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="input"] input,
+    [data-testid="stSidebar"] [data-baseweb="input"] input:disabled,
+    [data-testid="stSidebar"] input[disabled],
+    [data-testid="stSidebar"] input[readonly] {
+        color: #a9bfca !important;
+        background: #0d1925 !important;
+        -webkit-text-fill-color: #a9bfca !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stExpander"] details,
+    [data-testid="stSidebar"] [data-testid="stExpander"] details > summary {
+        border-color: #294155 !important;
+        color: #d8e8ee !important;
+        background: #0c1824 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stExpander"] details > summary * {
+        color: #d8e8ee !important;
+        -webkit-text-fill-color: #d8e8ee !important;
     }
     .import-source-row,
     .draft-status {
@@ -1648,7 +1715,7 @@ def config_summary(config: dict | None) -> dict[str, int]:
     }
 
 
-def proxy_names(config: dict | None) -> list[str]:
+def extract_proxy_names(config: dict | None) -> list[str]:
     config = config if isinstance(config, dict) else {}
     return [
         str(proxy.get("name"))
@@ -3099,8 +3166,18 @@ with tab3:
         all_groups = [group['name'] for group in proxy_groups]
         all_groups.extend(['DIRECT', 'REJECT', 'REJECT-DROP', 'Proxy'])
         all_groups = sorted(set(all_groups))
-        proxy_names = [proxy.get("name") for proxy in st.session_state.proxies_data if proxy.get("name")]
-        all_targets = sorted(set(all_groups + proxy_names + ["DIRECT", "REJECT", "REJECT-DROP", "Proxy"]))
+        available_proxy_names = [
+            proxy.get("name")
+            for proxy in st.session_state.proxies_data
+            if proxy.get("name")
+        ]
+        all_targets = sorted(
+            set(
+                all_groups
+                + available_proxy_names
+                + ["DIRECT", "REJECT", "REJECT-DROP", "Proxy"]
+            )
+        )
 
         if rule_type in {"dustinwin规则", "lhie1规则"}:
             if rule_type == "dustinwin规则":
@@ -3530,8 +3607,8 @@ with tab4:
             for label, key in labels:
                 delta = draft_stats[key] - published_stats[key]
                 st.write(f"{label}：已发布 {published_stats[key]} → 草稿 {draft_stats[key]}（{delta:+d}）")
-            published_node_names = set(proxy_names(published_config))
-            draft_node_names = set(proxy_names(draft_config))
+            published_node_names = set(extract_proxy_names(published_config))
+            draft_node_names = set(extract_proxy_names(draft_config))
             added_nodes = sorted(draft_node_names - published_node_names)
             removed_nodes = sorted(published_node_names - draft_node_names)
             if added_nodes:
