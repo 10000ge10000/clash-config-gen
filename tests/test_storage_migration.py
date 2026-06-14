@@ -11,6 +11,73 @@ from config_builder import build_yaml
 
 
 class StorageMigrationTest(unittest.TestCase):
+    def test_draft_storage_keeps_published_yaml_and_import_sources_separate(self):
+        """保存草稿不能提前覆盖线上订阅，来源标签需要随草稿持久化。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "app.db")
+            previous_db_path = os.environ.get("APP_DB_PATH")
+            os.environ["APP_DB_PATH"] = db_path
+            try:
+                storage.init_db()
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO users
+                            (id, username, password_hash, is_admin, is_enabled, created_at, updated_at)
+                        VALUES (1, 'draft-user', 'hash', 0, 1, 'now', 'now')
+                        """
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO subscription_configs
+                            (user_id, token, final_yaml, created_at, updated_at)
+                        VALUES (1, 'token', 'published: true', 'now', 'now')
+                        """
+                    )
+
+                proxies = [
+                    {
+                        "name": "node-1",
+                        "type": "ss",
+                        "server": "127.0.0.1",
+                        "port": 8388,
+                        "cipher": "aes-128-gcm",
+                        "password": "password",
+                        "_source_id": "source-1",
+                        "_source_name": "YAML 导入",
+                    }
+                ]
+                import_sources = [
+                    {
+                        "id": "source-1",
+                        "name": "YAML 导入",
+                        "type": "yaml",
+                        "node_count": 1,
+                    }
+                ]
+                storage.save_user_draft(
+                    1,
+                    proxies,
+                    {},
+                    [],
+                    {},
+                    "dustinwin规则",
+                    import_sources=import_sources,
+                    validation_status="passed",
+                    validation_message="draft ok",
+                )
+
+                saved = storage.get_user_config(1)
+                self.assertEqual("published: true", saved["final_yaml"])
+                self.assertEqual(import_sources, saved["import_sources"])
+                self.assertEqual("passed", saved["draft_validation_status"])
+                self.assertEqual("YAML 导入", saved["proxies"][0]["_source_name"])
+            finally:
+                if previous_db_path is None:
+                    os.environ.pop("APP_DB_PATH", None)
+                else:
+                    os.environ["APP_DB_PATH"] = previous_db_path
+
     def test_init_db_migrates_blank_legacy_rule_type_to_dustinwin(self):
         """未生成过配置的旧空白账号应迁移到 DustinWin 默认规则源。"""
         with tempfile.TemporaryDirectory() as tmpdir:

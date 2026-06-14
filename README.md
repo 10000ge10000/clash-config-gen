@@ -38,6 +38,8 @@ services:
       - PUBLIC_BASE_URL=https://clash.910501.xyz
       # 是否允许普通用户自行注册。公网部署建议保持 false，需要多人自助注册时再改 true。
       - ALLOW_REGISTRATION=false
+      # HTTPS 部署保持 true；仅本地 HTTP 调试时临时设为 false。
+      - AUTH_COOKIE_SECURE=true
       # 初始化管理员账号。首次启动时自动创建。
       - ADMIN_USERNAME=admin
       # 必须改成强密码，不要使用示例值。
@@ -70,7 +72,9 @@ docker compose pull
 docker compose up -d
 ```
 
-部署后访问 Web 管理页面，使用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录。生成配置后，侧边栏会显示当前用户的订阅链接，格式如下：
+部署后访问 Web 管理页面，使用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录。勾选“保持登录 30 天”后，浏览器会保存 `HttpOnly` 会话 Cookie，服务端仅保存令牌摘要；退出登录或禁用用户会立即撤销对应会话。
+
+生成配置后，侧边栏会显示当前用户的订阅链接，格式如下：
 
 ```text
 https://clash.910501.xyz/sub/用户自己的随机Token

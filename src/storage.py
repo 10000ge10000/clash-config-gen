@@ -1,7 +1,9 @@
 import json
 import os
+import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -63,15 +65,37 @@ def init_db() -> None:
                 global_config_json TEXT NOT NULL DEFAULT '{}',
                 custom_rules_json TEXT NOT NULL DEFAULT '[]',
                 custom_rule_providers_json TEXT NOT NULL DEFAULT '{}',
+                import_sources_json TEXT NOT NULL DEFAULT '[]',
                 selected_rule_type TEXT NOT NULL DEFAULT 'dustinwin规则',
                 final_yaml TEXT NOT NULL DEFAULT '',
                 validation_status TEXT NOT NULL DEFAULT 'unknown',
                 validation_message TEXT NOT NULL DEFAULT '',
                 validated_at TEXT NOT NULL DEFAULT '',
+                draft_validation_status TEXT NOT NULL DEFAULT 'unknown',
+                draft_validation_message TEXT NOT NULL DEFAULT '',
+                draft_validated_at TEXT NOT NULL DEFAULT '',
+                published_at TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT NOT NULL,
+                revoked_at TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id
+            ON auth_sessions(user_id);
+
+            CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at
+            ON auth_sessions(expires_at);
             """
         )
         _ensure_subscription_config_columns(conn)
@@ -152,6 +176,89 @@ def authenticate_user(username: str, password: str) -> sqlite3.Row | None:
     return user
 
 
+def create_auth_session(user_id: int, days: int = 30) -> str:
+    """创建只在浏览器保存明文、数据库仅保存摘要的持久登录令牌。"""
+    user = get_user_by_id(user_id)
+    if user is None or not int(user["is_enabled"]):
+        raise ValueError("用户不存在或已被禁用")
+
+    token = secrets.token_urlsafe(48)
+    token_hash = _hash_auth_token(token)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(days=max(1, min(days, 90)))
+    with _connect() as conn:
+        _delete_expired_auth_sessions(conn, now)
+        conn.execute(
+            """
+            INSERT INTO auth_sessions
+                (user_id, token_hash, expires_at, created_at, last_used_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                token_hash,
+                expires_at.isoformat(timespec="seconds"),
+                now.isoformat(timespec="seconds"),
+                now.isoformat(timespec="seconds"),
+            ),
+        )
+    return token
+
+
+def get_user_by_auth_session(token: str) -> sqlite3.Row | None:
+    if not token:
+        return None
+
+    token_hash = _hash_auth_token(token)
+    now = datetime.now(timezone.utc)
+    with _connect() as conn:
+        _delete_expired_auth_sessions(conn, now)
+        row = conn.execute(
+            """
+            SELECT u.*
+            FROM auth_sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ?
+              AND s.revoked_at = ''
+              AND s.expires_at > ?
+              AND u.is_enabled = 1
+            """,
+            (token_hash, now.isoformat(timespec="seconds")),
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE auth_sessions SET last_used_at = ? WHERE token_hash = ?",
+                (now.isoformat(timespec="seconds"), token_hash),
+            )
+        return row
+
+
+def revoke_auth_session(token: str) -> None:
+    if not token:
+        return
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE auth_sessions
+            SET revoked_at = ?
+            WHERE token_hash = ? AND revoked_at = ''
+            """,
+            (utc_now(), _hash_auth_token(token)),
+        )
+
+
+def revoke_user_auth_sessions(user_id: int) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE auth_sessions
+            SET revoked_at = ?
+            WHERE user_id = ? AND revoked_at = ''
+            """,
+            (utc_now(), user_id),
+        )
+
+
 def list_users() -> list[sqlite3.Row]:
     with _connect() as conn:
         return conn.execute(
@@ -171,6 +278,15 @@ def set_user_enabled(user_id: int, enabled: bool) -> None:
             "UPDATE users SET is_enabled = ?, updated_at = ? WHERE id = ?",
             (int(enabled), utc_now(), user_id),
         )
+        if not enabled:
+            conn.execute(
+                """
+                UPDATE auth_sessions
+                SET revoked_at = ?
+                WHERE user_id = ? AND revoked_at = ''
+                """,
+                (utc_now(), user_id),
+            )
 
 
 def delete_regular_user(user_id: int) -> None:
@@ -234,6 +350,7 @@ def save_user_config(
     final_yaml: str,
     validation_status: str = "unknown",
     validation_message: str = "",
+    import_sources: list[dict[str, Any]] | None = None,
 ) -> None:
     ensure_user_config(user_id)
     now = utc_now()
@@ -247,11 +364,16 @@ def save_user_config(
                 global_config_json = ?,
                 custom_rules_json = ?,
                 custom_rule_providers_json = ?,
+                import_sources_json = ?,
                 selected_rule_type = ?,
                 final_yaml = ?,
                 validation_status = ?,
                 validation_message = ?,
                 validated_at = ?,
+                draft_validation_status = ?,
+                draft_validation_message = ?,
+                draft_validated_at = ?,
+                published_at = ?,
                 updated_at = ?
             WHERE user_id = ?
             """,
@@ -260,8 +382,60 @@ def save_user_config(
                 json.dumps(global_config, ensure_ascii=False),
                 json.dumps(custom_rules, ensure_ascii=False),
                 json.dumps(custom_rule_providers, ensure_ascii=False),
+                json.dumps(import_sources or [], ensure_ascii=False),
                 selected_rule_type,
                 final_yaml,
+                validation_status,
+                validation_message[:2000],
+                now if validation_status != "unknown" else "",
+                validation_status,
+                validation_message[:2000],
+                now if validation_status != "unknown" else "",
+                now,
+                now,
+                user_id,
+            ),
+        )
+
+
+def save_user_draft(
+    user_id: int,
+    proxies: list[dict[str, Any]],
+    global_config: dict[str, Any],
+    custom_rules: list[str],
+    custom_rule_providers: dict[str, Any],
+    selected_rule_type: str,
+    import_sources: list[dict[str, Any]] | None = None,
+    validation_status: str = "unknown",
+    validation_message: str = "",
+) -> None:
+    """保存编辑中的配置，不覆盖线上 final_yaml。"""
+    ensure_user_config(user_id)
+    now = utc_now()
+    proxies = normalize_proxies_for_mihomo(proxies)
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE subscription_configs
+            SET proxies_json = ?,
+                global_config_json = ?,
+                custom_rules_json = ?,
+                custom_rule_providers_json = ?,
+                import_sources_json = ?,
+                selected_rule_type = ?,
+                draft_validation_status = ?,
+                draft_validation_message = ?,
+                draft_validated_at = ?,
+                updated_at = ?
+            WHERE user_id = ?
+            """,
+            (
+                json.dumps(proxies, ensure_ascii=False),
+                json.dumps(global_config, ensure_ascii=False),
+                json.dumps(custom_rules, ensure_ascii=False),
+                json.dumps(custom_rule_providers, ensure_ascii=False),
+                json.dumps(import_sources or [], ensure_ascii=False),
+                selected_rule_type,
                 validation_status,
                 validation_message[:2000],
                 now if validation_status != "unknown" else "",
@@ -279,6 +453,11 @@ def _ensure_subscription_config_columns(conn: sqlite3.Connection) -> None:
         "validation_status": "TEXT NOT NULL DEFAULT 'unknown'",
         "validation_message": "TEXT NOT NULL DEFAULT ''",
         "validated_at": "TEXT NOT NULL DEFAULT ''",
+        "import_sources_json": "TEXT NOT NULL DEFAULT '[]'",
+        "draft_validation_status": "TEXT NOT NULL DEFAULT 'unknown'",
+        "draft_validation_message": "TEXT NOT NULL DEFAULT ''",
+        "draft_validated_at": "TEXT NOT NULL DEFAULT ''",
+        "published_at": "TEXT NOT NULL DEFAULT ''",
     }.items():
         if column not in existing_columns:
             conn.execute(f"ALTER TABLE subscription_configs ADD COLUMN {column} {definition}")
@@ -388,6 +567,21 @@ def health_snapshot() -> dict[str, Any]:
     }
 
 
+def _hash_auth_token(token: str) -> str:
+    return sha256(token.encode("utf-8")).hexdigest()
+
+
+def _delete_expired_auth_sessions(
+    conn: sqlite3.Connection,
+    now: datetime | None = None,
+) -> None:
+    current = now or datetime.now(timezone.utc)
+    conn.execute(
+        "DELETE FROM auth_sessions WHERE expires_at <= ?",
+        (current.isoformat(timespec="seconds"),),
+    )
+
+
 def _decode_config_row(row: sqlite3.Row) -> dict[str, Any]:
     def load_json(field: str, fallback: Any) -> Any:
         try:
@@ -403,11 +597,16 @@ def _decode_config_row(row: sqlite3.Row) -> dict[str, Any]:
         "global_config": load_json("global_config_json", {}),
         "custom_rules": load_json("custom_rules_json", []),
         "custom_rule_providers": load_json("custom_rule_providers_json", {}),
+        "import_sources": load_json("import_sources_json", []),
         "selected_rule_type": row["selected_rule_type"],
         "final_yaml": row["final_yaml"] or "",
         "validation_status": row["validation_status"] if "validation_status" in row.keys() else "unknown",
         "validation_message": row["validation_message"] if "validation_message" in row.keys() else "",
         "validated_at": row["validated_at"] if "validated_at" in row.keys() else "",
+        "draft_validation_status": row["draft_validation_status"] if "draft_validation_status" in row.keys() else "unknown",
+        "draft_validation_message": row["draft_validation_message"] if "draft_validation_message" in row.keys() else "",
+        "draft_validated_at": row["draft_validated_at"] if "draft_validated_at" in row.keys() else "",
+        "published_at": row["published_at"] if "published_at" in row.keys() else "",
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

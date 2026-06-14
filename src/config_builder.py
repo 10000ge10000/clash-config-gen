@@ -10,7 +10,11 @@ from clash_meta_gen import (
     DEFAULT_URL_TEST_URL,
     generate_proxy_groups,
 )
-from normalizer import normalize_proxies_for_mihomo, validate_proxy_fields
+from normalizer import (
+    normalize_proxies_for_mihomo,
+    strip_internal_proxy_metadata,
+    validate_proxy_fields,
+)
 
 SUBSCRIPTION_GENERATOR = "Clash-Config-Gen"
 SUBSCRIPTION_PROJECT = "一万AI分享 Clash/OpenClash 订阅生成器"
@@ -223,7 +227,10 @@ def build_config(
     selected_rule_type: str = DEFAULT_RULE_TYPE,
 ) -> dict[str, Any]:
     """生成最终 Clash/OpenClash 配置；API 和 Web UI 都应复用这套逻辑。"""
-    proxies = normalize_proxies_for_mihomo(proxies)
+    proxies = [
+        strip_internal_proxy_metadata(proxy)
+        for proxy in normalize_proxies_for_mihomo(proxies)
+    ]
     global_config = apply_generation_profile(global_config)
     custom_rules = custom_rules or []
     custom_rule_providers = custom_rule_providers or {}

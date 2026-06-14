@@ -18,6 +18,7 @@ BROWSER_CLIENT_FINGERPRINTS = {
 
 CERTIFICATE_PIN_PATTERN = re.compile(r"^(?:[A-Fa-f0-9]{64}|(?:[A-Fa-f0-9]{2}:){31}[A-Fa-f0-9]{2})$")
 HOP_INTERVAL_RANGE_PATTERN = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
+INTERNAL_PROXY_FIELD_PREFIX = "_"
 
 PROTOCOL_REQUIRED_FIELDS = {
     "ss": {"name", "type", "server", "port", "cipher", "password"},
@@ -117,6 +118,15 @@ def normalize_proxies(proxies: list[dict[str, Any]]) -> tuple[list[dict[str, Any
 def normalize_proxies_for_mihomo(proxies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized_proxies, _warnings, _errors = normalize_proxies(proxies)
     return normalized_proxies
+
+
+def strip_internal_proxy_metadata(proxy: dict[str, Any]) -> dict[str, Any]:
+    """移除仅供管理界面使用的来源、原名等内部字段。"""
+    return {
+        key: value
+        for key, value in proxy.items()
+        if not str(key).startswith(INTERNAL_PROXY_FIELD_PREFIX)
+    }
 
 
 def normalize_proxy_for_mihomo(proxy: dict[str, Any]) -> dict[str, Any]:

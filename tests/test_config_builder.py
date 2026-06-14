@@ -72,6 +72,30 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertNotIn("fingerprint", config["proxies"][0])
         self.assertEqual("firefox", config["proxies"][0]["client-fingerprint"])
 
+    def test_build_config_strips_internal_import_source_metadata(self):
+        """导入来源只用于管理界面，不能泄漏到最终订阅 YAML。"""
+        config = build_config(
+            [
+                {
+                    "name": "node-1",
+                    "type": "ss",
+                    "server": "127.0.0.1",
+                    "port": 8388,
+                    "cipher": "aes-128-gcm",
+                    "password": "password",
+                    "_source_id": "source-1",
+                    "_source_name": "远程订阅",
+                    "_origin_name": "原始节点",
+                }
+            ],
+            {},
+        )
+
+        self.assertEqual("node-1", config["proxies"][0]["name"])
+        self.assertFalse(
+            any(key.startswith("_") for key in config["proxies"][0]),
+        )
+
     def test_hysteria2_hop_interval_range_is_normalized_to_int(self):
         """OpenClash 当前按整数解析 hop-interval，旧数据里的 5-25 必须收敛为 5。"""
         proxy = normalize_proxy_for_mihomo(

@@ -1,15 +1,32 @@
-import yaml
-from fastapi import FastAPI, HTTPException, Response
+from pathlib import Path
+from urllib.parse import quote
 
+import yaml
+from fastapi import FastAPI, Form, HTTPException, Request, Response
+from fastapi.responses import FileResponse, RedirectResponse
+
+from auth import get_bool_env
 from config_builder import DUSTINWIN_PROVIDERS_MAP
 from config_builder import build_subscription_headers, build_yaml, validate_config
 from diagnostics import build_subscription_diagnostics
 from normalizer import normalize_proxies_for_mihomo
 from ruleset_updater import get_ruleset_cache_path, start_ruleset_update_worker
-from storage import ensure_admin_from_env, get_config_by_token, health_snapshot, init_db
+from storage import (
+    authenticate_user,
+    create_auth_session,
+    create_user,
+    ensure_admin_from_env,
+    get_config_by_token,
+    health_snapshot,
+    init_db,
+    revoke_auth_session,
+)
 
 
 app = FastAPI(title="Clash-Config-Gen Subscription API")
+AUTH_COOKIE_NAME = "clash_config_gen_session"
+AUTH_COOKIE_DAYS = 30
+AUTH_ASSET_PATH = Path(__file__).with_name("assets") / "auth-future-city.png"
 
 
 @app.on_event("startup")
@@ -22,6 +39,89 @@ def startup() -> None:
 @app.get("/health")
 def health_check():
     return health_snapshot()
+
+
+def _auth_redirect(message: str = "") -> RedirectResponse:
+    target = "/" if not message else f"/?auth_error={quote(message)}"
+    return RedirectResponse(target, status_code=303)
+
+
+def _set_auth_cookie(response: Response, token: str, remember: bool) -> None:
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=AUTH_COOKIE_DAYS * 86400 if remember else None,
+        httponly=True,
+        secure=get_bool_env("AUTH_COOKIE_SECURE", True),
+        samesite="lax",
+        path="/",
+    )
+
+
+@app.get("/sub/assets/auth-future-city.png")
+def auth_future_city_asset():
+    if not AUTH_ASSET_PATH.is_file():
+        raise HTTPException(status_code=404, detail="登录页背景资源不存在")
+    return FileResponse(
+        AUTH_ASSET_PATH,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.post("/sub/auth/login")
+def login(
+    username: str = Form(...),
+    password: str = Form(...),
+    remember: str = Form(""),
+):
+    user = authenticate_user(username, password)
+    if not user:
+        return _auth_redirect("用户名或密码错误，或账号已被禁用。")
+
+    persistent = remember == "on"
+    token = create_auth_session(
+        int(user["id"]),
+        days=AUTH_COOKIE_DAYS if persistent else 1,
+    )
+    response = _auth_redirect()
+    _set_auth_cookie(response, token, persistent)
+    return response
+
+
+@app.post("/sub/auth/register")
+def register(
+    username: str = Form(...),
+    password: str = Form(...),
+    password_confirm: str = Form(...),
+):
+    if not get_bool_env("ALLOW_REGISTRATION", False):
+        return _auth_redirect("当前部署已关闭公开注册，请联系管理员创建账号。")
+    if password != password_confirm:
+        return _auth_redirect("两次输入的密码不一致。")
+    try:
+        user = create_user(username, password, is_admin=False)
+    except Exception as exc:
+        return _auth_redirect(f"注册失败：{exc}")
+
+    token = create_auth_session(int(user["id"]), days=AUTH_COOKIE_DAYS)
+    response = _auth_redirect()
+    _set_auth_cookie(response, token, remember=True)
+    return response
+
+
+@app.post("/sub/auth/logout")
+def logout(request: Request):
+    revoke_auth_session(request.cookies.get(AUTH_COOKIE_NAME, ""))
+    response = _auth_redirect()
+    response.delete_cookie(
+        AUTH_COOKIE_NAME,
+        path="/",
+        secure=get_bool_env("AUTH_COOKIE_SECURE", True),
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 @app.get("/ruleset/dustinwin/{name}")

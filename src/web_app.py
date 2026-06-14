@@ -1,3 +1,4 @@
+import html
 import streamlit as st
 import yaml
 import requests
@@ -6,7 +7,10 @@ import uuid
 import ipaddress
 import re
 import socket
+from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
+from textwrap import dedent
 from urllib.parse import urlparse
 
 from auth import get_bool_env
@@ -21,16 +25,16 @@ from config_builder import (
 from importers import normalize_subscription_content, parse_proxy_yaml, parse_share_link
 from mihomo_validator import validate_with_mihomo
 from storage import (
-    authenticate_user,
-    create_user,
     delete_regular_user,
     ensure_admin_from_env,
     get_public_base_url,
+    get_user_by_auth_session,
     get_user_config,
     init_db,
     list_users,
     reset_subscription_token,
     save_user_config,
+    save_user_draft,
     set_user_enabled,
 )
 
@@ -134,72 +138,120 @@ st.markdown("""
         display: none;
     }
     
+    :root {
+        color-scheme: dark;
+    }
+    .stApp {
+        background: #050b14;
+        color: #effcff;
+    }
+    [data-testid="stHeader"] {
+        background: transparent;
+    }
     /* 移除顶部默认的 padding */
     .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 2rem !important;
+        max-width: 1280px;
+        padding-top: 1.8rem !important;
+        padding-bottom: 5rem !important;
     }
-    
-    .app-hero {
-        padding: 1.25rem 1.35rem 1.35rem;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: linear-gradient(135deg, #f8fafc 0%, #ffffff 55%, #eef6ff 100%);
-        margin-bottom: 1rem;
-        overflow: visible;
+    [data-testid="stSidebar"] {
+        background: #06101c;
+        border-right: 1px solid #193349;
     }
-    .app-brand {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: baseline;
-        column-gap: .55rem;
-        row-gap: .15rem;
-        margin: 0 0 .55rem 0;
-        padding-top: .25rem;
-        overflow: visible;
+    [data-testid="stSidebar"] * {
+        color: #dcebf2;
     }
-    .app-brand-en {
-        display: inline-block;
-        font-size: clamp(1.9rem, 3.4vw, 2.35rem);
-        line-height: 1.5;
-        font-weight: 850;
-        color: #111827;
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 1.15rem;
     }
-    .app-brand-cn {
-        display: inline-block;
-        font-size: clamp(1.55rem, 3vw, 2.1rem);
-        line-height: 1.55;
-        font-weight: 800;
-        color: #1f2937;
-        white-space: normal;
-        word-break: keep-all;
+    [data-testid="stSidebar"] .stHeadingContainer h1,
+    [data-testid="stSidebar"] .stHeadingContainer h2,
+    [data-testid="stSidebar"] .stHeadingContainer h3 {
+        margin: .25rem 0 .45rem;
+        font-size: 1.12rem;
+        line-height: 1.35;
     }
-    .app-hero-subtitle {
-        color: #4b5563;
-        font-size: 1rem;
-        line-height: 1.65;
-        margin: 0 0 .85rem 0;
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stCaptionContainer {
+        font-size: .78rem;
+        line-height: 1.45;
     }
-    .app-hero-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-        gap: .6rem;
-    }
-    .app-hero-chip {
-        display: flex;
-        align-items: center;
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
         gap: .55rem;
-        padding: .62rem .72rem;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: rgba(255,255,255,.78);
-        color: #374151;
-        font-weight: 650;
-        min-width: 0;
     }
-    .app-hero-chip span:first-child {
-        font-size: 1.25rem;
-        flex: 0 0 auto;
+    [data-testid="stSidebar"] hr {
+        margin: .8rem 0;
+        border-color: #152b3d;
+    }
+    [data-testid="stSidebar"] details {
+        border-color: #21425b;
+        border-radius: 6px;
+        background: #081321;
+    }
+    [data-testid="stSidebar"] details summary {
+        min-height: 38px;
+        padding: .45rem .65rem;
+        font-size: .78rem;
+    }
+    [data-testid="stSidebar"] [data-baseweb="input"] {
+        min-height: 38px;
+        border-color: #28506d;
+        background: #f8fafc;
+    }
+    [data-testid="stSidebar"] [data-baseweb="input"] input {
+        color: #172536 !important;
+        background: #f8fafc !important;
+        font-size: .78rem;
+    }
+    [data-testid="stSidebar"] [data-baseweb="radio"] {
+        margin-bottom: .1rem;
+    }
+    [data-testid="stSidebar"] [data-testid="stAlertContainer"] {
+        padding: .65rem .75rem;
+        border-radius: 6px;
+    }
+    .stButton > button,
+    .stDownloadButton > button,
+    [data-testid="stFormSubmitButton"] > button {
+        min-height: 38px;
+        border: 1px solid #2b4b63 !important;
+        border-radius: 6px !important;
+        color: #effcff !important;
+        background: #172333 !important;
+        font-weight: 700 !important;
+    }
+    .stButton > button:hover,
+    .stDownloadButton > button:hover,
+    [data-testid="stFormSubmitButton"] > button:hover {
+        border-color: #45ff7b !important;
+        color: #45ff7b !important;
+        background: #0b1928 !important;
+    }
+    .stButton > button[kind="primary"],
+    [data-testid="stFormSubmitButton"] > button[kind="primary"] {
+        border-color: #45ff7b !important;
+        color: #03101e !important;
+        background: #45ff7b !important;
+    }
+    .stButton > button:disabled,
+    .stDownloadButton > button:disabled,
+    [data-testid="stFormSubmitButton"] > button:disabled {
+        border-color: #243647 !important;
+        color: #748696 !important;
+        background: #111b29 !important;
+        opacity: 1 !important;
+    }
+    [data-baseweb="input"],
+    [data-baseweb="textarea"],
+    [data-baseweb="select"] > div {
+        border-color: #28506d !important;
+    }
+    [data-baseweb="input"] input,
+    [data-baseweb="textarea"] textarea {
+        color: #172536 !important;
+        background: #f8fafc !important;
+        -webkit-text-fill-color: #172536 !important;
     }
     [data-testid="collapsedControl"],
     [data-testid="stSidebarCollapsedControl"] {
@@ -219,6 +271,335 @@ st.markdown("""
     .auth-spacer {
         height: clamp(1.5rem, 9vh, 6rem);
     }
+    .auth-page {
+        position: fixed;
+        inset: 0;
+        z-index: 999998;
+        overflow: auto;
+        color: #effcff;
+        background:
+            linear-gradient(90deg, rgba(3, 12, 27, .22) 0%, rgba(3, 12, 27, .42) 50%, rgba(3, 12, 27, .96) 100%),
+            url("/sub/assets/auth-future-city.png") center / cover fixed;
+    }
+    .auth-page::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+            linear-gradient(rgba(57, 255, 116, .045) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(57, 255, 116, .045) 1px, transparent 1px);
+        background-size: 72px 72px;
+        mask-image: linear-gradient(to bottom, rgba(0,0,0,.7), transparent 82%);
+    }
+    .auth-page::after {
+        content: "";
+        position: fixed;
+        width: 7px;
+        height: 7px;
+        left: 18%;
+        top: 72%;
+        border-radius: 50%;
+        background: #45ff7b;
+        box-shadow:
+            13vw -9vh 0 #45ff7b,
+            31vw -3vh 0 #2bc9ff,
+            43vw -20vh 0 #45ff7b,
+            57vw -11vh 0 #45ff7b;
+        filter: drop-shadow(0 0 10px rgba(69,255,123,.9));
+        animation: auth-particles 5s ease-in-out infinite alternate;
+        pointer-events: none;
+    }
+    .auth-layout {
+        position: relative;
+        z-index: 1;
+        width: min(1320px, calc(100% - 64px));
+        min-height: 100vh;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 428px;
+        align-items: center;
+        gap: 72px;
+        padding: 48px 0;
+    }
+    .auth-brand {
+        position: absolute;
+        top: 48px;
+        left: 0;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+    .auth-brand-mark {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 6px;
+        color: #03101e;
+        background: #45ff7b;
+        font-weight: 900;
+        font-size: 1.15rem;
+        box-shadow: 0 0 28px rgba(69,255,123,.25);
+    }
+    .auth-brand-name {
+        font-size: 1.05rem;
+        line-height: 1.2;
+        font-weight: 800;
+    }
+    .auth-brand-desc {
+        margin-top: 3px;
+        color: #8fa7b9;
+        font-size: .72rem;
+    }
+    .auth-intro {
+        max-width: 670px;
+        padding-top: 64px;
+        animation: auth-enter .5s ease-out both;
+    }
+    .auth-eyebrow {
+        margin-bottom: 22px;
+        color: #45ff7b;
+        font-size: .78rem;
+        font-weight: 800;
+    }
+    .auth-intro h1 {
+        margin: 0;
+        color: #f0fbff;
+        font-size: clamp(2.55rem, 4.4vw, 4rem);
+        line-height: 1.17;
+        letter-spacing: 0;
+    }
+    .auth-intro > p {
+        max-width: 610px;
+        margin: 26px 0 30px;
+        color: #a1b5c5;
+        font-size: 1.06rem;
+        line-height: 1.75;
+    }
+    .auth-capabilities {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .auth-capability {
+        padding: 9px 13px;
+        border: 1px solid rgba(69,255,123,.25);
+        border-radius: 6px;
+        color: #d8e9ef;
+        background: rgba(4, 23, 40, .64);
+        font-size: .82rem;
+        backdrop-filter: blur(10px);
+    }
+    .auth-capability::before {
+        content: "";
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 8px;
+        border-radius: 50%;
+        background: #45ff7b;
+        box-shadow: 0 0 9px rgba(69,255,123,.8);
+    }
+    .auth-card {
+        padding: 34px 32px 30px;
+        border: 1px solid rgba(72, 132, 165, .6);
+        border-radius: 8px;
+        background: rgba(3, 14, 29, .94);
+        box-shadow: 0 26px 70px rgba(0,0,0,.42);
+        backdrop-filter: blur(18px);
+        animation: auth-card-enter .42s ease-out both;
+    }
+    .auth-card h2 {
+        margin: 0;
+        color: #f0fbff;
+        font-size: 1.7rem;
+        letter-spacing: 0;
+    }
+    .auth-card-subtitle {
+        margin: 7px 0 24px;
+        color: #849cad;
+        font-size: .9rem;
+    }
+    .auth-tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        margin-bottom: 26px;
+    }
+    .auth-tab {
+        padding: 13px 8px;
+        border-bottom: 2px solid transparent;
+        color: #879eae !important;
+        text-align: center;
+        text-decoration: none !important;
+        font-weight: 700;
+    }
+    .auth-tab.active {
+        border-color: #45ff7b;
+        color: #45ff7b !important;
+        background: rgba(18, 52, 74, .22);
+    }
+    .auth-form {
+        display: grid;
+        gap: 18px;
+    }
+    .auth-field {
+        display: grid;
+        gap: 8px;
+        color: #9db0be;
+        font-size: .82rem;
+    }
+    .auth-field input {
+        box-sizing: border-box;
+        width: 100%;
+        height: 49px;
+        padding: 0 15px;
+        border: 1px solid #264a61;
+        border-radius: 6px;
+        outline: 0;
+        color: #ecfaff;
+        background: rgba(2, 12, 25, .75);
+        font: inherit;
+        font-size: .95rem;
+        transition: border-color .18s, box-shadow .18s;
+    }
+    .auth-field input:focus {
+        border-color: #45ff7b;
+        box-shadow: 0 0 0 3px rgba(69,255,123,.12);
+    }
+    .auth-options {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: #91a7b7;
+        font-size: .82rem;
+    }
+    .auth-remember {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+    }
+    .auth-remember input {
+        width: 17px;
+        height: 17px;
+        accent-color: #45ff7b;
+    }
+    .auth-submit {
+        height: 50px;
+        border: 0;
+        border-radius: 6px;
+        color: #03101e;
+        background: #45ff7b;
+        font-size: .96rem;
+        font-weight: 850;
+        cursor: pointer;
+        transition: transform .18s, box-shadow .18s, background .18s;
+    }
+    .auth-submit:hover {
+        transform: translateY(-1px);
+        background: #65ff91;
+        box-shadow: 0 12px 30px rgba(69,255,123,.18);
+    }
+    .auth-error {
+        margin: 0 0 18px;
+        padding: 11px 12px;
+        border-left: 3px solid #ff5964;
+        border-radius: 4px;
+        color: #ffd5d8;
+        background: rgba(110, 17, 31, .34);
+        font-size: .82rem;
+        line-height: 1.5;
+    }
+    .auth-security {
+        margin-top: 24px;
+        padding-top: 19px;
+        border-top: 1px solid #173449;
+        color: #8fa5b5;
+        font-size: .76rem;
+        text-align: center;
+    }
+    .auth-security::before {
+        content: "";
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 8px;
+        border-radius: 50%;
+        background: #45ff7b;
+    }
+    .auth-registration-closed {
+        padding: 13px;
+        border: 1px solid #264a61;
+        border-radius: 6px;
+        color: #9fb3c1;
+        background: rgba(13, 37, 55, .55);
+        font-size: .84rem;
+        line-height: 1.55;
+    }
+    .auth-product-note {
+        position: absolute;
+        left: 0;
+        bottom: 48px;
+        color: #9bb0be;
+        font-size: .8rem;
+    }
+    form.auth-logout-form {
+        margin: 0;
+    }
+    form.auth-logout-form button {
+        width: 100%;
+        padding: .55rem .75rem;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        color: #374151;
+        background: white;
+        cursor: pointer;
+        font-weight: 650;
+    }
+    @keyframes auth-enter {
+        from { opacity: 0; transform: translateY(12px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes auth-card-enter {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes auth-particles {
+        from { transform: translate3d(-8px, 5px, 0); opacity: .6; }
+        to { transform: translate3d(10px, -9px, 0); opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .auth-page::after, .auth-intro, .auth-card { animation: none; }
+    }
+    @media (max-width: 820px) {
+        .auth-layout {
+            width: min(100% - 40px, 430px);
+            grid-template-columns: 1fr;
+            align-content: start;
+            gap: 28px;
+            padding: 28px 0 34px;
+        }
+        .auth-brand {
+            position: static;
+        }
+        .auth-intro {
+            padding-top: 20px;
+        }
+        .auth-intro h1 {
+            font-size: 2.25rem;
+        }
+        .auth-intro > p {
+            margin: 14px 0 0;
+            font-size: .92rem;
+        }
+        .auth-capabilities, .auth-product-note {
+            display: none;
+        }
+        .auth-card {
+            padding: 28px 24px 26px;
+        }
+    }
     .auth-panel-title {
         margin: 0 0 .35rem 0;
         font-size: 1.6rem;
@@ -235,7 +616,7 @@ st.markdown("""
     }
     div[data-baseweb="tab-list"] {
         gap: .9rem;
-        border-bottom: 1px solid #e5e7eb;
+        border-bottom: 1px solid #21425b;
     }
     button[data-baseweb="tab"] {
         padding: .9rem .25rem .95rem !important;
@@ -245,11 +626,11 @@ st.markdown("""
         font-size: 1.14rem;
         line-height: 1.45;
         font-weight: 750;
-        color: #1f2937;
+        color: #8fa7b9;
         letter-spacing: 0;
     }
     button[data-baseweb="tab"][aria-selected="true"] p {
-        color: #ef4444;
+        color: #45ff7b;
     }
     .workflow-step {
         display: flex;
@@ -257,10 +638,10 @@ st.markdown("""
         gap: .75rem;
         padding: .85rem 1rem;
         margin: .35rem 0 1rem;
-        border: 1px solid #dbeafe;
+        border: 1px solid #21425b;
         border-radius: 8px;
-        background: #eff6ff;
-        color: #1e3a8a;
+        background: #081321;
+        color: #effcff;
     }
     .workflow-step-number {
         display: inline-flex;
@@ -270,8 +651,8 @@ st.markdown("""
         width: 1.8rem;
         height: 1.8rem;
         border-radius: 50%;
-        background: #2563eb;
-        color: #fff;
+        background: #45ff7b;
+        color: #03101e;
         font-weight: 800;
         font-size: .95rem;
     }
@@ -280,37 +661,552 @@ st.markdown("""
         font-size: 1.08rem;
         line-height: 1.45;
         font-weight: 800;
-        color: #172554;
+        color: #effcff;
     }
     .workflow-step-desc {
         margin: 0;
         font-size: .98rem;
         line-height: 1.6;
-        color: #1e40af;
+        color: #8fa7b9;
+    }
+    @media (max-width: 760px) {
+        .block-container {
+            padding: 1rem 1rem 5.5rem !important;
+        }
+        [data-testid="stSidebar"] { width: min(88vw, 340px) !important; }
+    }
+
+    /* 浅色主题覆盖：保留绿色操作强调色，统一应用页与登录页对比度。 */
+    :root {
+        color-scheme: light;
+    }
+    .stApp {
+        color: #172536;
+        background: #f4f7fb;
+    }
+    .stApp,
+    .stApp p,
+    .stApp label,
+    .stApp h1,
+    .stApp h2,
+    .stApp h3,
+    .stApp h4,
+    .stApp h5,
+    .stApp h6 {
+        color: #172536;
+    }
+    [data-testid="stHeader"] {
+        background: rgba(244, 247, 251, .92);
+    }
+    [data-testid="stSidebar"] {
+        background: #ffffff;
+        border-right-color: #d8e2ec;
+    }
+    [data-testid="stSidebar"] *,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label {
+        color: #233548;
+    }
+    [data-testid="stSidebar"] hr {
+        border-color: #e2e8f0;
+    }
+    [data-testid="stSidebar"] details,
+    [data-testid="stExpander"] details {
+        border-color: #d8e2ec;
+        background: #f8fafc;
+    }
+    [data-testid="stSidebar"] [data-testid="stAlertContainer"],
+    [data-testid="stAlertContainer"] {
+        border-color: #cfe0ee;
+        background: #eef6ff;
+    }
+    div[data-baseweb="tab-list"] {
+        border-bottom-color: #d8e2ec;
+    }
+    button[data-baseweb="tab"] p {
+        color: #60758a;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] p {
+        color: #087a3e;
+    }
+    [data-baseweb="input"],
+    [data-baseweb="textarea"],
+    [data-baseweb="select"] > div,
+    [data-baseweb="base-input"],
+    [data-testid="stNumberInput"] > div > div {
+        border-color: #c8d4df !important;
+        background: #ffffff !important;
+    }
+    [data-baseweb="input"] input,
+    [data-baseweb="textarea"] textarea,
+    [data-baseweb="select"] input,
+    [data-baseweb="select"] span {
+        color: #172536 !important;
+        background: #ffffff !important;
+        -webkit-text-fill-color: #172536 !important;
+    }
+    [data-baseweb="select"] svg,
+    [data-testid="stNumberInput"] button svg {
+        color: #40566b !important;
+        fill: #40566b !important;
+    }
+    [data-baseweb="popover"],
+    [role="listbox"],
+    [data-baseweb="menu"] {
+        color: #172536 !important;
+        background: #ffffff !important;
+    }
+    [role="option"] {
+        color: #172536 !important;
+        background: #ffffff !important;
+    }
+    [role="option"]:hover,
+    [aria-selected="true"][role="option"] {
+        background: #edf9f2 !important;
+    }
+    .stButton > button,
+    .stDownloadButton > button,
+    [data-testid="stFormSubmitButton"] > button {
+        border-color: #b8c7d5 !important;
+        color: #203247 !important;
+        background: #ffffff !important;
+    }
+    .stButton > button:hover,
+    .stDownloadButton > button:hover,
+    [data-testid="stFormSubmitButton"] > button:hover {
+        border-color: #0fa958 !important;
+        color: #087a3e !important;
+        background: #eefcf3 !important;
+    }
+    .stButton > button[kind="primary"],
+    [data-testid="stFormSubmitButton"] > button[kind="primary"] {
+        border-color: #0fa958 !important;
+        color: #ffffff !important;
+        background: #0fa958 !important;
+    }
+    .stButton > button:disabled,
+    .stDownloadButton > button:disabled,
+    [data-testid="stFormSubmitButton"] > button:disabled {
+        border-color: #d7e0e8 !important;
+        color: #94a3b1 !important;
+        background: #edf1f5 !important;
+    }
+    .workflow-step {
+        border-color: #d5e0e9;
+        color: #172536;
+        background: #ffffff;
+        box-shadow: 0 4px 16px rgba(31, 52, 73, .05);
+    }
+    .workflow-step-number {
+        color: #ffffff;
+        background: #0fa958;
+    }
+    .workflow-step-title {
+        color: #172536;
+    }
+    .workflow-step-desc {
+        color: #60758a;
+    }
+    [data-testid="stCode"],
+    [data-testid="stJson"],
+    pre {
+        border-color: #d8e2ec !important;
+        color: #172536 !important;
+        background: #ffffff !important;
+    }
+    .auth-page {
+        color: #172536;
+        background:
+            linear-gradient(90deg, rgba(240, 249, 255, .18) 0%, rgba(240, 249, 255, .62) 48%, rgba(247, 250, 252, .98) 100%),
+            url("/sub/assets/auth-future-city.png") center / cover fixed;
+    }
+    .auth-brand-mark,
+    .auth-submit {
+        color: #ffffff;
+        background: #0fa958;
+    }
+    .auth-brand-name,
+    .auth-intro h1,
+    .auth-card h2 {
+        color: #102338;
+    }
+    .auth-brand-desc,
+    .auth-intro > p,
+    .auth-card-subtitle,
+    .auth-options,
+    .auth-security,
+    .auth-product-note {
+        color: #52677b;
+    }
+    .auth-eyebrow,
+    .auth-tab.active {
+        color: #087a3e !important;
+    }
+    .auth-capability {
+        color: #20364a;
+        background: rgba(255, 255, 255, .84);
+    }
+    .auth-card {
+        border-color: rgba(184, 204, 220, .95);
+        background: rgba(255, 255, 255, .97);
+        box-shadow: 0 26px 70px rgba(31, 52, 73, .18);
+    }
+    .auth-tab {
+        color: #60758a !important;
+    }
+    .auth-tab.active {
+        background: #edf9f2;
+    }
+    .auth-field {
+        color: #40566b;
+    }
+    .auth-field input {
+        border-color: #b8c9d8;
+        color: #172536;
+        background: #ffffff;
+    }
+    .auth-submit:hover {
+        background: #0b914b;
+    }
+    .auth-security {
+        border-top-color: #dce5ed;
+    }
+    .auth-registration-closed {
+        border-color: #c8d5e0;
+        color: #52677b;
+        background: #f5f8fb;
+    }
+    /* 修正 Streamlit 默认顶部留白，并避免窄屏标签互相遮挡。 */
+    [data-testid="stAppViewContainer"] > .main {
+        padding-top: 0 !important;
+    }
+    .block-container {
+        width: 100%;
+        max-width: 1440px;
+        padding-top: .55rem !important;
+    }
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: .55rem !important;
+    }
+    div[data-baseweb="tab-list"] {
+        width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        flex-wrap: nowrap;
+        scrollbar-width: thin;
+    }
+    button[data-baseweb="tab"] {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+    button[data-baseweb="tab"] p {
+        white-space: nowrap;
+    }
+    @media (max-width: 1100px) {
+        .block-container {
+            padding-right: 1rem !important;
+            padding-left: 1rem !important;
+        }
+        button[data-baseweb="tab"] {
+            padding-right: .5rem !important;
+            padding-left: .5rem !important;
+        }
+        button[data-baseweb="tab"] p {
+            font-size: .95rem;
+        }
+    }
+    @media (max-width: 760px) {
+        .block-container {
+            padding-top: .35rem !important;
+        }
+    }
+    /* Streamlit 顶部 Header 会形成透明点击遮罩，同时推低侧栏内容。 */
+    [data-testid="stHeader"] {
+        display: none !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        pointer-events: none !important;
+    }
+    [data-testid="stAppViewContainer"],
+    [data-testid="stAppViewContainer"] > .main {
+        top: 0 !important;
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+    }
+    [data-testid="stSidebar"] {
+        top: 0 !important;
+        height: 100vh !important;
+    }
+    [data-testid="stSidebar"] > div,
+    [data-testid="stSidebar"] > div:first-child,
+    [data-testid="stSidebarContent"] {
+        margin-top: 0 !important;
+        padding-top: .5rem !important;
+    }
+    div[data-baseweb="tab-list"],
+    button[data-baseweb="tab"] {
+        position: relative;
+        z-index: 2;
+        pointer-events: auto !important;
+    }
+    /* 压缩主表单纵向节奏，保留控件可点击高度。 */
+    [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {
+        gap: .62rem;
+    }
+    [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlockBorderWrapper"] {
+        margin-bottom: .15rem;
+    }
+    [data-testid="stMainBlockContainer"] [data-testid="stWidgetLabel"] {
+        margin-bottom: .15rem;
+    }
+    [data-testid="stMainBlockContainer"] [data-testid="stWidgetLabel"] p {
+        line-height: 1.3;
+    }
+    [data-testid="stMainBlockContainer"] .stHeadingContainer {
+        margin-bottom: -.15rem;
+    }
+    [data-testid="stMainBlockContainer"] .workflow-step {
+        margin-bottom: .45rem;
+    }
+    [data-testid="stMainBlockContainer"] hr {
+        margin: .55rem 0;
+    }
+    [data-testid="stMainBlockContainer"] details summary {
+        min-height: 42px;
+        padding-top: .45rem;
+        padding-bottom: .45rem;
+    }
+    /* 应用页最终主题：深色玻璃拟态，避免依赖 Tab DOM 顺序或 :has()。 */
+    :root {
+        color-scheme: dark;
+    }
+    .stApp {
+        color: #e9f5f8;
+        background:
+            radial-gradient(circle at 12% 0%, rgba(34, 95, 151, .24), transparent 34rem),
+            radial-gradient(circle at 88% 6%, rgba(24, 181, 116, .12), transparent 28rem),
+            #070b12;
+    }
+    .stApp,
+    .stApp p,
+    .stApp label,
+    .stApp h1,
+    .stApp h2,
+    .stApp h3,
+    .stApp h4,
+    .stApp h5,
+    .stApp h6 {
+        color: #e9f5f8;
+    }
+    [data-testid="stSidebar"] {
+        background: rgba(6, 13, 23, .9);
+        border-right-color: rgba(130, 174, 205, .18);
+        backdrop-filter: blur(18px);
+    }
+    [data-testid="stSidebar"] *,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label {
+        color: #c8dbe4;
+    }
+    div[data-baseweb="tab-list"] {
+        border-bottom-color: rgba(130, 174, 205, .2);
+        background: rgba(8, 17, 29, .5);
+        backdrop-filter: blur(14px);
+    }
+    button[data-baseweb="tab"] p {
+        color: #8ea6b4;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] p {
+        color: #45ff7b;
+    }
+    .workflow-step,
+    [data-testid="stMetric"],
+    [data-testid="stExpander"] details,
+    [data-testid="stAlertContainer"] {
+        border: 1px solid rgba(128, 173, 205, .2) !important;
+        border-radius: 8px !important;
+        background: rgba(12, 25, 40, .68) !important;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, .2);
+        backdrop-filter: blur(16px);
+    }
+    .workflow-step {
+        gap: .6rem;
+        margin: .1rem 0 .55rem;
+        padding: .65rem .8rem;
+    }
+    .workflow-step-number {
+        width: 1.6rem;
+        height: 1.6rem;
+        flex-basis: 1.6rem;
+        color: #06111b;
+        background: #45ff7b;
+        font-size: .82rem;
+    }
+    .workflow-step-title {
+        color: #effcff;
+        font-size: .96rem;
+        line-height: 1.25;
+    }
+    .workflow-step-desc {
+        color: #91a8b6;
+        font-size: .84rem;
+        line-height: 1.35;
+    }
+    [data-testid="stMetric"] {
+        min-height: 76px;
+        padding: .58rem .7rem;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 1.22rem;
+    }
+    [data-testid="stMainBlockContainer"] details summary {
+        min-height: 38px;
+        padding-top: .32rem;
+        padding-bottom: .32rem;
+        color: #dcecf2;
+    }
+    [data-baseweb="input"],
+    [data-baseweb="textarea"],
+    [data-baseweb="select"] > div,
+    [data-baseweb="base-input"],
+    [data-testid="stNumberInput"] > div > div {
+        border-color: rgba(110, 159, 193, .3) !important;
+        background: rgba(9, 20, 33, .82) !important;
+    }
+    [data-baseweb="input"] input,
+    [data-baseweb="textarea"] textarea,
+    [data-baseweb="select"] input,
+    [data-baseweb="select"] span {
+        color: #e7f2f6 !important;
+        background: transparent !important;
+        -webkit-text-fill-color: #e7f2f6 !important;
+    }
+    [data-baseweb="select"] svg,
+    [data-testid="stNumberInput"] button svg {
+        color: #9bb1be !important;
+        fill: #9bb1be !important;
+    }
+    [data-baseweb="popover"],
+    [role="listbox"],
+    [data-baseweb="menu"],
+    [role="option"] {
+        color: #e7f2f6 !important;
+        background: #0c1826 !important;
+    }
+    [role="option"]:hover,
+    [aria-selected="true"][role="option"] {
+        background: #122c35 !important;
+    }
+    [data-testid="stCode"],
+    [data-testid="stJson"],
+    pre {
+        border-color: rgba(110, 159, 193, .25) !important;
+        color: #dcecf2 !important;
+        background: rgba(5, 14, 24, .88) !important;
+    }
+    .stButton > button,
+    .stDownloadButton > button,
+    [data-testid="stFormSubmitButton"] > button {
+        border-color: rgba(110, 159, 193, .38) !important;
+        color: #e9f5f8 !important;
+        background: rgba(17, 34, 51, .82) !important;
+    }
+    .stButton > button:hover,
+    .stDownloadButton > button:hover,
+    [data-testid="stFormSubmitButton"] > button:hover {
+        border-color: #45ff7b !important;
+        color: #45ff7b !important;
+        background: rgba(11, 30, 40, .94) !important;
+    }
+    .stButton > button[kind="primary"],
+    [data-testid="stFormSubmitButton"] > button[kind="primary"] {
+        border-color: #45ff7b !important;
+        color: #06111b !important;
+        background: #45ff7b !important;
+    }
+    .stButton > button:disabled,
+    .stDownloadButton > button:disabled,
+    [data-testid="stFormSubmitButton"] > button:disabled {
+        border-color: #263847 !important;
+        color: #708390 !important;
+        background: rgba(14, 25, 37, .86) !important;
+    }
+    .import-source-row,
+    .draft-status {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: .45rem;
+        padding: .65rem .75rem;
+        border: 1px solid rgba(128, 173, 205, .2);
+        border-radius: 8px;
+        background: rgba(10, 23, 37, .66);
+        backdrop-filter: blur(14px);
+    }
+    .import-source-row > div,
+    .draft-status > div {
+        display: flex;
+        align-items: baseline;
+        gap: .65rem;
+        min-width: 0;
+    }
+    .import-source-row span,
+    .draft-status span {
+        color: #8fa6b4;
+        font-size: .78rem;
+    }
+    .draft-status {
+        margin: .1rem 0 .7rem;
+        border-left: 3px solid #45ff7b;
+    }
+    .draft-status-pending {
+        border-left-color: #ffbd4a;
+    }
+    .draft-status-pending strong {
+        color: #ffcc72;
+    }
+    .draft-status-clean strong {
+        color: #45ff7b;
+    }
+    .auth-card {
+        border-color: rgba(94, 151, 187, .5);
+        color: #e9f5f8;
+        background: rgba(4, 15, 28, .82);
+        box-shadow: 0 26px 70px rgba(0, 0, 0, .38);
+        backdrop-filter: blur(20px);
+    }
+    .auth-brand-name,
+    .auth-intro h1,
+    .auth-card h2 {
+        color: #effcff;
+    }
+    .auth-brand-desc,
+    .auth-intro > p,
+    .auth-card-subtitle,
+    .auth-options,
+    .auth-security,
+    .auth-product-note {
+        color: #94aab7;
+    }
+    .auth-field {
+        color: #9fb3be;
+    }
+    .auth-field input {
+        border-color: #28506d;
+        color: #ecfaff;
+        background: rgba(2, 12, 25, .76);
+    }
+    @media (max-width: 760px) {
+        .draft-status,
+        .import-source-row {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: .35rem;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
-
-st.markdown(
-    """
-<section class="app-hero">
-  <div class="app-brand">
-    <span class="app-brand-en">OpenClash</span>
-    <span class="app-brand-cn">配置文件生成器</span>
-  </div>
-  <p class="app-hero-subtitle">
-    面向 Docker 自部署、OpenClash 软路由和 mihomo 客户端的订阅生成工具。
-    导入节点、编辑规则、生成订阅、校验 YAML，一套流程直接闭环。
-  </p>
-  <div class="app-hero-grid">
-    <div class="app-hero-chip"><span>🧩</span><span>智能导入 YAML / 订阅 / 分享链接</span></div>
-    <div class="app-hero-chip"><span>🛡️</span><span>用户隔离 Token 订阅</span></div>
-    <div class="app-hero-chip"><span>🧪</span><span>生成前自动检查配置</span></div>
-  </div>
-</section>
-""",
-    unsafe_allow_html=True,
-)
 
 
 # ==========================================
@@ -325,61 +1221,126 @@ if "auth_user" not in st.session_state:
 
 def render_auth_gate():
     """所有配置都和用户绑定，未登录时必须提前拦截，避免匿名配置丢失。"""
-    st.markdown('<div class="auth-spacer"></div>', unsafe_allow_html=True)
-    left, middle, right = st.columns([1.15, 1, 1.15])
-    with middle:
-        st.markdown('<div class="auth-panel-title">账号中心</div>', unsafe_allow_html=True)
-        st.markdown('<div class="auth-panel-desc">登录后保存节点、规则和专属订阅 Token。</div>', unsafe_allow_html=True)
-        login_tab, register_tab = st.tabs(["登录", "注册"])
+    register_mode = st.query_params.get("auth") == "register"
+    registration_enabled = get_bool_env("ALLOW_REGISTRATION", False)
+    error_message = html.escape(st.query_params.get("auth_error", ""))
+    title = "创建新账号" if register_mode else "欢迎回来"
+    subtitle = "建立你的专属配置空间" if register_mode else "登录以继续管理节点与订阅"
 
-        with login_tab:
-            with st.form("login_form"):
-                username = st.text_input("用户名", key="login_username")
-                password = st.text_input("密码", type="password", key="login_password")
-                submitted = st.form_submit_button("登录", type="primary", use_container_width=True)
-            if submitted:
-                user = authenticate_user(username, password)
-                if user:
-                    st.session_state.auth_user = {
-                        "id": int(user["id"]),
-                        "username": user["username"],
-                        "is_admin": bool(user["is_admin"]),
-                    }
-                    st.session_state.pop("session_loaded_user_id", None)
-                    st.rerun()
-                else:
-                    st.error("用户名或密码错误，或账号已被禁用。")
+    if register_mode and registration_enabled:
+        form_html = dedent(
+            """
+            <form class="auth-form" method="post" action="/sub/auth/register">
+              <label class="auth-field">用户名
+                <input name="username" autocomplete="username" required minlength="3" maxlength="32" placeholder="3-32 位字母、数字、点或短横线">
+              </label>
+              <label class="auth-field">密码
+                <input name="password" type="password" autocomplete="new-password" required minlength="8" placeholder="至少 8 位">
+              </label>
+              <label class="auth-field">确认密码
+                <input name="password_confirm" type="password" autocomplete="new-password" required minlength="8" placeholder="再次输入密码">
+              </label>
+              <button class="auth-submit" type="submit">注册并进入控制台</button>
+            </form>
+            """
+        ).strip()
+    elif register_mode:
+        form_html = dedent(
+            """
+            <div class="auth-registration-closed">
+              当前部署已关闭公开注册，请联系管理员创建账号。
+            </div>
+            """
+        ).strip()
+    else:
+        form_html = dedent(
+            """
+            <form class="auth-form" method="post" action="/sub/auth/login">
+              <label class="auth-field">用户名
+                <input name="username" autocomplete="username" required placeholder="请输入用户名">
+              </label>
+              <label class="auth-field">密码
+                <input name="password" type="password" autocomplete="current-password" required placeholder="请输入密码">
+              </label>
+              <div class="auth-options">
+                <label class="auth-remember">
+                  <input name="remember" type="checkbox">
+                  <span>保持登录 30 天</span>
+                </label>
+              </div>
+              <button class="auth-submit" type="submit">安全登录</button>
+            </form>
+            """
+        ).strip()
 
-        with register_tab:
-            if not get_bool_env("ALLOW_REGISTRATION", False):
-                st.warning("当前部署已关闭公开注册，请联系管理员创建账号。")
-                return
-            with st.form("register_form"):
-                new_username = st.text_input("用户名", key="register_username", help="3-32 位字母、数字、下划线、点或短横线")
-                new_password = st.text_input("密码", type="password", key="register_password", help="至少 8 位")
-                new_password_confirm = st.text_input("确认密码", type="password", key="register_password_confirm")
-                submitted = st.form_submit_button("注册并登录", type="primary", use_container_width=True)
-            if submitted:
-                if new_password != new_password_confirm:
-                    st.error("两次输入的密码不一致。")
-                    return
-                try:
-                    user = create_user(new_username, new_password, is_admin=False)
-                    st.session_state.auth_user = {
-                        "id": int(user["id"]),
-                        "username": user["username"],
-                        "is_admin": bool(user["is_admin"]),
-                    }
-                    st.session_state.pop("session_loaded_user_id", None)
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"注册失败: {exc}")
+    error_html = f'<div class="auth-error">{error_message}</div>' if error_message else ""
+    register_class = "active" if register_mode else ""
+    login_class = "" if register_mode else "active"
+    auth_page_html = "\n".join(
+        line.strip()
+        for line in dedent(
+            f"""
+        <div class="auth-page">
+          <main class="auth-layout">
+            <header class="auth-brand">
+              <div class="auth-brand-mark">C</div>
+              <div>
+                <div class="auth-brand-name">CLASH CONFIG GEN</div>
+                <div class="auth-brand-desc">Secure configuration intelligence</div>
+              </div>
+            </header>
+            <section class="auth-intro">
+              <div class="auth-eyebrow">CONFIGURATION INTELLIGENCE</div>
+              <h1>让复杂网络配置<br>变得清晰、可靠。</h1>
+              <p>面向 OpenClash 与 mihomo 的智能订阅生成平台。导入、校验、发布，一套工作流完成。</p>
+              <div class="auth-capabilities">
+                <span class="auth-capability">真实 mihomo 内核校验</span>
+                <span class="auth-capability">用户隔离订阅</span>
+                <span class="auth-capability">持久化节点与规则</span>
+              </div>
+            </section>
+            <section class="auth-card">
+              <h2>{title}</h2>
+              <div class="auth-card-subtitle">{subtitle}</div>
+              <nav class="auth-tabs">
+                <a class="auth-tab {login_class}" href="/">登录</a>
+                <a class="auth-tab {register_class}" href="/?auth=register">注册</a>
+              </nav>
+              {error_html}
+              {form_html}
+              <div class="auth-security">TLS 加密传输 · HttpOnly 会话 · 可随时撤销</div>
+            </section>
+            <div class="auth-product-note">登录后同步节点、规则和专属订阅 Token</div>
+          </main>
+        </div>
+        """
+        ).splitlines()
+        if line.strip()
+    )
+    st.markdown(auth_page_html, unsafe_allow_html=True)
+
+
+def set_auth_user(user) -> None:
+    st.session_state.auth_user = {
+        "id": int(user["id"]),
+        "username": user["username"],
+        "is_admin": bool(user["is_admin"]),
+    }
+    st.session_state.pop("session_loaded_user_id", None)
+
+
+if not st.session_state.auth_user:
+    session_token = st.context.cookies.get("clash_config_gen_session", "")
+    session_user = get_user_by_auth_session(session_token)
+    if session_user:
+        set_auth_user(session_user)
 
 
 if not st.session_state.auth_user:
     render_auth_gate()
     st.stop()
 
+st.query_params.clear()
 
 def reset_global_widget_keys() -> None:
     """应用预设时清理侧边栏控件缓存，避免旧 widget 值覆盖新的 global_config。"""
@@ -593,61 +1554,107 @@ def migrate_global_defaults(global_config: dict, saved_global_config: dict) -> d
     return migrated
 
 
-def autosave_current_subscription(selected_rule_type: str, reason: str) -> tuple[bool, str]:
-    """规则源或预设目标变更后立即刷新数据库中的订阅 YAML。"""
-    if not st.session_state.proxies_data:
-        return False, "当前还没有节点，规则设置已暂存，添加节点并生成后才会发布订阅。"
+def draft_state_signature(
+    proxies: list[dict],
+    global_config: dict,
+    custom_rules: list[str],
+    custom_rule_providers: dict,
+    selected_rule_type: str,
+    import_sources: list[dict],
+) -> str:
+    payload = json.dumps(
+        {
+            "proxies": proxies,
+            "global_config": global_config,
+            "custom_rules": custom_rules,
+            "custom_rule_providers": custom_rule_providers,
+            "selected_rule_type": selected_rule_type,
+            "import_sources": import_sources,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return sha256(payload.encode("utf-8")).hexdigest()
 
-    final_config = build_subscription_config(
+
+def current_draft_signature() -> str:
+    return draft_state_signature(
         st.session_state.proxies_data,
         st.session_state.global_config,
         st.session_state.custom_rules,
         st.session_state.custom_rule_providers,
-        selected_rule_type,
+        st.session_state.get("selected_rule_type", DEFAULT_RULE_TYPE),
+        st.session_state.import_sources,
     )
-    check_errors, check_warnings = validate_subscription_config(final_config)
-    if check_errors:
-        return False, "自动保存失败：" + "；".join(check_errors)
 
-    final_config_str = build_subscription_yaml(final_config)
-    mihomo_result = validate_with_mihomo(final_config_str)
-    if not mihomo_result.ok:
-        return False, f"自动保存失败：mihomo 校验未通过 ({mihomo_result.status})"
 
-    validation_message = reason
-    if check_warnings:
-        validation_message = f"{reason}；警告：{'；'.join(check_warnings[:3])}"
-    save_user_config(
+def persist_current_draft(
+    validation_status: str = "unknown",
+    validation_message: str = "",
+) -> None:
+    source_counts: dict[str, int] = {}
+    for proxy in st.session_state.proxies_data:
+        source_id = str(proxy.get("_source_id") or "")
+        if source_id:
+            source_counts[source_id] = source_counts.get(source_id, 0) + 1
+    for source in st.session_state.import_sources:
+        source["node_count"] = source_counts.get(str(source.get("id") or ""), 0)
+
+    save_user_draft(
         current_user["id"],
         st.session_state.proxies_data,
         st.session_state.global_config,
         st.session_state.custom_rules,
         st.session_state.custom_rule_providers,
-        selected_rule_type,
-        final_config_str,
-        validation_status=mihomo_result.status,
-        validation_message=f"{validation_message}\n{mihomo_result.message}"[:2000],
+        st.session_state.get("selected_rule_type", DEFAULT_RULE_TYPE),
+        st.session_state.import_sources,
+        validation_status=validation_status,
+        validation_message=validation_message,
     )
-    return True, "分流设置已自动保存，订阅链接已立即生效。"
+    st.session_state.persisted_draft_signature = current_draft_signature()
 
 
-def rule_settings_signature(
-    selected_rule_type: str,
-    global_config: dict,
-    custom_rules: list[str] | None = None,
-    custom_rule_providers: dict | None = None,
-) -> str:
-    return yaml.dump(
+def register_import_source(source_name: str, source_type: str, proxies: list[dict]) -> list[dict]:
+    source_id = uuid.uuid4().hex
+    imported_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    clean_name = source_name.strip() or source_type
+    tagged_proxies = []
+    for proxy in proxies:
+        tagged = dict(proxy)
+        tagged["_source_id"] = source_id
+        tagged["_source_name"] = clean_name
+        tagged["_origin_name"] = str(proxy.get("name", ""))
+        tagged_proxies.append(tagged)
+    st.session_state.import_sources.append(
         {
-            "selected_rule_type": selected_rule_type,
-            "dustinwin_provider_targets": global_config.get("dustinwin_provider_targets", {}),
-            "lhie1_provider_targets": global_config.get("lhie1_provider_targets", {}),
-            "custom_rules": custom_rules or [],
-            "custom_rule_providers": custom_rule_providers or {},
-        },
-        allow_unicode=True,
-        sort_keys=True,
+            "id": source_id,
+            "name": clean_name,
+            "type": source_type,
+            "node_count": len(tagged_proxies),
+            "imported_at": imported_at,
+        }
     )
+    return tagged_proxies
+
+
+def config_summary(config: dict | None) -> dict[str, int]:
+    config = config if isinstance(config, dict) else {}
+    return {
+        "nodes": len(config.get("proxies") or []),
+        "groups": len(config.get("proxy-groups") or []),
+        "providers": len(config.get("rule-providers") or {}),
+        "rules": len(config.get("rules") or []),
+    }
+
+
+def proxy_names(config: dict | None) -> list[str]:
+    config = config if isinstance(config, dict) else {}
+    return [
+        str(proxy.get("name"))
+        for proxy in config.get("proxies") or []
+        if isinstance(proxy, dict) and proxy.get("name")
+    ]
 
 
 def normalize_hy2_hop_interval(raw_value: str) -> int:
@@ -682,6 +1689,9 @@ if 'custom_rules' not in st.session_state:
 if 'custom_rule_providers' not in st.session_state:
     st.session_state.custom_rule_providers = {}
 
+if 'import_sources' not in st.session_state:
+    st.session_state.import_sources = []
+
 if 'global_config' not in st.session_state:
     st.session_state.global_config = build_default_global_config()
 
@@ -712,17 +1722,16 @@ if st.session_state.get("session_loaded_user_id") != current_user["id"]:
         })
     st.session_state.custom_rules = saved_config.get("custom_rules") or []
     st.session_state.custom_rule_providers = saved_config.get("custom_rule_providers") or {}
+    st.session_state.import_sources = saved_config.get("import_sources") or []
     if saved_config.get("selected_rule_type"):
         st.session_state.selected_rule_type = saved_config["selected_rule_type"]
     elif "selected_rule_type" not in st.session_state:
         st.session_state.selected_rule_type = DEFAULT_RULE_TYPE
     st.session_state["target_mode"] = target_mode_from_global_config(st.session_state.global_config)
-    st.session_state.last_published_rule_signature = rule_settings_signature(
-        st.session_state.selected_rule_type,
-        st.session_state.global_config,
-        st.session_state.custom_rules,
-        st.session_state.custom_rule_providers,
-    )
+    st.session_state.persisted_draft_signature = current_draft_signature()
+    st.session_state.pop("checked_draft_signature", None)
+    st.session_state.pop("checked_draft_yaml", None)
+    st.session_state.pop("checked_draft_warnings", None)
     reset_global_widget_keys()
     st.session_state.session_loaded_user_id = current_user["id"]
 
@@ -766,9 +1775,14 @@ with st.sidebar:
         reset_subscription_token(current_user["id"])
         st.success("订阅 Token 已重置。")
         st.rerun()
-    if st.button("退出登录"):
-        st.session_state.clear()
-        st.rerun()
+    st.markdown(
+        """
+        <form class="auth-logout-form" method="post" action="/sub/auth/logout">
+          <button type="submit">退出登录</button>
+        </form>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if current_user["is_admin"]:
         with st.expander("用户管理", expanded=False):
@@ -1233,13 +2247,13 @@ def render_workflow_step(step: int, title: str, description: str) -> None:
     )
 
 
-tab1, tab2, tab3, tab4 = st.tabs(["1 快速填入 (YAML/链接)", "2 节点管理", "3 分流规则", "4 生成与检查"])
+tab1, tab2, tab3, tab4 = st.tabs(["1 导入节点", "2 节点管理", "3 分流规则", "4 生成与检查"])
 
 with tab1:
     render_workflow_step(
         1,
         "导入节点",
-        "粘贴 YAML、订阅链接或分享链接，系统会统一解析、去重并校验节点字段。",
+        "批量导入或手动添加节点，系统会统一解析、去重并校验节点字段。",
     )
     st.info(
         "这里统一处理完整 config.yaml、proxies: 片段、纯节点列表、onekey 输出片段、"
@@ -1257,11 +2271,25 @@ with tab1:
 
     import_method = st.radio(
         "选择导入方式",
-        ("智能 YAML 导入", "订阅链接", "分享链接"),
-        help="智能 YAML 导入负责本地粘贴内容；订阅链接负责远程拉取；分享链接负责单条 URI。三者最终都会进入同一套校验流程。",
+        ("智能 YAML 导入", "订阅链接", "分享链接", "手动添加"),
+        horizontal=True,
+        help="四种录入方式最终进入同一套解析、去重和字段校验流程。",
     )
 
+    source_name = st.text_input(
+        "来源名称",
+        value={
+            "智能 YAML 导入": "YAML 导入",
+            "订阅链接": "远程订阅",
+            "分享链接": "分享链接",
+            "手动添加": "手动添加",
+        }[import_method],
+        key=f"import_source_name_{import_method}",
+        help="用于节点管理中的来源标签，不会写入最终订阅 YAML。",
+    )
     raw_yaml_input = ""
+    subscription_url = ""
+    share_link = ""
     if import_method == "智能 YAML 导入":
         raw_yaml_input = st.text_area(
             "粘贴 YAML / OpenClash / onekey 输出片段",
@@ -1275,554 +2303,662 @@ with tab1:
             placeholder="https://example.com/sub/xxxxx",
             help="如果这里返回的是 Streamlit/HTML 页面，说明 /sub/ 被反代到了 Web UI，而不是 FastAPI API 端口。",
         )
-        if subscription_url:
-            try:
-                response_text, content_type = fetch_text_from_external_url(subscription_url, timeout=15)
-                raw_yaml_input = normalize_subscription_content(
-                    response_text,
-                    content_type,
-                )
-                st.success("订阅内容获取成功，已进入统一解析管线。")
-            except Exception as e:
-                st.error(f"订阅链接导入失败: {e}")
-                st.info("部署时请确认 `/sub/` 路径被反代到 FastAPI 服务端口 8000，而不是 Streamlit Web UI 端口 8501。")
-    else:
+    elif import_method == "分享链接":
         share_link = st.text_area(
             "输入分享链接",
             placeholder="ss://... 或 vless://...，多条链接可一行一条",
             height=140,
             help="支持 ss、trojan、vmess、vless、tuic、hysteria2/hy2、anytls 等常见分享链接。",
         )
-        if share_link.strip():
-            try:
-                proxies = []
+
+    if import_method != "手动添加" and st.button(
+        "解析并加入草稿",
+        key="import_proxies",
+        type="primary",
+        help="解析当前来源，完成去重和字段校验后加入草稿；不会立即发布订阅。",
+    ):
+        try:
+            if import_method == "订阅链接":
+                if not subscription_url.strip():
+                    raise ValueError("请输入订阅链接")
+                response_text, content_type = fetch_text_from_external_url(subscription_url, timeout=15)
+                raw_yaml_input = normalize_subscription_content(response_text, content_type)
+            elif import_method == "分享链接":
+                parsed_links = []
                 for line in share_link.splitlines():
                     line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    proxies.append(parse_share_link(line))
-                raw_yaml_input = yaml.dump(proxies, default_flow_style=False, allow_unicode=True, sort_keys=False)
-                st.success(f"分享链接解析成功，共识别 {len(proxies)} 个节点。")
-            except Exception as e:
-                st.error(f"分享链接解析失败: {e}")
+                    if line and not line.startswith("#"):
+                        parsed_links.append(parse_share_link(line))
+                if not parsed_links:
+                    raise ValueError("请输入至少一条有效分享链接")
+                raw_yaml_input = yaml.dump(
+                    parsed_links,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                )
+            if not raw_yaml_input.strip():
+                raise ValueError("没有可导入的内容")
 
-    # 添加导入按钮
-    if st.button("导入节点", key="import_proxies", help="导入当前输入的节点"):
-        if not raw_yaml_input:
-            st.error("没有可导入的内容。")
+            input_proxies, import_warnings = parse_proxy_yaml(raw_yaml_input)
+            existing_names = {proxy.get("name") for proxy in st.session_state.proxies_data}
+            new_proxies = []
+            for proxy in input_proxies:
+                if proxy["name"] in existing_names:
+                    st.warning(f"节点 '{proxy['name']}' 已存在，跳过重复添加")
+                    continue
+                new_proxies.append(proxy)
+                existing_names.add(proxy["name"])
+
+            source_type = {
+                "智能 YAML 导入": "yaml",
+                "订阅链接": "url",
+                "分享链接": "share",
+            }[import_method]
+            if not new_proxies:
+                st.info("本次没有可加入的节点，未创建空导入来源。")
+            else:
+                tagged_proxies = register_import_source(source_name, source_type, new_proxies)
+                st.session_state.proxies_data.extend(tagged_proxies)
+                st.success(f"已加入草稿：{len(tagged_proxies)} 个新节点。")
+            for warning in import_warnings:
+                st.warning(warning)
+        except Exception as e:
+            st.error(f"导入失败: {e}")
+            if import_method == "订阅链接":
+                st.info("确认远程地址返回 YAML 或节点订阅，并检查反向代理路径是否正确。")
+
+    if st.session_state.import_sources:
+        with st.expander(f"导入来源（{len(st.session_state.import_sources)}）", expanded=False):
+            for source in st.session_state.import_sources:
+                source_name_label = html.escape(str(source.get("name") or "未命名来源"))
+                source_type_label = html.escape(str(source.get("type") or "unknown"))
+                imported_at = html.escape(str(source.get("imported_at") or "历史数据"))
+                node_count = int(source.get("node_count") or 0)
+                st.markdown(
+                    f"""
+<div class="import-source-row">
+  <div><strong>{source_name_label}</strong><span>{source_type_label}</span></div>
+  <div><strong>{node_count}</strong><span>节点 · {imported_at}</span></div>
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
+
+    if import_method == "手动添加":
+        render_workflow_step(
+            1,
+            "手动添加节点",
+            "按协议填写基础字段；高级参数按需展开，添加前仍会经过统一 YAML 校验。",
+        )
+    
+        # 节点类型选择
+        node_type = st.selectbox("选择节点类型", ["ss", "vless", "vmess", "trojan", "anytls", "tuic", "hysteria2"], help="选择要添加的代理节点类型")
+    
+        # 通用字段
+        col1, col2 = st.columns(2)
+        with col1:
+            node_name = st.text_input("节点名称", f"My-{node_type.title()}", help="给节点起一个便于识别的名称")
+            node_server = st.text_input("服务器地址", "example.com", help="代理服务器的地址")
+        with col2:
+            node_port = st.number_input("端口", min_value=1, max_value=65535, value=443, help="代理服务器的端口号")
+            if node_type not in ["tuic", "hysteria2"]:  # tuic和hy2协议有单独的配置或不需要此通用UDP开关
+                node_udp = st.checkbox("UDP 支持", value=True, key=f"node_udp_{node_type}", help="是否启用UDP转发")
+
+        # 通用高级字段仅对 ss、vless、vmess 协议显示
+        if node_type in ["ss", "vless", "vmess"]:
+            with st.expander("通用高级字段", expanded=False):
+                col_common1, col_common2 = st.columns(2)
+                with col_common1:
+                    common_ip_version = st.selectbox(
+                        "ip-version",
+                        ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"],
+                        index=0,
+                        key=f"common_ip_version_{node_type}",
+                        help="mihomo 公共字段；默认不写入，避免和核心自动选择冲突。",
+                    )
+                with col_common2:
+                    enable_smux = st.checkbox("smux", value=False, key=f"enable_smux_{node_type}", help="mihomo 复用配置；onekey 的 VLESS Reality brutal 参数会写入这里。")
+                    smux_enabled = st.checkbox("smux.enabled", value=True, key=f"smux_enabled_{node_type}") if enable_smux else False
+                    smux_protocol = st.selectbox("smux.protocol", ["h2mux", "yamux", "smux"], index=0, key=f"smux_protocol_{node_type}") if enable_smux else "h2mux"
+                    smux_max_connections = st.number_input("smux.max-connections", min_value=1, value=4, key=f"smux_max_conn_{node_type}") if enable_smux else 4
+                    smux_brutal_enabled = st.checkbox("smux.brutal-opts.enabled", value=node_type == "vless", key=f"smux_brutal_enabled_{node_type}") if enable_smux else False
+                    smux_brutal_up = st.number_input("brutal up Mbps", min_value=1, value=100, key=f"smux_brutal_up_{node_type}") if enable_smux and smux_brutal_enabled else 100
+                    smux_brutal_down = st.number_input("brutal down Mbps", min_value=1, value=100, key=f"smux_brutal_down_{node_type}") if enable_smux and smux_brutal_enabled else 100
         else:
-            try:
-                input_proxies, import_warnings = parse_proxy_yaml(raw_yaml_input)
-                existing_names = {proxy.get("name") for proxy in st.session_state.proxies_data}
-                new_proxies = []
-                for proxy in input_proxies:
-                    if proxy["name"] in existing_names:
-                        st.warning(f"节点 '{proxy['name']}' 已存在，跳过重复添加")
-                        continue
-                    new_proxies.append(proxy)
-                    existing_names.add(proxy["name"])
+            # 其他协议不显示通用高级字段，设置默认值避免后续引用报错
+            common_ip_version = "默认"
+            enable_smux = False
+            smux_enabled = False
+            smux_protocol = "h2mux"
+            smux_max_connections = 4
+            smux_brutal_enabled = False
+            smux_brutal_up = 100
+            smux_brutal_down = 100
+    
+        # 根据节点类型显示不同的配置选项
+        if node_type == "vmess":
+            col3, col4 = st.columns(2)
+            with col3:
+                node_uuid = st.text_input("UUID", "your-uuid-here", help="VMess协议的用户UUID")
+                node_alterid = st.number_input("Alter ID", 0, help="VMess协议的额外ID数量")
+                vmess_encryption = st.selectbox("加密方式", ["auto", "none", "aes-128-gcm", "chacha20-poly1305"], index=0, help="VMess协议的加密方式")
+            with col4:
+                node_tls = st.checkbox("启用TLS", value=True, key=f"node_tls_{node_type}", help="是否启用TLS加密")
+                node_skip_cert = st.checkbox("跳过证书验证", value=False, key=f"node_skip_cert_{node_type}", help="是否跳过TLS证书验证")
+                node_tfo = st.checkbox("TFO", value=False, key=f"node_tfo_{node_type}", help="是否启用TCP Fast Open")
+            
+            network_type = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc", "http"], index=0, help="VMess协议的传输方式")
+            ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
+        
+            if network_type == "ws":
+                ws_path = st.text_input("WebSocket路径", "/", help="WebSocket的路径")
+                ws_host = st.text_input("WebSocket主机", "example.com", help="WebSocket的主机头")
+            elif network_type == "h2":
+                h2_path = st.text_input("HTTP/2路径", "/", help="HTTP/2的路径")
+                h2_host = st.text_input("HTTP/2主机", "example.com", help="HTTP/2的主机头")
+            elif network_type == "grpc":
+                grpc_service_name = st.text_input("gRPC服务名称", "example", help="gRPC服务的名称")
+    
+        elif node_type == "ss":
+            col3, col4 = st.columns(2)
+            with col3:
+                ss_encryption = st.selectbox("加密方式", [
+                    "aes-128-gcm", "aes-192-gcm", "aes-256-gcm",
+                    "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305",
+                    "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"
+                ], index=5, help="Shadowsocks协议的加密方式；onekey 默认使用 2022-blake3-aes-128-gcm。")
+                node_password = st.text_input("密码", type="password", help="Shadowsocks协议的密码")
+            with col4:
+                ss_udp_over_tcp = st.checkbox("udp-over-tcp", value=False, key=f"ss_udp_over_tcp_{node_type}", help="是否启用UDP over TCP")
+                ss_tfo = st.checkbox("TFO", value=False, key=f"ss_tfo_{node_type}", help="是否启用TCP Fast Open")
+        
+            ss_network = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc"], index=0, help="传输层协议")
+            ss_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
+            ss_mux = st.checkbox("多路复用", value=False, key=f"ss_mux_{node_type}", help="是否启用多路复用")
+    
+        elif node_type == "trojan":
+            col3, col4 = st.columns(2)
+            with col3:
+                node_password = st.text_input("密码", type="password", help="Trojan协议的密码")
+                trojan_udp_over_tcp = st.checkbox("udp-over-tcp", value=False, key=f"trojan_udp_over_tcp_{node_type}", help="是否启用UDP over TCP")
+            with col4:
+                trojan_tfo = st.checkbox("TFO", value=False, key=f"trojan_tfo_{node_type}", help="是否启用TCP Fast Open")
+            
+            trojan_network = st.selectbox("传输协议", ["tcp", "ws", "grpc"], index=0, help="传输层协议")
+            trojan_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
 
-                st.session_state.proxies_data.extend(new_proxies)
-                st.success(f"成功添加 {len(new_proxies)} 个新节点。")
-                for warning in import_warnings:
-                    st.warning(warning)
+            if trojan_network == "ws":
+                ws_path = st.text_input("WebSocket路径", "/", help="WebSocket的路径")
+                ws_host = st.text_input("WebSocket主机", "example.com", help="WebSocket的主机头")
+            elif trojan_network == "grpc":
+                grpc_service_name = st.text_input("gRPC服务名称", "example", help="gRPC服务的名称")
+    
+        elif node_type == "hysteria2":
+            col3, col4 = st.columns(2)
+            with col3:
+                node_password = st.text_input("密码", type="password", help="Hysteria2协议的认证密码")
+                hy2_sni = st.text_input("SNI", "www.bing.com", help="TLS握手时的服务器名称指示；onekey 默认伪装为 www.bing.com。")
+                hy2_obfs_type = st.selectbox("混淆插件", ["none", "salamander"], index=0, help="流量混淆类型")
+            with col4:
+                hy2_up_mbps = st.number_input("上行链路容量（默认：Mbps）", 50, help="上行带宽限制")
+                hy2_down_mbps = st.number_input("下行链路容量（默认：Mbps）", 100, help="下行带宽限制")
+                if hy2_obfs_type != "none":
+                    hy2_obfs_password = st.text_input("混淆密码", type="password", help="流量混淆密码")
+                else:
+                     hy2_obfs_password = ""
+        
+            hy2_skip_cert = st.checkbox("跳过证书验证", value=True, key=f"hy2_skip_cert_{node_type}", help="是否跳过TLS证书验证")
+            hy2_alpn = st.selectbox("ALPN", ["h3", "h3-29", "h3-27"], index=0, help="应用层协议协商标识")
+        
+            enable_port_hopping = st.checkbox("启用端口跳跃", value=True, key=f"enable_port_hopping_{node_type}", help="启用后写入 ports 字段；mihomo 会忽略 port 并按端口范围跳跃。")
+            if enable_port_hopping:
+                port_hopping_range = st.text_input("端口范围", "29950-30000", help="端口跳跃的范围；兼容 onekey 的 ports 字段。")
+        
+            enable_protocol = st.checkbox("启用传输协议设置", key=f"enable_protocol_{node_type}", help="是否自定义传输协议")
+            if enable_protocol:
+                hy2_protocol = st.selectbox("传输协议", ["udp"], index=0, help="使用的传输协议")
+        
+            enable_quic_params = st.checkbox("QUIC 参数", key=f"enable_quic_params_{node_type}", help="是否自定义QUIC参数")
+            if enable_quic_params:
+                with st.expander("QUIC 参数设置"):
+                    # QUIC 参数计算器
+                    st.markdown("##### 🛠️ QUIC 参数计算器")
+                    st.caption("基于带宽和延迟推荐窗口大小 (BDP模型)")
+                    q_col1, q_col2, q_col3 = st.columns([2, 2, 1])
+                    with q_col1:
+                        calc_bw = st.number_input("带宽 (Mbps)", value=1000, min_value=1, step=10, key="quic_calc_bw")
+                    with q_col2:
+                        calc_rtt = st.number_input("延迟 RTT (ms)", value=50, min_value=1, step=10, key="quic_calc_rtt")
+                    with q_col3:
+                        st.write("")
+                        st.write("")
+                        calc_btn = st.button("计算并推荐", key="quic_calc_btn")
+                
+                    # 初始化或获取 session state 中的值
+                    if 'quic_params_vals' not in st.session_state:
+                         st.session_state.quic_params_vals = {
+                             "init_stream": 8388608,
+                             "max_stream": 8388608,
+                             "init_conn": 20971520,
+                             "max_conn": 20971520
+                         }
+
+                    if calc_btn:
+                        # BDP (bytes) = (Bandwidth_Mbps * 10^6 * RTT_ms * 10^-3) / 8
+                        # 简化: BDP = Bandwidth * RTT * 125
+                        bdp = int(calc_bw * calc_rtt * 125)
+                        # 推荐值策略：
+                        # init_stream ~= BDP (min 2MB)
+                        # max_stream ~= BDP * 1.5
+                        # init_conn ~= BDP * 2
+                        # max_conn ~= BDP * 4 (或更高)
+                    
+                        rec_stream = max(2097152, bdp) # 至少 2MB
+                    
+                        st.session_state.quic_params_vals["init_stream"] = rec_stream
+                        st.session_state.quic_params_vals["max_stream"] = int(rec_stream * 1.5)
+                        st.session_state.quic_params_vals["init_conn"] = int(rec_stream * 2.5) # 给连接更多余量
+                        st.session_state.quic_params_vals["max_conn"] = int(rec_stream * 4)
+                        st.success(f"已根据 {calc_bw}Mbps / {calc_rtt}ms 推荐参数 (BDP: {bdp/1024/1024:.2f} MB)")
+
+                    initial_stream_receive_window = st.number_input("initial_stream_receive_window", value=st.session_state.quic_params_vals["init_stream"], help="QUIC初始流接收窗口大小")
+                    max_stream_receive_window = st.number_input("max_stream_receive_window", value=st.session_state.quic_params_vals["max_stream"], help="QUIC最大流接收窗口大小")
+                    initial_connection_receive_window = st.number_input("initial_connection_receive_window", value=st.session_state.quic_params_vals["init_conn"], help="QUIC初始连接接收窗口大小")
+                    max_connection_receive_window = st.number_input("max_connection_receive_window", value=st.session_state.quic_params_vals["max_conn"], help="QUIC最大连接接收窗口大小")
+        
+            hy2_hop_interval = st.text_input(
+                "跳跃间隔（单位：秒）",
+                value="30",
+                help="OpenClash/mihomo 会按整数秒读取 hop-interval。兼容输入 5-25，但保存时会自动取左侧 5 秒，避免内核解析失败。",
+            )
+            hy2_fingerprint = st.selectbox("Client Fingerprint", ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "none"], index=0, help="TLS 客户端指纹；mihomo 必须写入 client-fingerprint，不能写入 fingerprint。")
+            hy2_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
+    
+        elif node_type == "tuic":
+            col3, col4 = st.columns(2)
+            with col3:
+                tuic_uuid = st.text_input("UUID", "00000000-0000-4000-8000-000000000000", help="TUIC协议的用户UUID")
+                tuic_password = st.text_input("Password", type="password", help="TUIC协议的密码")
+                tuic_server_ip = st.text_input("Server IP", "1.2.3.4", help="服务器IP地址")
+            with col4:
+                tuic_congestion = st.selectbox("Congestion Controller", ["bbr", "cubic", "new_reno", "bbr2", "none"], index=0, help="拥塞控制算法；onekey 默认使用 bbr。")
+                tuic_alpn = st.selectbox("ALPN", ["h3", "h3-29", "h3-27"], index=0, help="应用层协议协商标识")
+                tuic_udp_relay_mode = st.selectbox("UDP Relay Mode", ["native", "quic"], index=0, help="UDP中继模式")
+        
+            # 将高级设置提出来
+            tuic_heartbeat_interval = st.number_input("心跳间隔 (毫秒)", value=10000, help="Application Layer 心跳间隔")
+
+            tuic_close_sni = st.checkbox("关闭 SNI 服务器名称指示", value=False, key=f"tuic_close_sni_{node_type}", help="是否关闭SNI服务器名称指示")
+            tuic_reduce_rtt = st.checkbox("Reduce RTT", value=True, key=f"tuic_reduce_rtt_{node_type}", help="是否启用0-RTT握手")
+            tuic_skip_cert_verify = st.checkbox("跳过证书验证", value=True, key=f"tuic_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
+            tuic_fast_open = st.checkbox("快速打开", value=True, key=f"tuic_fast_open_{node_type}", help="是否启用快速打开")
+            tuic_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
+    
+        elif node_type == "vless":
+            col3, col4 = st.columns(2)
+            with col3:
+                node_uuid = st.text_input("UUID", "your-uuid-here", help="VLESS协议的用户UUID")
+                vless_tls = st.checkbox("TLS", value=True, key=f"vless_tls_{node_type}", help="是否启用TLS加密")
+            with col4:
+                vless_flow = st.selectbox("flow (reality)", ["none", "xtls-rprx-vision", "xtls-rprx-vision-udp443"], index=1, help="XTLS 的流量特征；VLESS Reality 默认使用 xtls-rprx-vision。")
+                vless_servername = st.text_input("servername", "v1-dy.ixigua.com", help="TLS握手时的服务器名称；onekey Reality 默认使用该伪装域名。")
+        
+            vless_network = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc", "http"], index=0, help="传输层协议")
+            vless_packet_encoding = st.text_input("Packet-Encoding", "", help="数据包编码方式")
+            if vless_network == "ws":
+                vless_ws_path = st.text_input("WebSocket path", "/vless", help="VLESS WS 的 ws-opts.path，兼容 OpenClash/mihomo。")
+                vless_ws_host = st.text_input("WebSocket Host", "", help="需要伪装 Host 时填写，留空不写入 headers。")
+            elif vless_network == "grpc":
+                vless_grpc_service_name = st.text_input("gRPC service-name", "grpc", help="VLESS gRPC 的 grpc-opts.grpc-service-name。")
+                vless_ws_path = ""
+                vless_ws_host = ""
+            else:
+                vless_ws_path = ""
+                vless_ws_host = ""
+                vless_grpc_service_name = ""
+            # vless_udp 已统一使用上方的通用 UDP 选项
+            vless_tfo = st.checkbox("TFO", value=False, key=f"vless_tfo_{node_type}", help="是否启用TCP Fast Open")
+            vless_fp = st.selectbox("客户端指纹", ["chrome", "firefox", "safari", "edge", "ios", "android", "random", "none"], index=0, help="TLS客户端指纹")
+            vless_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
+        
+            # Reality相关参数
+            if vless_flow != "none":
+                with st.expander("Reality 设置", expanded=True):
+                    vless_public_key = st.text_input("public-key (reality)", "", help="Reality协议的公钥")
+                    vless_short_id = st.text_input("short-id (reality)", "", help="Reality协议的短ID")
+            else:
+                vless_public_key = ""
+                vless_short_id = ""
+        
+            # 其他选项
+            vless_skip_cert_verify = st.checkbox("跳过证书验证", value=False, key=f"vless_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
+    
+        elif node_type == "anytls":
+            col3, col4 = st.columns(2)
+            with col3:
+                anytls_password = st.text_input("密码", type="password", help="AnyTLS协议的密码")
+                anytls_sni = st.text_input("SNI", "www.bing.com", help="TLS握手时的服务器名称指示；onekey 默认伪装为 www.bing.com。")
+                anytls_fp = st.selectbox("客户端指纹", ["chrome", "firefox", "safari", "edge", "ios", "android", "random", "none"], index=0, help="TLS客户端指纹")
+            with col4:
+                anytls_skip_cert_verify = st.checkbox("跳过证书验证", value=True, key=f"anytls_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
+                anytls_alpn = st.selectbox("ALPN", ["h2,http/1.1", "h2", "http/1.1", "none"], index=0, help="应用层协议协商标识")
+                anytls_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
+        
+            anytls_idle_session_check_interval = st.number_input("idle-session-check-interval", value=30, help="空闲会话检查间隔（秒）")
+            anytls_idle_session_timeout = st.number_input("idle-session-timeout", value=180, help="空闲会话超时时间（秒）")
+            anytls_min_idle_session = st.number_input("min-idle-session", value=2, help="最小空闲会话数")
+    
+        # 链式代理（dialer-proxy）选项 - 智能下拉选择
+        use_dialer_proxy = st.checkbox("使用链式代理 (dialer-proxy)", value=False, key=f"use_dialer_proxy_{node_type}", help="是否通过另一个代理连接此节点")
+        dialer_proxy_name = ""
+        if use_dialer_proxy:
+            # 获取现有的节点名称列表
+            existing_proxy_names = [p['name'] for p in st.session_state.proxies_data]
+            if existing_proxy_names:
+                dialer_proxy_name = st.selectbox("选择前置代理节点", existing_proxy_names, key=f"dialer_proxy_select_{node_type}", help="选择已添加的节点作为前置代理")
+            else:
+                st.warning("暂无可用节点，请先添加其他节点作为前置代理")
+                dialer_proxy_name = st.text_input("链式代理节点名称 (手动输入)", placeholder="输入用于链式连接的节点名称", key=f"dialer_proxy_name_{node_type}")
+
+        # 构建节点配置
+        manual_node = {
+            "name": node_name,
+            "type": node_type,
+            "server": node_server,
+            "port": node_port
+        }
+
+        # 根据节点类型添加特定配置
+        if node_type == "vmess":
+            manual_node["uuid"] = node_uuid
+            manual_node["alterId"] = node_alterid
+            manual_node["cipher"] = vmess_encryption
+            manual_node["tls"] = node_tls
+            manual_node["skip-cert-verify"] = node_skip_cert
+            manual_node["tfo"] = node_tfo
+            manual_node["network"] = network_type
+            if ip_version != "默认":
+                manual_node["ip-version"] = ip_version
+            
+            if network_type == "ws":
+                ws_opts = {"path": ws_path}
+                if ws_host:
+                    ws_opts["headers"] = {"Host": ws_host}
+                manual_node["ws-opts"] = ws_opts
+            elif network_type == "h2":
+                h2_opts = {"path": h2_path}
+                if h2_host:
+                    h2_opts["host"] = [h2_host]
+                manual_node["h2-opts"] = h2_opts
+            elif network_type == "grpc":
+                manual_node["grpc-service-name"] = grpc_service_name
+
+        elif node_type == "ss":
+            manual_node["password"] = node_password
+            manual_node["cipher"] = ss_encryption
+            manual_node["udp"] = node_udp
+            manual_node["udp-over-tcp"] = ss_udp_over_tcp
+            manual_node["tfo"] = ss_tfo
+            manual_node["network"] = ss_network
+            if ss_ip_version != "默认":
+                manual_node["ip-version"] = ss_ip_version
+            manual_node["mux"] = ss_mux
+
+        elif node_type == "trojan":
+            manual_node["password"] = node_password
+            manual_node["udp"] = node_udp
+            manual_node["udp-over-tcp"] = trojan_udp_over_tcp
+            manual_node["tfo"] = trojan_tfo
+            manual_node["network"] = trojan_network
+            if trojan_ip_version != "默认":
+                manual_node["ip-version"] = trojan_ip_version
+        
+            if trojan_network == "ws":
+                ws_opts = {"path": ws_path}
+                if ws_host:
+                    ws_opts["headers"] = {"Host": ws_host}
+                manual_node["ws-opts"] = ws_opts
+            elif trojan_network == "grpc":
+                manual_node["grpc-opts"] = {"grpc-service-name": grpc_service_name}
+
+        elif node_type == "hysteria2":
+            manual_node["password"] = node_password
+            manual_node["sni"] = hy2_sni
+            manual_node["skip-cert-verify"] = hy2_skip_cert
+            manual_node["alpn"] = [hy2_alpn]
+            if hy2_obfs_type and hy2_obfs_type != "none":
+                manual_node["obfs"] = hy2_obfs_type
+                manual_node["obfs-password"] = hy2_obfs_password
+            manual_node["up"] = f"{hy2_up_mbps} Mbps"
+            manual_node["down"] = f"{hy2_down_mbps} Mbps"
+            try:
+                manual_node["hop-interval"] = normalize_hy2_hop_interval(hy2_hop_interval)
+            except ValueError as exc:
+                st.warning(str(exc))
+                manual_node["hop-interval"] = 30
+            if hy2_fingerprint != "none":
+                manual_node["client-fingerprint"] = hy2_fingerprint
+            if hy2_ip_version != "默认":
+                manual_node["ip-version"] = hy2_ip_version
+            
+            if enable_port_hopping:
+                manual_node["ports"] = port_hopping_range
+            if enable_protocol:
+                manual_node["protocol"] = hy2_protocol
+            if enable_quic_params:
+                manual_node["quic-params"] = {
+                    "initial-stream-receive-window": initial_stream_receive_window,
+                    "max-stream-receive-window": max_stream_receive_window,
+                    "initial-connection-receive-window": initial_connection_receive_window,
+                    "max-connection-receive-window": max_connection_receive_window
+                }
+
+        elif node_type == "tuic":
+            manual_node["uuid"] = tuic_uuid
+            manual_node["password"] = tuic_password
+            manual_node["ip"] = tuic_server_ip
+            manual_node["congestion-controller"] = tuic_congestion
+            manual_node["alpn"] = [tuic_alpn]
+            manual_node["udp-relay-mode"] = tuic_udp_relay_mode
+            manual_node["disable-sni"] = tuic_close_sni
+            if not tuic_close_sni:
+                manual_node["sni"] = node_server
+            manual_node["reduce-rtt"] = tuic_reduce_rtt
+            manual_node["skip-cert-verify"] = tuic_skip_cert_verify
+            manual_node["fast-open"] = tuic_fast_open
+            if tuic_ip_version != "默认":
+                manual_node["ip-version"] = tuic_ip_version
+            manual_node["heartbeat-interval"] = tuic_heartbeat_interval
+
+        elif node_type == "vless":
+            manual_node["uuid"] = node_uuid
+            manual_node["tls"] = vless_tls
+            manual_node["servername"] = vless_servername
+            manual_node["network"] = vless_network
+            # 修复逻辑: 只有当 flow 不为 none 时才添加该字段
+            if vless_flow != "none":
+                manual_node["flow"] = vless_flow
+        
+            if vless_packet_encoding:
+                 manual_node["packet-encoding"] = vless_packet_encoding
+            manual_node["udp"] = node_udp
+            manual_node["tfo"] = vless_tfo
+            manual_node["client-fingerprint"] = vless_fp
+            if vless_ip_version != "默认":
+                manual_node["ip-version"] = vless_ip_version
+            manual_node["skip-cert-verify"] = vless_skip_cert_verify
+        
+            # Reality / Utils
+            if vless_public_key:
+                 manual_node["reality-opts"] = {"public-key": vless_public_key}
+                 if vless_short_id:
+                     manual_node["reality-opts"]["short-id"] = vless_short_id
+        
+            # WS Opts etc.
+            if vless_network == "ws":
+                ws_opts = {"path": vless_ws_path}
+                if vless_ws_host:
+                    ws_opts["headers"] = {"Host": vless_ws_host}
+                manual_node["ws-opts"] = ws_opts
+            elif vless_network == "grpc":
+                 manual_node["grpc-opts"] = {"grpc-service-name": vless_grpc_service_name}
+
+        elif node_type == "anytls":
+            manual_node["password"] = anytls_password
+            manual_node["skip-cert-verify"] = anytls_skip_cert_verify
+            manual_node["sni"] = anytls_sni
+            if anytls_alpn != "none":
+                manual_node["alpn"] = anytls_alpn.split(",") if "," in anytls_alpn else [anytls_alpn]
+            manual_node["idle-session-check-interval"] = anytls_idle_session_check_interval
+            manual_node["idle-session-timeout"] = anytls_idle_session_timeout
+            manual_node["min-idle-session"] = anytls_min_idle_session
+            manual_node["client-fingerprint"] = anytls_fp
+            manual_node["udp"] = node_udp
+            if anytls_ip_version != "默认":
+                manual_node["ip-version"] = anytls_ip_version
+
+        if common_ip_version != "默认" and "ip-version" not in manual_node:
+            manual_node["ip-version"] = common_ip_version
+        if enable_smux:
+            manual_node["smux"] = {
+                "enabled": smux_enabled,
+                "protocol": smux_protocol,
+                "max-connections": smux_max_connections,
+            }
+            if smux_brutal_enabled:
+                manual_node["smux"]["brutal-opts"] = {
+                    "enabled": True,
+                    "up": f"{smux_brutal_up} Mbps",
+                    "down": f"{smux_brutal_down} Mbps",
+                }
+
+        # 添加链式代理配置
+        if use_dialer_proxy and dialer_proxy_name:
+            manual_node["dialer-proxy"] = dialer_proxy_name
+
+        manual_node_yaml = yaml.dump([manual_node], allow_unicode=True, sort_keys=False)
+        if st.session_state.get("manual_node_yaml_source") != manual_node_yaml:
+            st.session_state["manual_node_yaml_editor"] = manual_node_yaml
+            st.session_state["manual_node_yaml_source"] = manual_node_yaml
+
+        edited_manual_node_yaml = st.text_area(
+            "当前节点 YAML（可手动编辑）",
+            key="manual_node_yaml_editor",
+            height=320,
+            help="这里显示由表单生成的节点 YAML。你可以直接改字段；点击添加前会重新走统一校验，防止无效 YAML 被写入。",
+        )
+
+        if st.button("校验并添加节点", key=f"add_manual_node_{node_type}", help="校验当前 YAML 并添加到节点列表"):
+            try:
+                parsed_nodes, manual_warnings = parse_proxy_yaml(edited_manual_node_yaml)
+                if len(parsed_nodes) != 1:
+                    st.error("手动添加一次只能包含 1 个节点；如果要批量导入，请使用“智能 YAML 导入”。")
+                else:
+                    parsed_node = parsed_nodes[0]
+                    existing_names = {proxy.get("name") for proxy in st.session_state.proxies_data}
+                    if parsed_node["name"] in existing_names:
+                        st.warning(f"节点 '{parsed_node['name']}' 已存在，跳过重复添加")
+                    else:
+                        manual_sources = [
+                            source for source in st.session_state.import_sources
+                            if source.get("type") == "manual"
+                        ]
+                        if manual_sources:
+                            manual_source = manual_sources[0]
+                            parsed_node["_source_id"] = manual_source["id"]
+                            parsed_node["_source_name"] = manual_source["name"]
+                            parsed_node["_origin_name"] = parsed_node["name"]
+                            manual_source["node_count"] = int(manual_source.get("node_count", 0)) + 1
+                        else:
+                            parsed_node = register_import_source(
+                                source_name,
+                                "manual",
+                                [parsed_node],
+                            )[0]
+                        st.session_state.proxies_data.append(parsed_node)
+                        st.success(f"节点 '{parsed_node['name']}' 已添加。")
+                    for warning in manual_warnings:
+                        st.warning(warning)
             except Exception as e:
-                st.error(f"导入失败: {e}")
+                st.error(f"节点 YAML 校验失败: {e}")
+
 
 with tab2:
+    # 第二步仅负责整理、筛选和编辑已有节点。
     render_workflow_step(
         2,
         "整理节点",
-        "检查节点名称、协议字段和手动补充节点，后续策略组会自动引用这里的节点。",
+        "集中查看、筛选、排序和修正已导入节点，后续策略组会自动引用这里的节点。",
     )
-    st.write("手动添加单个节点：")
-    
-    # 节点类型选择
-    node_type = st.selectbox("选择节点类型", ["ss", "vless", "vmess", "trojan", "anytls", "tuic", "hysteria2"], help="选择要添加的代理节点类型")
-    
-    # 通用字段
-    col1, col2 = st.columns(2)
-    with col1:
-        node_name = st.text_input("节点名称", f"My-{node_type.title()}", help="给节点起一个便于识别的名称")
-        node_server = st.text_input("服务器地址", "example.com", help="代理服务器的地址")
-    with col2:
-        node_port = st.number_input("端口", min_value=1, max_value=65535, value=443, help="代理服务器的端口号")
-        if node_type not in ["tuic", "hysteria2"]:  # tuic和hy2协议有单独的配置或不需要此通用UDP开关
-            node_udp = st.checkbox("UDP 支持", value=True, key=f"node_udp_{node_type}", help="是否启用UDP转发")
-
-    # 通用高级字段仅对 ss、vless、vmess 协议显示
-    if node_type in ["ss", "vless", "vmess"]:
-        with st.expander("通用高级字段", expanded=False):
-            col_common1, col_common2 = st.columns(2)
-            with col_common1:
-                common_ip_version = st.selectbox(
-                    "ip-version",
-                    ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"],
-                    index=0,
-                    key=f"common_ip_version_{node_type}",
-                    help="mihomo 公共字段；默认不写入，避免和核心自动选择冲突。",
-                )
-            with col_common2:
-                enable_smux = st.checkbox("smux", value=False, key=f"enable_smux_{node_type}", help="mihomo 复用配置；onekey 的 VLESS Reality brutal 参数会写入这里。")
-                smux_enabled = st.checkbox("smux.enabled", value=True, key=f"smux_enabled_{node_type}") if enable_smux else False
-                smux_protocol = st.selectbox("smux.protocol", ["h2mux", "yamux", "smux"], index=0, key=f"smux_protocol_{node_type}") if enable_smux else "h2mux"
-                smux_max_connections = st.number_input("smux.max-connections", min_value=1, value=4, key=f"smux_max_conn_{node_type}") if enable_smux else 4
-                smux_brutal_enabled = st.checkbox("smux.brutal-opts.enabled", value=node_type == "vless", key=f"smux_brutal_enabled_{node_type}") if enable_smux else False
-                smux_brutal_up = st.number_input("brutal up Mbps", min_value=1, value=100, key=f"smux_brutal_up_{node_type}") if enable_smux and smux_brutal_enabled else 100
-                smux_brutal_down = st.number_input("brutal down Mbps", min_value=1, value=100, key=f"smux_brutal_down_{node_type}") if enable_smux and smux_brutal_enabled else 100
-    else:
-        # 其他协议不显示通用高级字段，设置默认值避免后续引用报错
-        common_ip_version = "默认"
-        enable_smux = False
-        smux_enabled = False
-        smux_protocol = "h2mux"
-        smux_max_connections = 4
-        smux_brutal_enabled = False
-        smux_brutal_up = 100
-        smux_brutal_down = 100
-    
-    # 根据节点类型显示不同的配置选项
-    if node_type == "vmess":
-        col3, col4 = st.columns(2)
-        with col3:
-            node_uuid = st.text_input("UUID", "your-uuid-here", help="VMess协议的用户UUID")
-            node_alterid = st.number_input("Alter ID", 0, help="VMess协议的额外ID数量")
-            vmess_encryption = st.selectbox("加密方式", ["auto", "none", "aes-128-gcm", "chacha20-poly1305"], index=0, help="VMess协议的加密方式")
-        with col4:
-            node_tls = st.checkbox("启用TLS", value=True, key=f"node_tls_{node_type}", help="是否启用TLS加密")
-            node_skip_cert = st.checkbox("跳过证书验证", value=False, key=f"node_skip_cert_{node_type}", help="是否跳过TLS证书验证")
-            node_tfo = st.checkbox("TFO", value=False, key=f"node_tfo_{node_type}", help="是否启用TCP Fast Open")
-            
-        network_type = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc", "http"], index=0, help="VMess协议的传输方式")
-        ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
-        
-        if network_type == "ws":
-            ws_path = st.text_input("WebSocket路径", "/", help="WebSocket的路径")
-            ws_host = st.text_input("WebSocket主机", "example.com", help="WebSocket的主机头")
-        elif network_type == "h2":
-            h2_path = st.text_input("HTTP/2路径", "/", help="HTTP/2的路径")
-            h2_host = st.text_input("HTTP/2主机", "example.com", help="HTTP/2的主机头")
-        elif network_type == "grpc":
-            grpc_service_name = st.text_input("gRPC服务名称", "example", help="gRPC服务的名称")
-    
-    elif node_type == "ss":
-        col3, col4 = st.columns(2)
-        with col3:
-            ss_encryption = st.selectbox("加密方式", [
-                "aes-128-gcm", "aes-192-gcm", "aes-256-gcm", 
-                "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305",
-                "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"
-            ], index=5, help="Shadowsocks协议的加密方式；onekey 默认使用 2022-blake3-aes-128-gcm。")
-            node_password = st.text_input("密码", type="password", help="Shadowsocks协议的密码")
-        with col4:
-            ss_udp_over_tcp = st.checkbox("udp-over-tcp", value=False, key=f"ss_udp_over_tcp_{node_type}", help="是否启用UDP over TCP")
-            ss_tfo = st.checkbox("TFO", value=False, key=f"ss_tfo_{node_type}", help="是否启用TCP Fast Open")
-        
-        ss_network = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc"], index=0, help="传输层协议")
-        ss_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
-        ss_mux = st.checkbox("多路复用", value=False, key=f"ss_mux_{node_type}", help="是否启用多路复用")
-    
-    elif node_type == "trojan":
-        col3, col4 = st.columns(2)
-        with col3:
-            node_password = st.text_input("密码", type="password", help="Trojan协议的密码")
-            trojan_udp_over_tcp = st.checkbox("udp-over-tcp", value=False, key=f"trojan_udp_over_tcp_{node_type}", help="是否启用UDP over TCP")
-        with col4:
-            trojan_tfo = st.checkbox("TFO", value=False, key=f"trojan_tfo_{node_type}", help="是否启用TCP Fast Open")
-            
-        trojan_network = st.selectbox("传输协议", ["tcp", "ws", "grpc"], index=0, help="传输层协议")
-        trojan_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
-
-        if trojan_network == "ws":
-            ws_path = st.text_input("WebSocket路径", "/", help="WebSocket的路径")
-            ws_host = st.text_input("WebSocket主机", "example.com", help="WebSocket的主机头")
-        elif trojan_network == "grpc":
-            grpc_service_name = st.text_input("gRPC服务名称", "example", help="gRPC服务的名称")
-    
-    elif node_type == "hysteria2":
-        col3, col4 = st.columns(2)
-        with col3:
-            node_password = st.text_input("密码", type="password", help="Hysteria2协议的认证密码")
-            hy2_sni = st.text_input("SNI", "www.bing.com", help="TLS握手时的服务器名称指示；onekey 默认伪装为 www.bing.com。")
-            hy2_obfs_type = st.selectbox("混淆插件", ["none", "salamander"], index=0, help="流量混淆类型")
-        with col4:
-            hy2_up_mbps = st.number_input("上行链路容量（默认：Mbps）", 50, help="上行带宽限制")
-            hy2_down_mbps = st.number_input("下行链路容量（默认：Mbps）", 100, help="下行带宽限制")
-            if hy2_obfs_type != "none":
-                hy2_obfs_password = st.text_input("混淆密码", type="password", help="流量混淆密码")
-            else:
-                 hy2_obfs_password = ""
-        
-        hy2_skip_cert = st.checkbox("跳过证书验证", value=True, key=f"hy2_skip_cert_{node_type}", help="是否跳过TLS证书验证")
-        hy2_alpn = st.selectbox("ALPN", ["h3", "h3-29", "h3-27"], index=0, help="应用层协议协商标识")
-        
-        enable_port_hopping = st.checkbox("启用端口跳跃", value=True, key=f"enable_port_hopping_{node_type}", help="启用后写入 ports 字段；mihomo 会忽略 port 并按端口范围跳跃。")
-        if enable_port_hopping:
-            port_hopping_range = st.text_input("端口范围", "29950-30000", help="端口跳跃的范围；兼容 onekey 的 ports 字段。")
-        
-        enable_protocol = st.checkbox("启用传输协议设置", key=f"enable_protocol_{node_type}", help="是否自定义传输协议")
-        if enable_protocol:
-            hy2_protocol = st.selectbox("传输协议", ["udp"], index=0, help="使用的传输协议")
-        
-        enable_quic_params = st.checkbox("QUIC 参数", key=f"enable_quic_params_{node_type}", help="是否自定义QUIC参数")
-        if enable_quic_params:
-            with st.expander("QUIC 参数设置"):
-                # QUIC 参数计算器
-                st.markdown("##### 🛠️ QUIC 参数计算器")
-                st.caption("基于带宽和延迟推荐窗口大小 (BDP模型)")
-                q_col1, q_col2, q_col3 = st.columns([2, 2, 1])
-                with q_col1:
-                    calc_bw = st.number_input("带宽 (Mbps)", value=1000, min_value=1, step=10, key="quic_calc_bw")
-                with q_col2:
-                    calc_rtt = st.number_input("延迟 RTT (ms)", value=50, min_value=1, step=10, key="quic_calc_rtt")
-                with q_col3:
-                    st.write("")
-                    st.write("") 
-                    calc_btn = st.button("计算并推荐", key="quic_calc_btn")
-                
-                # 初始化或获取 session state 中的值
-                if 'quic_params_vals' not in st.session_state:
-                     st.session_state.quic_params_vals = {
-                         "init_stream": 8388608,
-                         "max_stream": 8388608,
-                         "init_conn": 20971520, 
-                         "max_conn": 20971520
-                     }
-
-                if calc_btn:
-                    # BDP (bytes) = (Bandwidth_Mbps * 10^6 * RTT_ms * 10^-3) / 8
-                    # 简化: BDP = Bandwidth * RTT * 125
-                    bdp = int(calc_bw * calc_rtt * 125)
-                    # 推荐值策略：
-                    # init_stream ~= BDP (min 2MB)
-                    # max_stream ~= BDP * 1.5
-                    # init_conn ~= BDP * 2
-                    # max_conn ~= BDP * 4 (或更高)
-                    
-                    rec_stream = max(2097152, bdp) # 至少 2MB
-                    
-                    st.session_state.quic_params_vals["init_stream"] = rec_stream
-                    st.session_state.quic_params_vals["max_stream"] = int(rec_stream * 1.5)
-                    st.session_state.quic_params_vals["init_conn"] = int(rec_stream * 2.5) # 给连接更多余量
-                    st.session_state.quic_params_vals["max_conn"] = int(rec_stream * 4)
-                    st.success(f"已根据 {calc_bw}Mbps / {calc_rtt}ms 推荐参数 (BDP: {bdp/1024/1024:.2f} MB)")
-
-                initial_stream_receive_window = st.number_input("initial_stream_receive_window", value=st.session_state.quic_params_vals["init_stream"], help="QUIC初始流接收窗口大小")
-                max_stream_receive_window = st.number_input("max_stream_receive_window", value=st.session_state.quic_params_vals["max_stream"], help="QUIC最大流接收窗口大小")
-                initial_connection_receive_window = st.number_input("initial_connection_receive_window", value=st.session_state.quic_params_vals["init_conn"], help="QUIC初始连接接收窗口大小")
-                max_connection_receive_window = st.number_input("max_connection_receive_window", value=st.session_state.quic_params_vals["max_conn"], help="QUIC最大连接接收窗口大小")
-        
-        hy2_hop_interval = st.text_input(
-            "跳跃间隔（单位：秒）",
-            value="30",
-            help="OpenClash/mihomo 会按整数秒读取 hop-interval。兼容输入 5-25，但保存时会自动取左侧 5 秒，避免内核解析失败。",
-        )
-        hy2_fingerprint = st.selectbox("Client Fingerprint", ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "none"], index=0, help="TLS 客户端指纹；mihomo 必须写入 client-fingerprint，不能写入 fingerprint。")
-        hy2_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
-    
-    elif node_type == "tuic":
-        col3, col4 = st.columns(2)
-        with col3:
-            tuic_uuid = st.text_input("UUID", "00000000-0000-4000-8000-000000000000", help="TUIC协议的用户UUID")
-            tuic_password = st.text_input("Password", type="password", help="TUIC协议的密码")
-            tuic_server_ip = st.text_input("Server IP", "1.2.3.4", help="服务器IP地址")
-        with col4:
-            tuic_congestion = st.selectbox("Congestion Controller", ["bbr", "cubic", "new_reno", "bbr2", "none"], index=0, help="拥塞控制算法；onekey 默认使用 bbr。")
-            tuic_alpn = st.selectbox("ALPN", ["h3", "h3-29", "h3-27"], index=0, help="应用层协议协商标识")
-            tuic_udp_relay_mode = st.selectbox("UDP Relay Mode", ["native", "quic"], index=0, help="UDP中继模式")
-        
-        # 将高级设置提出来
-        tuic_heartbeat_interval = st.number_input("心跳间隔 (毫秒)", value=10000, help="Application Layer 心跳间隔")
-
-        tuic_close_sni = st.checkbox("关闭 SNI 服务器名称指示", value=False, key=f"tuic_close_sni_{node_type}", help="是否关闭SNI服务器名称指示")
-        tuic_reduce_rtt = st.checkbox("Reduce RTT", value=True, key=f"tuic_reduce_rtt_{node_type}", help="是否启用0-RTT握手")
-        tuic_skip_cert_verify = st.checkbox("跳过证书验证", value=True, key=f"tuic_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
-        tuic_fast_open = st.checkbox("快速打开", value=True, key=f"tuic_fast_open_{node_type}", help="是否启用快速打开")
-        tuic_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
-    
-    elif node_type == "vless":
-        col3, col4 = st.columns(2)
-        with col3:
-            node_uuid = st.text_input("UUID", "your-uuid-here", help="VLESS协议的用户UUID")
-            vless_tls = st.checkbox("TLS", value=True, key=f"vless_tls_{node_type}", help="是否启用TLS加密")
-        with col4:
-            vless_flow = st.selectbox("flow (reality)", ["none", "xtls-rprx-vision", "xtls-rprx-vision-udp443"], index=1, help="XTLS 的流量特征；VLESS Reality 默认使用 xtls-rprx-vision。")
-            vless_servername = st.text_input("servername", "v1-dy.ixigua.com", help="TLS握手时的服务器名称；onekey Reality 默认使用该伪装域名。")
-        
-        vless_network = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc", "http"], index=0, help="传输层协议")
-        vless_packet_encoding = st.text_input("Packet-Encoding", "", help="数据包编码方式")
-        if vless_network == "ws":
-            vless_ws_path = st.text_input("WebSocket path", "/vless", help="VLESS WS 的 ws-opts.path，兼容 OpenClash/mihomo。")
-            vless_ws_host = st.text_input("WebSocket Host", "", help="需要伪装 Host 时填写，留空不写入 headers。")
-        elif vless_network == "grpc":
-            vless_grpc_service_name = st.text_input("gRPC service-name", "grpc", help="VLESS gRPC 的 grpc-opts.grpc-service-name。")
-            vless_ws_path = ""
-            vless_ws_host = ""
-        else:
-            vless_ws_path = ""
-            vless_ws_host = ""
-            vless_grpc_service_name = ""
-        # vless_udp 已统一使用上方的通用 UDP 选项
-        vless_tfo = st.checkbox("TFO", value=False, key=f"vless_tfo_{node_type}", help="是否启用TCP Fast Open")
-        vless_fp = st.selectbox("客户端指纹", ["chrome", "firefox", "safari", "edge", "ios", "android", "random", "none"], index=0, help="TLS客户端指纹")
-        vless_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
-        
-        # Reality相关参数
-        if vless_flow != "none":
-            with st.expander("Reality 设置", expanded=True):
-                vless_public_key = st.text_input("public-key (reality)", "", help="Reality协议的公钥")
-                vless_short_id = st.text_input("short-id (reality)", "", help="Reality协议的短ID")
-        else:
-            vless_public_key = ""
-            vless_short_id = ""
-        
-        # 其他选项
-        vless_skip_cert_verify = st.checkbox("跳过证书验证", value=False, key=f"vless_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
-    
-    elif node_type == "anytls":
-        col3, col4 = st.columns(2)
-        with col3:
-            anytls_password = st.text_input("密码", type="password", help="AnyTLS协议的密码")
-            anytls_sni = st.text_input("SNI", "www.bing.com", help="TLS握手时的服务器名称指示；onekey 默认伪装为 www.bing.com。")
-            anytls_fp = st.selectbox("客户端指纹", ["chrome", "firefox", "safari", "edge", "ios", "android", "random", "none"], index=0, help="TLS客户端指纹")
-        with col4:
-            anytls_skip_cert_verify = st.checkbox("跳过证书验证", value=True, key=f"anytls_skip_cert_verify_{node_type}", help="是否跳过TLS证书验证")
-            anytls_alpn = st.selectbox("ALPN", ["h2,http/1.1", "h2", "http/1.1", "none"], index=0, help="应用层协议协商标识")
-            anytls_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
-        
-        anytls_idle_session_check_interval = st.number_input("idle-session-check-interval", value=30, help="空闲会话检查间隔（秒）")
-        anytls_idle_session_timeout = st.number_input("idle-session-timeout", value=180, help="空闲会话超时时间（秒）")
-        anytls_min_idle_session = st.number_input("min-idle-session", value=2, help="最小空闲会话数")
-    
-    # 链式代理（dialer-proxy）选项 - 智能下拉选择
-    use_dialer_proxy = st.checkbox("使用链式代理 (dialer-proxy)", value=False, key=f"use_dialer_proxy_{node_type}", help="是否通过另一个代理连接此节点")
-    dialer_proxy_name = ""
-    if use_dialer_proxy:
-        # 获取现有的节点名称列表
-        existing_proxy_names = [p['name'] for p in st.session_state.proxies_data]
-        if existing_proxy_names:
-            dialer_proxy_name = st.selectbox("选择前置代理节点", existing_proxy_names, key=f"dialer_proxy_select_{node_type}", help="选择已添加的节点作为前置代理")
-        else:
-            st.warning("暂无可用节点，请先添加其他节点作为前置代理")
-            dialer_proxy_name = st.text_input("链式代理节点名称 (手动输入)", placeholder="输入用于链式连接的节点名称", key=f"dialer_proxy_name_{node_type}")
-
-    # 构建节点配置
-    manual_node = {
-        "name": node_name,
-        "type": node_type,
-        "server": node_server,
-        "port": node_port
-    }
-
-    # 根据节点类型添加特定配置
-    if node_type == "vmess":
-        manual_node["uuid"] = node_uuid
-        manual_node["alterId"] = node_alterid
-        manual_node["cipher"] = vmess_encryption
-        manual_node["tls"] = node_tls
-        manual_node["skip-cert-verify"] = node_skip_cert
-        manual_node["tfo"] = node_tfo
-        manual_node["network"] = network_type
-        if ip_version != "默认":
-            manual_node["ip-version"] = ip_version
-            
-        if network_type == "ws":
-            ws_opts = {"path": ws_path}
-            if ws_host:
-                ws_opts["headers"] = {"Host": ws_host}
-            manual_node["ws-opts"] = ws_opts
-        elif network_type == "h2":
-            h2_opts = {"path": h2_path}
-            if h2_host:
-                h2_opts["host"] = [h2_host]
-            manual_node["h2-opts"] = h2_opts
-        elif network_type == "grpc":
-            manual_node["grpc-service-name"] = grpc_service_name
-
-    elif node_type == "ss":
-        manual_node["password"] = node_password
-        manual_node["cipher"] = ss_encryption
-        manual_node["udp"] = node_udp
-        manual_node["udp-over-tcp"] = ss_udp_over_tcp
-        manual_node["tfo"] = ss_tfo
-        manual_node["network"] = ss_network
-        if ss_ip_version != "默认":
-            manual_node["ip-version"] = ss_ip_version
-        manual_node["mux"] = ss_mux
-
-    elif node_type == "trojan":
-        manual_node["password"] = node_password
-        manual_node["udp"] = node_udp
-        manual_node["udp-over-tcp"] = trojan_udp_over_tcp
-        manual_node["tfo"] = trojan_tfo
-        manual_node["network"] = trojan_network
-        if trojan_ip_version != "默认":
-            manual_node["ip-version"] = trojan_ip_version
-        
-        if trojan_network == "ws":
-            ws_opts = {"path": ws_path}
-            if ws_host:
-                ws_opts["headers"] = {"Host": ws_host}
-            manual_node["ws-opts"] = ws_opts
-        elif trojan_network == "grpc":
-            manual_node["grpc-opts"] = {"grpc-service-name": grpc_service_name}
-
-    elif node_type == "hysteria2":
-        manual_node["password"] = node_password
-        manual_node["sni"] = hy2_sni
-        manual_node["skip-cert-verify"] = hy2_skip_cert
-        manual_node["alpn"] = [hy2_alpn]
-        if hy2_obfs_type and hy2_obfs_type != "none":
-            manual_node["obfs"] = hy2_obfs_type
-            manual_node["obfs-password"] = hy2_obfs_password
-        manual_node["up"] = f"{hy2_up_mbps} Mbps"
-        manual_node["down"] = f"{hy2_down_mbps} Mbps"
-        try:
-            manual_node["hop-interval"] = normalize_hy2_hop_interval(hy2_hop_interval)
-        except ValueError as exc:
-            st.warning(str(exc))
-            manual_node["hop-interval"] = 30
-        if hy2_fingerprint != "none":
-            manual_node["client-fingerprint"] = hy2_fingerprint
-        if hy2_ip_version != "默认":
-            manual_node["ip-version"] = hy2_ip_version
-            
-        if enable_port_hopping:
-            manual_node["ports"] = port_hopping_range
-        if enable_protocol:
-            manual_node["protocol"] = hy2_protocol
-        if enable_quic_params:
-            manual_node["quic-params"] = {
-                "initial-stream-receive-window": initial_stream_receive_window,
-                "max-stream-receive-window": max_stream_receive_window,
-                "initial-connection-receive-window": initial_connection_receive_window,
-                "max-connection-receive-window": max_connection_receive_window
-            }
-
-    elif node_type == "tuic":
-        manual_node["uuid"] = tuic_uuid
-        manual_node["password"] = tuic_password
-        manual_node["ip"] = tuic_server_ip
-        manual_node["congestion-controller"] = tuic_congestion
-        manual_node["alpn"] = [tuic_alpn]
-        manual_node["udp-relay-mode"] = tuic_udp_relay_mode
-        manual_node["disable-sni"] = tuic_close_sni
-        if not tuic_close_sni:
-            manual_node["sni"] = node_server
-        manual_node["reduce-rtt"] = tuic_reduce_rtt
-        manual_node["skip-cert-verify"] = tuic_skip_cert_verify
-        manual_node["fast-open"] = tuic_fast_open
-        if tuic_ip_version != "默认":
-            manual_node["ip-version"] = tuic_ip_version
-        manual_node["heartbeat-interval"] = tuic_heartbeat_interval
-
-    elif node_type == "vless":
-        manual_node["uuid"] = node_uuid
-        manual_node["tls"] = vless_tls
-        manual_node["servername"] = vless_servername
-        manual_node["network"] = vless_network
-        # 修复逻辑: 只有当 flow 不为 none 时才添加该字段
-        if vless_flow != "none":
-            manual_node["flow"] = vless_flow
-        
-        if vless_packet_encoding:
-             manual_node["packet-encoding"] = vless_packet_encoding
-        manual_node["udp"] = node_udp
-        manual_node["tfo"] = vless_tfo
-        manual_node["client-fingerprint"] = vless_fp
-        if vless_ip_version != "默认":
-            manual_node["ip-version"] = vless_ip_version
-        manual_node["skip-cert-verify"] = vless_skip_cert_verify
-        
-        # Reality / Utils
-        if vless_public_key:
-             manual_node["reality-opts"] = {"public-key": vless_public_key}
-             if vless_short_id:
-                 manual_node["reality-opts"]["short-id"] = vless_short_id
-        
-        # WS Opts etc.
-        if vless_network == "ws":
-            ws_opts = {"path": vless_ws_path}
-            if vless_ws_host:
-                ws_opts["headers"] = {"Host": vless_ws_host}
-            manual_node["ws-opts"] = ws_opts
-        elif vless_network == "grpc":
-             manual_node["grpc-opts"] = {"grpc-service-name": vless_grpc_service_name}
-
-    elif node_type == "anytls":
-        manual_node["password"] = anytls_password
-        manual_node["skip-cert-verify"] = anytls_skip_cert_verify
-        manual_node["sni"] = anytls_sni
-        if anytls_alpn != "none":
-            manual_node["alpn"] = anytls_alpn.split(",") if "," in anytls_alpn else [anytls_alpn]
-        manual_node["idle-session-check-interval"] = anytls_idle_session_check_interval
-        manual_node["idle-session-timeout"] = anytls_idle_session_timeout
-        manual_node["min-idle-session"] = anytls_min_idle_session
-        manual_node["client-fingerprint"] = anytls_fp
-        manual_node["udp"] = node_udp
-        if anytls_ip_version != "默认":
-            manual_node["ip-version"] = anytls_ip_version
-
-    if common_ip_version != "默认" and "ip-version" not in manual_node:
-        manual_node["ip-version"] = common_ip_version
-    if enable_smux:
-        manual_node["smux"] = {
-            "enabled": smux_enabled,
-            "protocol": smux_protocol,
-            "max-connections": smux_max_connections,
-        }
-        if smux_brutal_enabled:
-            manual_node["smux"]["brutal-opts"] = {
-                "enabled": True,
-                "up": f"{smux_brutal_up} Mbps",
-                "down": f"{smux_brutal_down} Mbps",
-            }
-
-    # 添加链式代理配置
-    if use_dialer_proxy and dialer_proxy_name:
-        manual_node["dialer-proxy"] = dialer_proxy_name
-
-    manual_node_yaml = yaml.dump([manual_node], allow_unicode=True, sort_keys=False)
-    if st.session_state.get("manual_node_yaml_source") != manual_node_yaml:
-        st.session_state["manual_node_yaml_editor"] = manual_node_yaml
-        st.session_state["manual_node_yaml_source"] = manual_node_yaml
-
-    edited_manual_node_yaml = st.text_area(
-        "当前节点 YAML（可手动编辑）",
-        key="manual_node_yaml_editor",
-        height=320,
-        help="这里显示由表单生成的节点 YAML。你可以直接改字段；点击添加前会重新走统一校验，防止无效 YAML 被写入。",
-    )
-
-    if st.button("校验并添加节点", key=f"add_manual_node_{node_type}", help="校验当前 YAML 并添加到节点列表"):
-        try:
-            parsed_nodes, manual_warnings = parse_proxy_yaml(edited_manual_node_yaml)
-            if len(parsed_nodes) != 1:
-                st.error("手动添加一次只能包含 1 个节点；如果要批量导入，请使用“智能 YAML 导入”。")
-            else:
-                parsed_node = parsed_nodes[0]
-                existing_names = {proxy.get("name") for proxy in st.session_state.proxies_data}
-                if parsed_node["name"] in existing_names:
-                    st.warning(f"节点 '{parsed_node['name']}' 已存在，跳过重复添加")
-                else:
-                    st.session_state.proxies_data.append(parsed_node)
-                    st.success(f"节点 '{parsed_node['name']}' 已添加。")
-                for warning in manual_warnings:
-                    st.warning(warning)
-        except Exception as e:
-            st.error(f"节点 YAML 校验失败: {e}")
-
-    # 节点管理功能
-    st.subheader("节点管理")
     
     if not st.session_state.proxies_data:
-        st.warning("请先添加一些节点以管理")
+        st.info("暂无节点。请先在“导入节点”中批量导入或手动添加。")
     else:
-        # 显示所有节点并提供删除/修改功能
-        for idx, proxy in enumerate(st.session_state.proxies_data):
-            proxy_expander = st.expander(f"节点: {proxy['name']}", expanded=False)
+        total_nodes = len(st.session_state.proxies_data)
+        protocol_names = sorted({str(proxy.get("type", "unknown")) for proxy in st.session_state.proxies_data})
+        duplicate_names = total_nodes - len({proxy.get("name") for proxy in st.session_state.proxies_data})
+        metric_total, metric_protocols, metric_duplicates = st.columns(3)
+        metric_total.metric("节点总数", total_nodes)
+        metric_protocols.metric("协议类型", len(protocol_names))
+        metric_duplicates.metric("重复名称", duplicate_names)
+
+        source_names = sorted(
+            {
+                str(proxy.get("_source_name") or "历史节点")
+                for proxy in st.session_state.proxies_data
+            }
+        )
+        filter_search, filter_protocol, filter_source = st.columns([2, 1, 1])
+        with filter_search:
+            node_search = st.text_input(
+                "搜索节点",
+                placeholder="名称、服务器或协议",
+                key="node_management_search",
+            ).strip().lower()
+        with filter_protocol:
+            selected_protocol = st.selectbox(
+                "协议筛选",
+                ["全部"] + protocol_names,
+                key="node_management_protocol",
+            )
+        with filter_source:
+            selected_source = st.selectbox(
+                "来源筛选",
+                ["全部"] + source_names,
+                key="node_management_source",
+            )
+
+        visible_proxies = []
+        for original_idx, proxy in enumerate(st.session_state.proxies_data):
+            searchable = " ".join(
+                str(proxy.get(field, ""))
+                for field in ("name", "server", "type", "port")
+            ).lower()
+            if node_search and node_search not in searchable:
+                continue
+            if selected_protocol != "全部" and proxy.get("type") != selected_protocol:
+                continue
+            proxy_source = str(proxy.get("_source_name") or "历史节点")
+            if selected_source != "全部" and proxy_source != selected_source:
+                continue
+            visible_proxies.append((original_idx, proxy))
+
+        st.caption(f"当前显示 {len(visible_proxies)} / {total_nodes} 个节点")
+
+        # 紧凑节点行：摘要常显，详细 YAML 按需展开。
+        for idx, proxy in visible_proxies:
+            source_label = str(proxy.get("_source_name") or "历史节点")
+            server_label = f"{proxy.get('server', '-')}:{proxy.get('port', '-')}"
+            proxy_expander = st.expander(
+                f"{proxy['name']}  ·  {proxy.get('type', 'unknown')}  ·  {source_label}  ·  {server_label}",
+                expanded=False,
+            )
             with proxy_expander:
-                col_up, col_down, col_proxy_actions, col_proxy_type = st.columns([1, 1, 2, 1])
+                st.caption(
+                    f"来源：{source_label}　原始名称：{proxy.get('_origin_name') or proxy['name']}"
+                )
+                col_up, col_down, col_edit, col_delete = st.columns(4)
                 with col_up:
                     if st.button("上移", key=f"move_proxy_up_{idx}", disabled=idx == 0, use_container_width=True):
                         st.session_state.proxies_data[idx - 1], st.session_state.proxies_data[idx] = (
@@ -1837,26 +2973,15 @@ with tab2:
                             st.session_state.proxies_data[idx + 1],
                         )
                         st.rerun()
-                with col_proxy_actions:
-                    if st.button(f"删除节点 {proxy['name']}", key=f"delete_proxy_{idx}"):
-                        st.session_state.proxies_data.pop(idx)
-                        st.success(f"节点 {proxy['name']} 已删除")
+                with col_edit:
+                    if st.button("编辑", key=f"edit_proxy_{idx}", use_container_width=True):
+                        st.session_state.editing_proxy_idx = idx
+                        st.session_state.editing_proxy_data = proxy.copy()
                         st.rerun()
-                with col_proxy_type:
-                    st.caption(f"类型: {proxy['type']}")
-                
-                # 显示节点详细信息
-                proxy_details = proxy.copy()
-                st.json(proxy_details)
-                
-                # 修改节点功能
-                if st.button(f"编辑节点 {proxy['name']}", key=f"edit_proxy_{idx}"):
-                    # 将节点信息存储到session state，以便在其他地方使用
-                    st.session_state.editing_proxy_idx = idx
-                    st.session_state.editing_proxy_data = proxy.copy()
-                    st.info(f"正在编辑节点 {proxy['name']}，请修改参数后点击'添加节点'按钮保存")
-        
-        st.markdown("---")
+                with col_delete:
+                    if st.button("移除", key=f"delete_proxy_{idx}", use_container_width=True):
+                        st.session_state.proxies_data.pop(idx)
+                        st.rerun()
         
         # 检查是否有正在编辑的节点
         if 'editing_proxy_idx' in st.session_state and 'editing_proxy_data' in st.session_state:
@@ -1882,6 +3007,12 @@ with tab2:
                         # 验证必要的字段
                         if 'name' in updated_proxy and 'type' in updated_proxy and 'server' in updated_proxy and 'port' in updated_proxy:
                             # 更新节点信息
+                            internal_metadata = {
+                                key: value
+                                for key, value in editing_data.items()
+                                if str(key).startswith("_")
+                            }
+                            updated_proxy.update(internal_metadata)
                             st.session_state.proxies_data[editing_idx] = updated_proxy
                             
                             # 清除编辑状态
@@ -1901,7 +3032,7 @@ with tab3:
     render_workflow_step(
         3,
         "设置分流",
-        "选择基础规则源并调整预设目标，保存后订阅会立即刷新，不需要等到生成页手动保存。",
+        "选择基础规则源并调整预设目标；修改会保存为草稿，检查并发布后才影响线上订阅。",
     )
     
     if not st.session_state.proxies_data:
@@ -2026,27 +3157,10 @@ with tab3:
 
                 st.session_state.global_config[provider_targets_key] = next_overrides
                 if next_overrides:
-                    st.info(f"已覆盖 {len(next_overrides)} 条预设规则。保存配置后订阅立即生效。")
+                    st.info(f"已覆盖 {len(next_overrides)} 条预设规则，当前为待发布草稿。")
         else:
             st.session_state.global_config["dustinwin_provider_targets"] = {}
             st.session_state.global_config["lhie1_provider_targets"] = {}
-
-        current_rule_signature = rule_settings_signature(
-            rule_type,
-            st.session_state.global_config,
-            st.session_state.custom_rules,
-            st.session_state.custom_rule_providers,
-        )
-        if current_rule_signature != st.session_state.get("last_published_rule_signature"):
-            saved_ok, save_message = autosave_current_subscription(
-                rule_type,
-                "分流规则源或预设目标已变更，系统自动刷新订阅",
-            )
-            if saved_ok:
-                st.session_state.last_published_rule_signature = current_rule_signature
-                st.success(save_message)
-            else:
-                st.warning(save_message)
 
         try:
             preview_config = build_subscription_config(
@@ -2223,88 +3337,217 @@ with tab3:
 with tab4:
     render_workflow_step(
         4,
-        "生成订阅",
-        "最终生成 YAML、执行配置检查和 mihomo 内核校验，通过后写入订阅接口。",
+        "检查与发布",
+        "先生成并校验草稿，确认差异后再发布；线上订阅在发布前保持不变。",
     )
-    st.header("配置生成与检查")
-    
-    # 上传旧配置 (仅当无节点时显示，方便修改)
+
     if not st.session_state.proxies_data:
-        uploaded_yaml = st.file_uploader("📂 上传之前的配置文件 (进行修改)", type=["yaml", "yml"])
+        uploaded_yaml = st.file_uploader(
+            "上传本工具生成的旧配置并恢复节点",
+            type=["yaml", "yml"],
+            help="仅恢复 proxies 节点列表，恢复后先进入草稿，不会直接覆盖线上订阅。",
+        )
         if uploaded_yaml:
-            if uploaded_yaml.size > 5 * 1024 * 1024:
-                st.error("❌ 文件大小超过 5MB限制，请上传较小的配置文件")
+            if uploaded_yaml.size > MAX_REMOTE_SUBSCRIPTION_BYTES:
+                st.error("文件大小超过 5MB，请上传较小的配置文件。")
             else:
                 try:
-                    content = uploaded_yaml.read().decode("utf-8")
-                    if "# Generator: Clash-Config-Gen" in content:
-                        data = yaml.safe_load(content)
-                        if isinstance(data, dict) and "proxies" in data:
-                            st.session_state.proxies_data = data["proxies"]
-                            st.success(f"已恢复 {len(data['proxies'])} 个节点！")
-                            st.rerun()
-                        else:
-                            st.error("配置文件中没有找到 proxies 列表。")
-                    else:
-                        st.error("此文件不是由本工具生成的，或版本太旧，无法还原编辑。")
-                except Exception as e:
-                    st.error(f"解析失败: {e}")
-
-    if st.button("🔍 生成并检查配置文件", type="primary", use_container_width=True):
-        if not st.session_state.proxies_data:
-            st.error("❌ 错误: 未添加任何节点！无法生成配置。")
-        else:
-            selected_rule = st.session_state.get("selected_rule_type", DEFAULT_RULE_TYPE)
-            final_config = build_subscription_config(
-                st.session_state.proxies_data,
-                st.session_state.global_config,
-                st.session_state.custom_rules,
-                st.session_state.custom_rule_providers,
-                selected_rule,
-            )
-            check_errors, check_warnings = validate_subscription_config(final_config)
-            final_config_str = build_subscription_yaml(final_config)
-
-            if check_errors:
-                st.error(f"❌ 检查发现 {len(check_errors)} 个错误")
-                for error in check_errors:
-                    st.text(f"- {error}")
-            else:
-                mihomo_result = validate_with_mihomo(final_config_str)
-                if not mihomo_result.ok:
-                    st.error(f"mihomo 内核校验失败，订阅未保存: {mihomo_result.status}")
-                    st.code(mihomo_result.message, language="text")
-                else:
-                    save_user_config(
-                        current_user["id"],
-                        st.session_state.proxies_data,
-                        st.session_state.global_config,
-                        st.session_state.custom_rules,
-                        st.session_state.custom_rule_providers,
-                        selected_rule,
-                        final_config_str,
-                        validation_status=mihomo_result.status,
-                        validation_message=mihomo_result.message,
+                    restored_config = yaml.safe_load(uploaded_yaml.getvalue().decode("utf-8"))
+                    restored_proxies = (
+                        restored_config.get("proxies")
+                        if isinstance(restored_config, dict)
+                        else None
                     )
-                    refreshed_config = get_user_config(current_user["id"])
-                    st.success(f"配置检查和 mihomo 校验通过，订阅已保存并立即生效: {get_public_base_url()}/sub/{refreshed_config['token']}")
+                    if not isinstance(restored_proxies, list) or not restored_proxies:
+                        raise ValueError("配置中没有可恢复的 proxies 列表")
+                    tagged_proxies = register_import_source(
+                        "旧配置恢复",
+                        "restore",
+                        restored_proxies,
+                    )
+                    st.session_state.proxies_data = tagged_proxies
+                    st.session_state.draft_restore_notice = len(tagged_proxies)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"恢复失败：{exc}")
 
-            if check_warnings:
-                with st.expander(f"发现 {len(check_warnings)} 个警告", expanded=False):
-                    for warning in check_warnings:
-                        st.warning(warning)
+    restored_count = st.session_state.pop("draft_restore_notice", None)
+    if restored_count:
+        st.success(f"已恢复 {restored_count} 个节点到草稿。")
 
-            st.divider()
-            col_d1, col_d2 = st.columns([3, 1])
-            with col_d1:
-                st.text_area("配置预览（全文）", value=final_config_str, height=600)
-            with col_d2:
-                st.download_button(
-                    label="下载 config.yaml",
-                    data=final_config_str,
-                    file_name="config.yaml",
-                    mime="application/x-yaml",
-                    type="primary",
-                    use_container_width=True,
-                )
-            st.stop()
+    check_notice = st.session_state.pop("draft_check_notice", None)
+    if check_notice:
+        st.success(check_notice)
+
+    publish_notice = st.session_state.pop("draft_publish_notice", None)
+    if publish_notice:
+        st.success(publish_notice)
+
+    selected_rule = st.session_state.get("selected_rule_type", DEFAULT_RULE_TYPE)
+    draft_signature = current_draft_signature()
+    try:
+        draft_config = build_subscription_config(
+            st.session_state.proxies_data,
+            st.session_state.global_config,
+            st.session_state.custom_rules,
+            st.session_state.custom_rule_providers,
+            selected_rule,
+        ) if st.session_state.proxies_data else {}
+        draft_yaml = build_subscription_yaml(draft_config) if draft_config else ""
+        draft_build_error = ""
+    except Exception as exc:
+        draft_config = {}
+        draft_yaml = ""
+        draft_build_error = str(exc)
+
+    try:
+        published_config = yaml.safe_load(saved_config.get("final_yaml") or "") or {}
+    except Exception:
+        published_config = {}
+
+    draft_stats = config_summary(draft_config)
+    published_stats = config_summary(published_config)
+    has_unpublished_changes = draft_yaml != (saved_config.get("final_yaml") or "")
+
+    status_class = "draft-status-pending" if has_unpublished_changes else "draft-status-clean"
+    status_text = "有待发布修改" if has_unpublished_changes else "草稿与线上一致"
+    published_at = saved_config.get("published_at") or saved_config.get("validated_at") or "尚未发布"
+    st.markdown(
+        f"""
+<div class="draft-status {status_class}">
+  <div><strong>{status_text}</strong><span>已发布：{html.escape(str(published_at))}</span></div>
+  <span>草稿会自动保存，但只有点击发布才会更新订阅链接内容。</span>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    labels = (("节点", "nodes"), ("策略组", "groups"), ("规则集", "providers"), ("规则", "rules"))
+    metric_columns = st.columns(4)
+    for column, (label, key) in zip(metric_columns, labels):
+        delta = draft_stats[key] - published_stats[key]
+        column.metric(label, draft_stats[key], delta=delta if delta else None)
+
+    if draft_build_error:
+        st.error(f"草稿生成失败：{draft_build_error}")
+
+    check_column, publish_column = st.columns(2)
+    with check_column:
+        check_clicked = st.button(
+            "检查草稿",
+            type="primary",
+            use_container_width=True,
+            disabled=not bool(st.session_state.proxies_data) or bool(draft_build_error),
+        )
+    checked_is_current = (
+        st.session_state.get("checked_draft_signature") == draft_signature
+        and bool(st.session_state.get("checked_draft_yaml"))
+    )
+    with publish_column:
+        publish_clicked = st.button(
+            "发布订阅",
+            use_container_width=True,
+            disabled=not checked_is_current,
+            help="当前草稿必须先通过结构检查和 mihomo 内核校验。",
+        )
+
+    if check_clicked:
+        check_errors, check_warnings = validate_subscription_config(draft_config)
+        if check_errors:
+            st.session_state.pop("checked_draft_signature", None)
+            st.session_state.pop("checked_draft_yaml", None)
+            persist_current_draft("failed", "；".join(check_errors))
+            st.error(f"结构检查发现 {len(check_errors)} 个错误")
+            for error in check_errors:
+                st.code(error, language="text")
+        else:
+            mihomo_result = validate_with_mihomo(draft_yaml)
+            if not mihomo_result.ok:
+                st.session_state.pop("checked_draft_signature", None)
+                st.session_state.pop("checked_draft_yaml", None)
+                persist_current_draft(mihomo_result.status, mihomo_result.message)
+                st.error(f"mihomo 内核校验失败：{mihomo_result.status}")
+                st.code(mihomo_result.message, language="text")
+            else:
+                st.session_state.checked_draft_signature = draft_signature
+                st.session_state.checked_draft_yaml = draft_yaml
+                st.session_state.checked_draft_warnings = check_warnings
+                st.session_state.checked_draft_validation_status = mihomo_result.status
+                st.session_state.checked_draft_validation_message = mihomo_result.message
+                persist_current_draft(mihomo_result.status, mihomo_result.message)
+                st.session_state.draft_check_notice = "草稿已通过结构检查和 mihomo 内核校验，可以发布。"
+                st.rerun()
+
+    if publish_clicked:
+        published_token = saved_config["token"]
+        save_user_config(
+            current_user["id"],
+            st.session_state.proxies_data,
+            st.session_state.global_config,
+            st.session_state.custom_rules,
+            st.session_state.custom_rule_providers,
+            selected_rule,
+            st.session_state.checked_draft_yaml,
+            validation_status=st.session_state.get(
+                "checked_draft_validation_status",
+                "passed",
+            ),
+            validation_message=st.session_state.get(
+                "checked_draft_validation_message",
+                "草稿通过结构检查和 mihomo 内核校验后发布",
+            ),
+            import_sources=st.session_state.import_sources,
+        )
+        st.session_state.persisted_draft_signature = draft_signature
+        st.session_state.pop("checked_draft_signature", None)
+        st.session_state.pop("checked_draft_yaml", None)
+        st.session_state.pop("checked_draft_warnings", None)
+        st.session_state.pop("checked_draft_validation_status", None)
+        st.session_state.pop("checked_draft_validation_message", None)
+        st.session_state.draft_publish_notice = (
+            f"订阅已发布：{get_public_base_url()}/sub/{published_token}"
+        )
+        st.rerun()
+
+    checked_yaml = st.session_state.get("checked_draft_yaml")
+    if checked_yaml and st.session_state.get("checked_draft_signature") == draft_signature:
+        warnings = st.session_state.get("checked_draft_warnings") or []
+        if warnings:
+            with st.expander(f"校验警告（{len(warnings)}）", expanded=False):
+                for warning in warnings:
+                    st.warning(warning)
+        preview_tab, diff_tab = st.tabs(["草稿 YAML", "发布差异"])
+        with preview_tab:
+            st.text_area("配置预览", value=checked_yaml, height=560, disabled=True)
+            st.download_button(
+                "下载草稿 config.yaml",
+                data=checked_yaml,
+                file_name="config.yaml",
+                mime="application/x-yaml",
+                use_container_width=True,
+            )
+        with diff_tab:
+            for label, key in labels:
+                delta = draft_stats[key] - published_stats[key]
+                st.write(f"{label}：已发布 {published_stats[key]} → 草稿 {draft_stats[key]}（{delta:+d}）")
+            published_node_names = set(proxy_names(published_config))
+            draft_node_names = set(proxy_names(draft_config))
+            added_nodes = sorted(draft_node_names - published_node_names)
+            removed_nodes = sorted(published_node_names - draft_node_names)
+            if added_nodes:
+                st.markdown(f"**新增节点（{len(added_nodes)}）**")
+                st.code("\n".join(added_nodes), language="text")
+            if removed_nodes:
+                st.markdown(f"**移除节点（{len(removed_nodes)}）**")
+                st.code("\n".join(removed_nodes), language="text")
+            if not added_nodes and not removed_nodes:
+                st.caption("节点名称集合无变化；差异可能来自节点字段、全局选项或分流规则。")
+
+current_signature = current_draft_signature()
+if current_signature != st.session_state.get("persisted_draft_signature"):
+    st.session_state.pop("checked_draft_signature", None)
+    st.session_state.pop("checked_draft_yaml", None)
+    st.session_state.pop("checked_draft_warnings", None)
+    st.session_state.pop("checked_draft_validation_status", None)
+    st.session_state.pop("checked_draft_validation_message", None)
+    persist_current_draft()
