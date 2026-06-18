@@ -1,3 +1,5 @@
+import ast
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -58,7 +60,10 @@ def normalize_proxy(proxy: dict[str, Any]) -> NormalizationResult:
     if "name" in normalized:
         normalized["name"] = str(normalized["name"]).strip()
     if "server" in normalized:
-        normalized["server"] = str(normalized["server"]).strip()
+        server, server_warning = _normalize_server_address(normalized["server"])
+        normalized["server"] = server
+        if server_warning:
+            warnings.append(server_warning)
     if "port" in normalized:
         try:
             normalized["port"] = int(normalized["port"])
@@ -131,6 +136,54 @@ def strip_internal_proxy_metadata(proxy: dict[str, Any]) -> dict[str, Any]:
 
 def normalize_proxy_for_mihomo(proxy: dict[str, Any]) -> dict[str, Any]:
     return normalize_proxy(proxy).proxy
+
+
+def _normalize_server_address(value: Any) -> tuple[str, str | None]:
+    warning: str | None = None
+    raw = value
+
+    if isinstance(raw, (list, tuple)):
+        if len(raw) == 1:
+            raw = raw[0]
+            warning = "已将单元素 server 列表规范化为字符串"
+        else:
+            return str(raw).strip(), None
+
+    text = str(raw).strip()
+    parsed_list = _parse_single_string_list(text)
+    if parsed_list is not None:
+        text = parsed_list
+        warning = "已将列表字符串形式的 server 规范化为字符串"
+
+    bracketed = _strip_ipv6_brackets(text)
+    if bracketed != text:
+        text = bracketed
+        warning = "已移除 IPv6 server 外层方括号"
+
+    return text, warning
+
+
+def _parse_single_string_list(text: str) -> str | None:
+    if not (text.startswith("[") and text.endswith("]")):
+        return None
+    try:
+        parsed = ast.literal_eval(text)
+    except Exception:
+        return None
+    if isinstance(parsed, list) and len(parsed) == 1:
+        return str(parsed[0]).strip()
+    return None
+
+
+def _strip_ipv6_brackets(text: str) -> str:
+    if not (text.startswith("[") and text.endswith("]")):
+        return text
+    inner = text[1:-1].strip()
+    try:
+        parsed = ipaddress.ip_address(inner)
+    except ValueError:
+        return text
+    return inner if parsed.version == 6 else text
 
 
 def _normalize_hysteria2_hop_interval(value: Any) -> int | None:

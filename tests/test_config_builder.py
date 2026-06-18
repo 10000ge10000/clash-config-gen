@@ -53,6 +53,48 @@ class ValidateConfigTest(unittest.TestCase):
 
         self.assertNotIn("fingerprint", proxy)
 
+    def test_ipv6_server_brackets_are_removed(self):
+        """mihomo 的 server 字段应保存裸 IPv6，不能带 URL 风格方括号。"""
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "anytls-ipv6",
+                "type": "anytls",
+                "server": "[2a0e:97c0:3f4:1::27e]",
+                "port": 9530,
+                "password": "secret",
+            }
+        )
+
+        self.assertEqual("2a0e:97c0:3f4:1::27e", proxy["server"])
+
+    def test_ipv6_server_yaml_list_is_unwrapped(self):
+        """未加引号的 [IPv6] 会被 YAML 解析成列表，导入时必须收敛回字符串。"""
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "anytls-ipv6",
+                "type": "anytls",
+                "server": ["2a0e:97c0:3f4:1::27e"],
+                "port": 9530,
+                "password": "secret",
+            }
+        )
+
+        self.assertEqual("2a0e:97c0:3f4:1::27e", proxy["server"])
+
+    def test_legacy_ipv6_server_list_string_is_unwrapped(self):
+        """历史数据里已经污染成 ['IPv6'] 字符串的 server 也要在重算时修复。"""
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "anytls-ipv6",
+                "type": "anytls",
+                "server": "['2a0e:97c0:3f4:1::27e']",
+                "port": 9530,
+                "password": "secret",
+            }
+        )
+
+        self.assertEqual("2a0e:97c0:3f4:1::27e", proxy["server"])
+
     def test_build_config_normalizes_proxies_before_yaml_output(self):
         """生成订阅时也要兜底清洗，保证数据库里的旧节点不会继续污染 YAML。"""
         config = build_config(
