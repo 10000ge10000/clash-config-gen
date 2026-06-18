@@ -160,6 +160,10 @@ def _normalize_server_address(value: Any) -> tuple[str, str | None]:
         text = bracketed
         warning = "已移除 IPv6 server 外层方括号"
 
+    if _is_ipv6_literal(text):
+        text = f"[{text}]"
+        warning = "已将 IPv6 server 规范化为方括号字符串"
+
     return text, warning
 
 
@@ -184,6 +188,14 @@ def _strip_ipv6_brackets(text: str) -> str:
     except ValueError:
         return text
     return inner if parsed.version == 6 else text
+
+
+def _is_ipv6_literal(text: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return parsed.version == 6
 
 
 def _normalize_hysteria2_hop_interval(value: Any) -> int | None:
