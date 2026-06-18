@@ -53,8 +53,8 @@ class ValidateConfigTest(unittest.TestCase):
 
         self.assertNotIn("fingerprint", proxy)
 
-    def test_ipv6_server_brackets_are_preserved_as_string(self):
-        """IPv6 server 应保存为方括号字符串，不能变成 YAML 列表。"""
+    def test_ipv6_server_brackets_are_removed(self):
+        """IPv6 server 应保存为裸地址，不能带 URL 风格方括号。"""
         proxy = normalize_proxy_for_mihomo(
             {
                 "name": "anytls-ipv6",
@@ -65,10 +65,10 @@ class ValidateConfigTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual("[2a0e:97c0:3f4:1::27e]", proxy["server"])
+        self.assertEqual("2a0e:97c0:3f4:1::27e", proxy["server"])
 
-    def test_ipv6_server_yaml_list_is_wrapped_as_string(self):
-        """未加引号的 [IPv6] 会被 YAML 解析成列表，导入时必须收敛回方括号字符串。"""
+    def test_ipv6_server_yaml_list_is_unwrapped(self):
+        """未加引号的 [IPv6] 会被 YAML 解析成列表，导入时必须收敛回裸地址。"""
         proxy = normalize_proxy_for_mihomo(
             {
                 "name": "anytls-ipv6",
@@ -79,10 +79,10 @@ class ValidateConfigTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual("[2a0e:97c0:3f4:1::27e]", proxy["server"])
+        self.assertEqual("2a0e:97c0:3f4:1::27e", proxy["server"])
 
-    def test_legacy_ipv6_server_list_string_is_wrapped_as_string(self):
-        """历史数据里已经污染成 ['IPv6'] 字符串的 server 也要修复成方括号字符串。"""
+    def test_legacy_ipv6_server_list_string_is_unwrapped(self):
+        """历史数据里已经污染成 ['IPv6'] 字符串的 server 也要修复成裸地址。"""
         proxy = normalize_proxy_for_mihomo(
             {
                 "name": "anytls-ipv6",
@@ -93,10 +93,10 @@ class ValidateConfigTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual("[2a0e:97c0:3f4:1::27e]", proxy["server"])
+        self.assertEqual("2a0e:97c0:3f4:1::27e", proxy["server"])
 
     def test_shadowsocks_ipv6_server_uses_bare_literal(self):
-        """SS 的 IPv6 server 应输出裸地址，方括号只用于需要该形态的协议。"""
+        """SS 的 IPv6 server 应输出裸地址。"""
         proxy = normalize_proxy_for_mihomo(
             {
                 "name": "ss-ipv6",
