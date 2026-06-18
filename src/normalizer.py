@@ -21,6 +21,7 @@ BROWSER_CLIENT_FINGERPRINTS = {
 CERTIFICATE_PIN_PATTERN = re.compile(r"^(?:[A-Fa-f0-9]{64}|(?:[A-Fa-f0-9]{2}:){31}[A-Fa-f0-9]{2})$")
 HOP_INTERVAL_RANGE_PATTERN = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
 INTERNAL_PROXY_FIELD_PREFIX = "_"
+BRACKETED_IPV6_SERVER_PROTOCOLS = {"anytls"}
 
 PROTOCOL_REQUIRED_FIELDS = {
     "ss": {"name", "type", "server", "port", "cipher", "password"},
@@ -60,7 +61,10 @@ def normalize_proxy(proxy: dict[str, Any]) -> NormalizationResult:
     if "name" in normalized:
         normalized["name"] = str(normalized["name"]).strip()
     if "server" in normalized:
-        server, server_warning = _normalize_server_address(normalized["server"])
+        server, server_warning = _normalize_server_address(
+            normalized["server"],
+            str(normalized.get("type", "")).strip().lower(),
+        )
         normalized["server"] = server
         if server_warning:
             warnings.append(server_warning)
@@ -138,7 +142,7 @@ def normalize_proxy_for_mihomo(proxy: dict[str, Any]) -> dict[str, Any]:
     return normalize_proxy(proxy).proxy
 
 
-def _normalize_server_address(value: Any) -> tuple[str, str | None]:
+def _normalize_server_address(value: Any, proxy_type: str = "") -> tuple[str, str | None]:
     warning: str | None = None
     raw = value
 
@@ -160,7 +164,7 @@ def _normalize_server_address(value: Any) -> tuple[str, str | None]:
         text = bracketed
         warning = "已移除 IPv6 server 外层方括号"
 
-    if _is_ipv6_literal(text):
+    if _is_ipv6_literal(text) and proxy_type in BRACKETED_IPV6_SERVER_PROTOCOLS:
         text = f"[{text}]"
         warning = "已将 IPv6 server 规范化为方括号字符串"
 

@@ -95,6 +95,21 @@ class ValidateConfigTest(unittest.TestCase):
 
         self.assertEqual("[2a0e:97c0:3f4:1::27e]", proxy["server"])
 
+    def test_shadowsocks_ipv6_server_uses_bare_literal(self):
+        """SS 的 IPv6 server 应输出裸地址，方括号只用于需要该形态的协议。"""
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "ss-ipv6",
+                "type": "ss",
+                "server": "[2a0e:97c0:3f4:1::9ce]",
+                "port": 9529,
+                "cipher": "2022-blake3-aes-128-gcm",
+                "password": "secret",
+            }
+        )
+
+        self.assertEqual("2a0e:97c0:3f4:1::9ce", proxy["server"])
+
     def test_build_config_normalizes_proxies_before_yaml_output(self):
         """生成订阅时也要兜底清洗，保证数据库里的旧节点不会继续污染 YAML。"""
         config = build_config(
