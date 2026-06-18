@@ -181,15 +181,25 @@ DUSTINWIN_PROVIDERS_MAP = {
 }
 
 
-def priority_ordered_items(mapping: dict[str, Any], priority_names: tuple[str, ...]):
+def priority_ordered_items(
+    mapping: dict[str, Any],
+    priority_names: tuple[str, ...],
+    deferred_names: tuple[str, ...] = (),
+):
     seen: set[str] = set()
+    deferred = set(deferred_names)
     for name in priority_names:
         if name in mapping:
             seen.add(name)
             yield name, mapping[name]
     for name, value in mapping.items():
-        if name not in seen:
+        if name not in seen and name not in deferred:
+            seen.add(name)
             yield name, value
+    for name in deferred_names:
+        if name in mapping and name not in seen:
+            seen.add(name)
+            yield name, mapping[name]
 
 
 def text_to_list(text: str) -> list[str]:
@@ -603,7 +613,11 @@ def build_rules(
             "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
         ]
         interval = get_ruleset_update_interval()
-        for name, provider_config in priority_ordered_items(DUSTINWIN_PROVIDERS_MAP, ("ai",)):
+        for name, provider_config in priority_ordered_items(
+            DUSTINWIN_PROVIDERS_MAP,
+            ("ai",),
+            ("cnip",),
+        ):
             file_name = str(provider_config["file"])
             target = dustinwin_provider_targets.get(name) or str(provider_config["target"])
             rule_providers[name] = {
@@ -623,7 +637,11 @@ def build_rules(
             "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
             "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
         ]
-        for name, (suffix, target) in priority_ordered_items(LHIE1_PROVIDERS_MAP, ("AI Suite",)):
+        for name, (suffix, target) in priority_ordered_items(
+            LHIE1_PROVIDERS_MAP,
+            ("AI Suite",),
+            ("Domestic", "Domestic IPs"),
+        ):
             target = lhie1_provider_targets.get(name) or target
             rule_providers[name] = {
                 "type": "http",

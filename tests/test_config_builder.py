@@ -369,6 +369,26 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertLess(ai_index, rules.index("RULE-SET,Domestic IPs,Domestic"))
         self.assertLess(ai_index, rules.index("GEOIP,CN,Domestic,no-resolve"))
 
+    def test_lhie1_specific_service_rules_precede_domestic_fallbacks(self):
+        """LHIE1 专项服务规则必须早于国内域名/IP 兜底。"""
+        rules, _providers = build_rules("lhie1规则", [], {})
+        domestic_index = rules.index("RULE-SET,Domestic,Domestic")
+        domestic_ips_index = rules.index("RULE-SET,Domestic IPs,Domestic")
+
+        for expected_rule in [
+            "RULE-SET,Netflix,Netflix",
+            "RULE-SET,YouTube,Youtube",
+            "RULE-SET,Disney Plus,Disney Plus",
+            "RULE-SET,Telegram,Telegram",
+            "RULE-SET,TikTok,TikTok",
+            "RULE-SET,Microsoft,Microsoft",
+            "RULE-SET,Apple,Apple",
+            "RULE-SET,Google FCM,Google FCM",
+        ]:
+            rule_index = rules.index(expected_rule)
+            self.assertLess(rule_index, domestic_index, expected_rule)
+            self.assertLess(rule_index, domestic_ips_index, expected_rule)
+
     def test_dustinwin_media_rules_target_specific_policy_groups_when_available(self):
         """YouTube/Netflix 等规则应进入同名策略组，未手动选择时由该组默认回落到 Global TV。"""
         rules, _providers = build_rules("dustinwin规则", [], {})
@@ -433,6 +453,18 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertIn("RULE-SET,privateip,DIRECT,no-resolve", rules)
         self.assertEqual("ipcidr", providers["telegramip"]["behavior"])
         self.assertEqual("mrs", providers["telegramip"]["format"])
+
+    def test_dustinwin_specific_ip_rules_precede_domestic_ip_fallback(self):
+        """专项 IP 规则应早于 cnip，避免被国内 IP 兜底抢先命中。"""
+        rules, _providers = build_rules("dustinwin规则", [], {})
+        cnip_index = rules.index("RULE-SET,cnip,Domestic,no-resolve")
+
+        for expected_rule in [
+            "RULE-SET,telegramip,Telegram,no-resolve",
+            "RULE-SET,netflixip,Netflix,no-resolve",
+            "RULE-SET,mediaip,Global TV,no-resolve",
+        ]:
+            self.assertLess(rules.index(expected_rule), cnip_index, expected_rule)
 
     def test_media_policy_groups_default_to_aggregate_selectors(self):
         """独立流媒体策略组的默认选中项要和 LHIE1 聚合规则目标一致。"""
