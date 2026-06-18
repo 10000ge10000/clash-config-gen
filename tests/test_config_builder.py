@@ -352,6 +352,23 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertTrue(providers["ai"]["url"].endswith("/ruleset/dustinwin/ai.mrs"))
         self.assertEqual("./ruleset/dustinwin/ai.mrs", providers["ai"]["path"])
 
+    def test_dustinwin_ai_rules_precede_domestic_rules(self):
+        """AI 域名规则必须早于国内域名和国内 IP，避免污染 IP 抢先直连。"""
+        rules, _providers = build_rules("dustinwin规则", [], {})
+
+        ai_index = rules.index("RULE-SET,ai,AI Suite")
+        self.assertLess(ai_index, rules.index("RULE-SET,cn,Domestic"))
+        self.assertLess(ai_index, rules.index("RULE-SET,cnip,Domestic,no-resolve"))
+
+    def test_lhie1_ai_suite_rules_precede_domestic_rules(self):
+        """LHIE1 的 AI Suite 必须早于 Domestic / Domestic IPs。"""
+        rules, _providers = build_rules("lhie1规则", [], {})
+
+        ai_index = rules.index("RULE-SET,AI Suite,AI Suite")
+        self.assertLess(ai_index, rules.index("RULE-SET,Domestic,Domestic"))
+        self.assertLess(ai_index, rules.index("RULE-SET,Domestic IPs,Domestic"))
+        self.assertLess(ai_index, rules.index("GEOIP,CN,Domestic,no-resolve"))
+
     def test_dustinwin_media_rules_target_specific_policy_groups_when_available(self):
         """YouTube/Netflix 等规则应进入同名策略组，未手动选择时由该组默认回落到 Global TV。"""
         rules, _providers = build_rules("dustinwin规则", [], {})
