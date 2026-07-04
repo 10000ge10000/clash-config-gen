@@ -474,7 +474,7 @@ def _parse_anytls(parsed) -> dict[str, Any]:
     server, port = _split_host_port(host, 443)
     params = _query(parsed)
     alpn = params.get("alpn", "h2,http/1.1")
-    return {
+    proxy = {
         "name": f"anytls-{server}",
         "type": "anytls",
         "server": server,
@@ -486,6 +486,49 @@ def _parse_anytls(parsed) -> dict[str, Any]:
         "skip-cert-verify": params.get("insecure", "0") in {"1", "true"},
         "udp": True,
     }
+    ech_opts = _parse_ech_opts(params)
+    if ech_opts:
+        proxy["ech-opts"] = ech_opts
+    return proxy
+
+
+def _parse_ech_opts(params: dict[str, str]) -> dict[str, Any]:
+    ech_enabled = _query_bool(params, ("ech", "ech-enable"))
+    ech_config = _first_query_value(params, ("ech_config", "ech-config", "echConfig"))
+    ech_query_server_name = _first_query_value(
+        params,
+        ("ech-query-server-name", "ech_query_server_name"),
+    )
+
+    if ech_enabled is None and not ech_config and not ech_query_server_name:
+        return {}
+
+    ech_opts: dict[str, Any] = {"enable": True if ech_enabled is None else ech_enabled}
+    if ech_config:
+        ech_opts["config"] = ech_config.strip()
+    if ech_query_server_name:
+        ech_opts["query-server-name"] = ech_query_server_name.strip()
+    return ech_opts
+
+
+def _query_bool(params: dict[str, str], keys: tuple[str, ...]) -> bool | None:
+    value = _first_query_value(params, keys)
+    if value is None:
+        return None
+    lowered = value.strip().lower()
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _first_query_value(params: dict[str, str], keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = params.get(key)
+        if value is not None and value.strip():
+            return value
+    return None
 
 
 def _split_host_port(hostport: str, default_port: int) -> tuple[str, int]:

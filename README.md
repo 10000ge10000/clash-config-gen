@@ -181,7 +181,7 @@ server {
 
 ## mihomo 内核校验
 
-Docker 镜像内置 `mihomo v1.19.24`。点击“生成并检查配置文件”时，系统会先生成 YAML，再执行真实 mihomo 配置测试；只有测试通过才会写入数据库并对外发布订阅。
+Docker 镜像内置 `mihomo v1.19.27`。点击“生成并检查配置文件”时，系统会先生成 YAML，再执行真实 mihomo 配置测试；只有测试通过才会写入数据库并对外发布订阅。
 
 本地开发如果暂时没有安装 mihomo，可以显式关闭内核校验：
 
@@ -242,8 +242,8 @@ https://你的域名/ruleset/dustinwin/ai.mrs
 | VLESS Reality | `uuid`、`tls`、`flow`、`servername`、`reality-opts`、`client-fingerprint`、`smux` |
 | TUIC v5 | `uuid`、`password`、`sni`、`alpn`、`udp-relay-mode`、`congestion-controller` |
 | Shadowsocks 2022 | `cipher`、`password`、`udp` |
-| AnyTLS | `password`、`sni`、`alpn`、`client-fingerprint`、`skip-cert-verify` |
-| VMess WebSocket | `uuid`、`alterId`、`cipher`、`network: ws`、`ws-opts.path` |
+| AnyTLS | `password`、`sni`、`alpn`、`client-fingerprint`、`skip-cert-verify`、`ech-opts` |
+| VMess WebSocket | `uuid`、`alterId`、`cipher`、`tls`、`network: ws`、`ws-opts.path`、`ws-opts.headers`、`smux.brutal-opts` |
 | Hysteria2 | `password`、`sni`、`alpn`、`ports`、`hop-interval` |
 
 导入时会做基础校验：

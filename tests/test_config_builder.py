@@ -18,6 +18,7 @@ from config_builder import (
     validate_config,
 )
 from clash_meta_gen import generate_proxy_groups
+from importers import parse_share_link
 from normalizer import normalize_proxy_for_mihomo
 
 
@@ -183,6 +184,123 @@ class ValidateConfigTest(unittest.TestCase):
         )
 
         self.assertNotIn("hop-interval", proxy)
+
+    def test_anytls_ech_opts_are_preserved_and_normalized(self):
+        """AnyTLS ECH 必须输出 mihomo 官方 ech-opts 结构。"""
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "anytls-ech",
+                "type": "anytls",
+                "server": "example.com",
+                "port": 443,
+                "password": "secret",
+                "ech-opts": {
+                    "enable": "true",
+                    "config": "  AEn+DQBFKwAgAA  ",
+                    "query-server-name": "  public.tls-ech.dev  ",
+                },
+            }
+        )
+
+        self.assertEqual(
+            {
+                "enable": True,
+                "config": "AEn+DQBFKwAgAA",
+                "query-server-name": "public.tls-ech.dev",
+            },
+            proxy["ech-opts"],
+        )
+
+    def test_anytls_ech_without_config_keeps_enable_only(self):
+        """ECH config 可留空，留空时交给 mihomo 通过 DNS 获取。"""
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "anytls-ech",
+                "type": "anytls",
+                "server": "example.com",
+                "port": 443,
+                "password": "secret",
+                "ech-opts": {
+                    "enable": 1,
+                    "config": "",
+                    "query-server-name": " ",
+                },
+            }
+        )
+
+        self.assertEqual({"enable": True}, proxy["ech-opts"])
+
+    def test_invalid_ech_opts_are_removed(self):
+        """错误类型的 ech-opts 不能污染最终订阅。"""
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "anytls-ech",
+                "type": "anytls",
+                "server": "example.com",
+                "port": 443,
+                "password": "secret",
+                "ech-opts": "enabled",
+            }
+        )
+
+        self.assertNotIn("ech-opts", proxy)
+
+    def test_anytls_share_link_imports_ech_opts(self):
+        """分享链接的兼容 ECH 参数应映射成 mihomo 官方 ech-opts。"""
+        proxy = parse_share_link(
+            "anytls://secret@example.com:443?ech=1&ech_config=AEn%2Btest&ech-query-server-name=public.tls-ech.dev"
+        )
+        proxy = normalize_proxy_for_mihomo(proxy)
+
+        self.assertEqual(
+            {
+                "enable": True,
+                "config": "AEn+test",
+                "query-server-name": "public.tls-ech.dev",
+            },
+            proxy["ech-opts"],
+        )
+
+    def test_vmess_ws_brutal_fields_survive_build_config(self):
+        """VMess WS + Brutal 依赖 ws-opts 与 smux.brutal-opts，生成订阅不能丢字段。"""
+        config = build_config(
+            [
+                {
+                    "name": "vmess-ws-brutal",
+                    "type": "vmess",
+                    "server": "example.com",
+                    "port": 443,
+                    "uuid": "00000000-0000-4000-8000-000000000000",
+                    "alterId": 0,
+                    "cipher": "auto",
+                    "tls": True,
+                    "network": "ws",
+                    "ws-opts": {
+                        "path": "/ws",
+                        "headers": {"Host": "example.com"},
+                    },
+                    "smux": {
+                        "enabled": True,
+                        "protocol": "h2mux",
+                        "max-connections": 4,
+                        "brutal-opts": {
+                            "enabled": True,
+                            "up": "100 Mbps",
+                            "down": "100 Mbps",
+                        },
+                    },
+                }
+            ],
+            {},
+        )
+
+        proxy = config["proxies"][0]
+        self.assertEqual("ws", proxy["network"])
+        self.assertEqual("/ws", proxy["ws-opts"]["path"])
+        self.assertEqual("example.com", proxy["ws-opts"]["headers"]["Host"])
+        self.assertTrue(proxy["smux"]["brutal-opts"]["enabled"])
+        self.assertEqual("100 Mbps", proxy["smux"]["brutal-opts"]["up"])
+        self.assertEqual("100 Mbps", proxy["smux"]["brutal-opts"]["down"])
 
     def test_empty_proxy_groups_are_rejected(self):
         """没有策略组的配置会让客户端只剩内置 Global，必须在保存前拦住。"""

@@ -21,6 +21,8 @@ BROWSER_CLIENT_FINGERPRINTS = {
 CERTIFICATE_PIN_PATTERN = re.compile(r"^(?:[A-Fa-f0-9]{64}|(?:[A-Fa-f0-9]{2}:){31}[A-Fa-f0-9]{2})$")
 HOP_INTERVAL_RANGE_PATTERN = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
 INTERNAL_PROXY_FIELD_PREFIX = "_"
+BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
+BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
 
 PROTOCOL_REQUIRED_FIELDS = {
     "ss": {"name", "type", "server", "port", "cipher", "password"},
@@ -77,6 +79,15 @@ def normalize_proxy(proxy: dict[str, Any]) -> NormalizationResult:
             warnings.append("已移除无法解析为正整数秒的 hop-interval")
         else:
             normalized["hop-interval"] = hop_interval
+
+    if "ech-opts" in normalized:
+        ech_opts, ech_warning = _normalize_ech_opts(normalized.get("ech-opts"))
+        if ech_opts is None:
+            normalized.pop("ech-opts", None)
+        else:
+            normalized["ech-opts"] = ech_opts
+        if ech_warning:
+            warnings.append(ech_warning)
 
     fingerprint = normalized.get("fingerprint")
     if fingerprint is not None:
@@ -224,6 +235,50 @@ def _normalize_hysteria2_hop_interval(value: Any) -> int | None:
         end = int(range_match.group(2))
         if start > 0 and end > 0 and start <= end:
             return start
+    return None
+
+
+def _normalize_ech_opts(value: Any) -> tuple[dict[str, Any] | None, str | None]:
+    if not isinstance(value, dict):
+        return None, "已移除非字典 ech-opts"
+
+    normalized = dict(value)
+    warnings: list[str] = []
+
+    if "enable" in normalized:
+        enabled = _normalize_bool_value(normalized.get("enable"))
+        if enabled is None:
+            normalized.pop("enable", None)
+            warnings.append("已移除无法解析为布尔值的 ech-opts.enable")
+        else:
+            normalized["enable"] = enabled
+
+    for key in ("config", "query-server-name"):
+        if key not in normalized:
+            continue
+        text = str(normalized[key]).strip()
+        if text:
+            normalized[key] = text
+        else:
+            normalized.pop(key, None)
+            warnings.append(f"已移除空 ech-opts.{key}")
+
+    if not normalized:
+        return None, "已移除空 ech-opts"
+    return normalized, "；".join(warnings) if warnings else None
+
+
+def _normalize_bool_value(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in BOOL_TRUE_VALUES:
+            return True
+        if lowered in BOOL_FALSE_VALUES:
+            return False
     return None
 
 

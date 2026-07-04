@@ -3629,7 +3629,7 @@ with tab1:
                         help="mihomo 公共字段；默认不写入，避免和核心自动选择冲突。",
                     )
                 with col_common2:
-                    enable_smux = st.checkbox("smux", value=False, key=f"enable_smux_{node_type}", help="mihomo 复用配置；onekey 的 VLESS Reality brutal 参数会写入这里。")
+                    enable_smux = st.checkbox("smux", value=False, key=f"enable_smux_{node_type}", help="mihomo 通用复用配置，适用于支持 TCP 传输的 VMess / VLESS / Shadowsocks 等节点。")
                     smux_enabled = st.checkbox("smux.enabled", value=True, key=f"smux_enabled_{node_type}") if enable_smux else False
                     smux_protocol = st.selectbox("smux.protocol", ["h2mux", "yamux", "smux"], index=0, key=f"smux_protocol_{node_type}") if enable_smux else "h2mux"
                     smux_max_connections = st.number_input("smux.max-connections", min_value=1, value=4, key=f"smux_max_conn_{node_type}") if enable_smux else 4
@@ -3859,6 +3859,10 @@ with tab1:
             anytls_idle_session_check_interval = st.number_input("idle-session-check-interval", value=30, help="空闲会话检查间隔（秒）")
             anytls_idle_session_timeout = st.number_input("idle-session-timeout", value=180, help="空闲会话超时时间（秒）")
             anytls_min_idle_session = st.number_input("min-idle-session", value=2, help="最小空闲会话数")
+            with st.expander("ECH 设置", expanded=False):
+                anytls_ech_enabled = st.checkbox("启用 ECH", value=False, key=f"anytls_ech_enabled_{node_type}", help="写入 mihomo 官方 ech-opts.enable。")
+                anytls_ech_config = st.text_area("ECH config", "", height=80, key=f"anytls_ech_config_{node_type}", help="可留空；留空时由 mihomo 通过 DNS HTTPS/SVCB 记录获取 ECH 配置。")
+                anytls_ech_query_server_name = st.text_input("ECH query-server-name", "", key=f"anytls_ech_query_server_name_{node_type}", help="可选；指定通过 DNS 查询 ECH 配置时使用的域名。")
     
         # 链式代理（dialer-proxy）选项 - 智能下拉选择
         use_dialer_proxy = st.checkbox("使用链式代理 (dialer-proxy)", value=False, key=f"use_dialer_proxy_{node_type}", help="是否通过另一个代理连接此节点")
@@ -4028,6 +4032,12 @@ with tab1:
             manual_node["udp"] = node_udp
             if anytls_ip_version != "默认":
                 manual_node["ip-version"] = anytls_ip_version
+            if anytls_ech_enabled:
+                manual_node["ech-opts"] = {"enable": True}
+                if anytls_ech_config.strip():
+                    manual_node["ech-opts"]["config"] = anytls_ech_config.strip()
+                if anytls_ech_query_server_name.strip():
+                    manual_node["ech-opts"]["query-server-name"] = anytls_ech_query_server_name.strip()
 
         if common_ip_version != "默认" and "ip-version" not in manual_node:
             manual_node["ip-version"] = common_ip_version

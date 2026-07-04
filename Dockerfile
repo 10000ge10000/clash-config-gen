@@ -1,7 +1,7 @@
 # 使用官方 Python Slim 镜像减少体积
 FROM python:3.11-slim
 
-ARG MIHOMO_VERSION=v1.19.24
+ARG MIHOMO_VERSION=v1.19.27
 
 # 设置工作目录
 WORKDIR /app
