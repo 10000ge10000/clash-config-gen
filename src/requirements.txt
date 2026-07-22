@@ -1,6 +1,6 @@
-pyyaml
-streamlit
-fastapi
-uvicorn
-python-multipart
-requests
+pyyaml==6.0.3
+streamlit==1.60.0
+fastapi==0.139.2
+uvicorn==0.51.0
+python-multipart==0.0.32
+requests==2.34.2

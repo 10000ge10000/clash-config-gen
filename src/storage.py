@@ -96,6 +96,22 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at
             ON auth_sessions(expires_at);
+
+            CREATE TABLE IF NOT EXISTS auth_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                username TEXT NOT NULL DEFAULT '',
+                client_ip TEXT NOT NULL DEFAULT '',
+                success INTEGER NOT NULL DEFAULT 0,
+                detail TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_auth_audit_created_at
+            ON auth_audit_log(created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_auth_audit_login_lookup
+            ON auth_audit_log(event_type, username, client_ip, success, created_at);
             """
         )
         _ensure_subscription_config_columns(conn)
@@ -174,6 +190,74 @@ def authenticate_user(username: str, password: str) -> sqlite3.Row | None:
     if not verify_password(password, user["password_hash"]):
         return None
     return user
+
+
+def record_auth_audit_event(
+    event_type: str,
+    username: str,
+    client_ip: str,
+    success: bool,
+    detail: str = "",
+) -> None:
+    """记录不含密码、Cookie 或 Token 的认证审计事件，并限制日志保留期。"""
+    now = datetime.now(timezone.utc)
+    retention_boundary = now - timedelta(days=90)
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM auth_audit_log WHERE created_at < ?",
+            (retention_boundary.isoformat(timespec="seconds"),),
+        )
+        conn.execute(
+            """
+            INSERT INTO auth_audit_log
+                (event_type, username, client_ip, success, detail, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_type[:32],
+                username.strip().lower()[:64],
+                client_ip[:64],
+                int(success),
+                detail[:200],
+                now.isoformat(timespec="seconds"),
+            ),
+        )
+
+
+def recent_login_failure_counts(
+    username: str,
+    client_ip: str,
+    window_seconds: int = 900,
+) -> tuple[int, int]:
+    """返回时间窗内账号和 IP 的失败次数；账号成功登录后重新计算该账号失败序列。"""
+    boundary = datetime.now(timezone.utc) - timedelta(seconds=max(60, window_seconds))
+    boundary_text = boundary.isoformat(timespec="seconds")
+    normalized_username = username.strip().lower()[:64]
+    with _connect() as conn:
+        last_success = conn.execute(
+            """
+            SELECT MAX(created_at) AS created_at
+            FROM auth_audit_log
+            WHERE event_type = 'login' AND success = 1 AND username = ? AND created_at >= ?
+            """,
+            (normalized_username, boundary_text),
+        ).fetchone()["created_at"]
+        username_boundary = max(boundary_text, last_success or boundary_text)
+        username_failures = conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM auth_audit_log
+            WHERE event_type = 'login' AND success = 0 AND username = ? AND created_at >= ?
+            """,
+            (normalized_username, username_boundary),
+        ).fetchone()["c"]
+        ip_failures = conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM auth_audit_log
+            WHERE event_type = 'login' AND success = 0 AND client_ip = ? AND created_at >= ?
+            """,
+            (client_ip[:64], boundary_text),
+        ).fetchone()["c"]
+    return int(username_failures), int(ip_failures)
 
 
 def create_auth_session(user_id: int, days: int = 30) -> str:

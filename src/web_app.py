@@ -1,5 +1,6 @@
 import html
 import streamlit as st
+import streamlit.components.v1 as components
 import yaml
 import requests
 import json
@@ -10,7 +11,6 @@ import socket
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from textwrap import dedent
 from urllib.parse import urlparse
 
 from auth import get_bool_env
@@ -24,6 +24,7 @@ from config_builder import (
 )
 from importers import normalize_subscription_content, parse_proxy_yaml, parse_share_link
 from mihomo_validator import validate_with_mihomo
+from security import create_csrf_token
 from storage import (
     delete_regular_user,
     ensure_admin_from_env,
@@ -37,9 +38,15 @@ from storage import (
     save_user_draft,
     set_user_enabled,
 )
+from ui.auth_view import render_auth_gate
+from ui.node_view import render_node_management
+from ui.publish_view import render_publish_summary
+from ui.rule_view import collect_rule_targets, render_rule_provider_list, render_single_rule_editor
 
 MAX_REMOTE_SUBSCRIPTION_BYTES = 5 * 1024 * 1024
 SAFE_RULESET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+PROJECT_REPOSITORY_URL = "https://github.com/10000ge10000/clash-config-gen"
+MIHOMO_DOCUMENTATION_URL = "https://wiki.metacubex.one/"
 
 
 def validate_external_url(url: str) -> str:
@@ -119,6 +126,9 @@ st.set_page_config(
         'About': "### OpenClash 配置文件生成器\n\n这是一个用于快速生成 Clash Meta 配置文件的工具。"
     }
 )
+
+ASSETS_DIR = Path(__file__).with_name("assets")
+BRAND_MARK_SVG = (ASSETS_DIR / "brand-mark.svg").read_text(encoding="utf-8")
 
 # 假设 clash_meta_gen 就在同一目录下，如果报错请确保文件存在
 try:
@@ -2126,6 +2136,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# 主题覆盖独立于业务逻辑，便于仅迭代界面层而不影响 Streamlit 的控件状态和事件绑定。
+ui_theme_path = Path(__file__).with_name("assets") / "ui_theme.css"
+if ui_theme_path.is_file():
+    st.markdown(
+        f"<style>{ui_theme_path.read_text(encoding='utf-8')}</style>",
+        unsafe_allow_html=True,
+    )
+
 
 # ==========================================
 # 0.1 数据库初始化 + 登录注册门禁
@@ -2135,119 +2153,6 @@ ensure_admin_from_env()
 
 if "auth_user" not in st.session_state:
     st.session_state.auth_user = None
-
-
-def render_auth_gate():
-    """所有配置都和用户绑定，未登录时必须提前拦截，避免匿名配置丢失。"""
-    register_mode = st.query_params.get("auth") == "register"
-    registration_enabled = get_bool_env("ALLOW_REGISTRATION", False)
-    error_message = html.escape(st.query_params.get("auth_error", ""))
-    title = "创建新账号" if register_mode else "欢迎回来"
-    subtitle = "建立你的专属配置空间" if register_mode else "登录以继续管理节点与订阅"
-
-    if register_mode and registration_enabled:
-        form_html = dedent(
-            """
-            <form class="auth-form" method="post" action="/sub/auth/register">
-              <label class="auth-field">用户名
-                <input name="username" autocomplete="username" required minlength="3" maxlength="32" placeholder="3-32 位字母、数字、点或短横线">
-              </label>
-              <label class="auth-field">密码
-                <input name="password" type="password" autocomplete="new-password" required minlength="8" placeholder="至少 8 位">
-              </label>
-              <label class="auth-field">确认密码
-                <input name="password_confirm" type="password" autocomplete="new-password" required minlength="8" placeholder="再次输入密码">
-              </label>
-              <button class="auth-submit" type="submit">注册并进入控制台</button>
-            </form>
-            """
-        ).strip()
-    elif register_mode:
-        form_html = dedent(
-            """
-            <div class="auth-registration-closed">
-              当前部署已关闭公开注册，请联系管理员创建账号。
-            </div>
-            """
-        ).strip()
-    else:
-        form_html = dedent(
-            """
-            <form class="auth-form" method="post" action="/sub/auth/login">
-              <label class="auth-field">用户名
-                <input name="username" autocomplete="username" required placeholder="请输入用户名">
-              </label>
-              <label class="auth-field">密码
-                <input name="password" type="password" autocomplete="current-password" required placeholder="请输入密码">
-              </label>
-              <div class="auth-options">
-                <label class="auth-remember">
-                  <input name="remember" type="checkbox">
-                  <span>保持登录 30 天</span>
-                </label>
-              </div>
-              <button class="auth-submit" type="submit">安全登录</button>
-            </form>
-            """
-        ).strip()
-
-    error_html = f'<div class="auth-error">{error_message}</div>' if error_message else ""
-    register_class = "active" if register_mode else ""
-    login_class = "" if register_mode else "active"
-    auth_page_html = "\n".join(
-        line.strip()
-        for line in dedent(
-            f"""
-        <div class="auth-page">
-          <main class="auth-layout">
-            <header class="auth-brand">
-              <div class="auth-brand-mark">C</div>
-              <div>
-                <div class="auth-brand-name">CLASH CONFIG GEN</div>
-                <div class="auth-brand-desc">Secure configuration intelligence</div>
-              </div>
-            </header>
-            <section class="auth-intro">
-              <div class="auth-eyebrow">CONFIGURATION INTELLIGENCE</div>
-              <h1>把复杂配置，变成<br>可控的发布流程。</h1>
-              <p>导入节点、检查规则、生成订阅。每一步都可追踪，每一次发布都有明确差异。</p>
-              <div class="auth-capabilities">
-                <span class="auth-capability">真实 mihomo 内核校验</span>
-                <span class="auth-capability">用户隔离订阅</span>
-                <span class="auth-capability">持久化节点与规则</span>
-              </div>
-              <div class="auth-route-card" aria-hidden="true">
-                <div class="auth-route-labels">
-                  <span>源配置</span>
-                  <span>规则检查</span>
-                  <strong>安全发布</strong>
-                </div>
-              </div>
-              <div class="auth-metrics" aria-hidden="true">
-                <div class="auth-metric"><strong>8</strong><span>在线节点</span></div>
-                <div class="auth-metric"><strong>32</strong><span>有效规则</span></div>
-                <div class="auth-metric"><strong>&lt; 60 ms</strong><span>节点延迟</span></div>
-              </div>
-            </section>
-            <section class="auth-card">
-              <h2>{title}</h2>
-              <div class="auth-card-subtitle">{subtitle}</div>
-              <nav class="auth-tabs">
-                <a class="auth-tab {login_class}" href="/">登录</a>
-                <a class="auth-tab {register_class}" href="/?auth=register">注册</a>
-              </nav>
-              {error_html}
-              {form_html}
-              <div class="auth-security">TLS 加密传输 · HttpOnly 会话 · 可随时撤销</div>
-            </section>
-            <div class="auth-product-note">登录后同步节点、规则和专属订阅 Token</div>
-          </main>
-        </div>
-        """
-        ).splitlines()
-        if line.strip()
-    )
-    st.markdown(auth_page_html, unsafe_allow_html=True)
 
 
 def set_auth_user(user) -> None:
@@ -2267,7 +2172,7 @@ if not st.session_state.auth_user:
 
 
 if not st.session_state.auth_user:
-    render_auth_gate()
+    render_auth_gate(BRAND_MARK_SVG, PROJECT_REPOSITORY_URL, MIHOMO_DOCUMENTATION_URL)
     st.stop()
 
 st.query_params.clear()
@@ -2695,9 +2600,9 @@ def switch_workspace(tab_name: str) -> None:
 # ==========================================
 with st.sidebar:
     st.markdown(
-        """
+        f"""
         <div class="sidebar-brand">
-          <div class="sidebar-brand-mark">C</div>
+          <div class="sidebar-brand-mark">{BRAND_MARK_SVG}</div>
           <div>
             <strong>CLASH CONFIG GEN</strong>
             <span>配置工作台</span>
@@ -2737,7 +2642,24 @@ with st.sidebar:
             import streamlit.components.v1 as components
             copy_js = f"""
             <script>
-            navigator.clipboard.writeText('{subscription_url}');
+            (async () => {{
+                const text = {json.dumps(subscription_url)};
+                const clipboard = window.parent?.navigator?.clipboard || navigator.clipboard;
+                try {{
+                    await clipboard.writeText(text);
+                }} catch (error) {{
+                    // 某些嵌入式浏览器会禁止 Clipboard API；保留旧浏览器降级路径。
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.setAttribute('readonly', '');
+                    textarea.style.position = 'fixed';
+                    textarea.style.opacity = '0';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    textarea.remove();
+                }}
+            }})();
             </script>
             """
             components.html(copy_js, height=0)
@@ -2748,8 +2670,9 @@ with st.sidebar:
         st.success("订阅 Token 已重置。")
         st.rerun()
     st.markdown(
-        """
+        f"""
         <form class="auth-logout-form" method="post" action="/sub/auth/logout">
+          <input name="csrf_token" type="hidden" value="{html.escape(create_csrf_token('logout'), quote=True)}">
           <button type="submit">退出登录</button>
         </form>
         """,
@@ -3303,20 +3226,9 @@ dashboard_tab, tab1, tab2, tab3, tab4 = st.tabs(
 )
 
 with dashboard_tab:
-    dashboard_action, dashboard_spacer = st.columns([1, 4])
-    with dashboard_action:
-        st.button(
-            "＋ 导入新节点",
-            type="primary",
-            use_container_width=True,
-            key="dashboard_import_nodes",
-            on_click=switch_workspace,
-            args=("导入节点",),
-        )
-
     workflow_active_step = 3 if workspace_checked else 4 if not workspace_has_changes else 1
     workflow_steps = (
-        ("01", "导入节点", f"{len(st.session_state.import_sources)} 个来源"),
+        ("01", "导入节点", f"{len(st.session_state.proxies_data)} 个节点"),
         ("02", "整理节点", f"{len(st.session_state.proxies_data)} 个可用"),
         ("03", "检查草稿", workspace_status),
         ("04", "发布订阅", "已同步" if not workspace_has_changes else "待确认"),
@@ -3348,12 +3260,10 @@ with dashboard_tab:
         node_rows = []
         for proxy in st.session_state.proxies_data[:5]:
             node_name = html.escape(str(proxy.get("name") or "未命名节点"))
-            source_name = html.escape(str(proxy.get("_source_name") or "历史节点"))
             protocol = html.escape(str(proxy.get("type") or "unknown"))
             node_rows.append(
                 '<div class="dashboard-node-row">'
                 f'<div class="dashboard-node-name">{node_name}</div>'
-                f'<div class="dashboard-node-source">{source_name}</div>'
                 '<div class="dashboard-node-status">可用</div>'
                 f'<div class="dashboard-node-protocol">{protocol}</div>'
                 '</div>'
@@ -3363,10 +3273,10 @@ with dashboard_tab:
         )
         st.markdown(
             '<section class="dashboard-panel">'
-            '<h3>节点与来源</h3>'
-            '<div class="dashboard-panel-subtitle">显示当前草稿中的代理节点与导入来源</div>'
+            '<h3>节点概览</h3>'
+            '<div class="dashboard-panel-subtitle">显示当前草稿中的节点与协议状态</div>'
             '<div class="dashboard-node-head">'
-            '<span>节点</span><span>来源</span><span>状态</span><span>协议</span>'
+            '<span>节点</span><span>状态</span><span>协议</span>'
             '</div>'
             f'{node_content}'
             '</section>',
@@ -3434,9 +3344,9 @@ with dashboard_tab:
             str(workspace_published_at),
         ),
         (
-            "导入来源",
-            f"{len(st.session_state.import_sources)} 个来源",
+            "节点配置",
             f"{len(st.session_state.proxies_data)} 个节点",
+            f"{len(set(str(proxy.get('type') or 'unknown') for proxy in st.session_state.proxies_data))} 种协议",
         ),
     ]
     activity_html = "".join(
@@ -3487,17 +3397,13 @@ with tab1:
         help="四种录入方式最终进入同一套解析、去重和字段校验流程。",
     )
 
-    source_name = st.text_input(
-        "来源名称",
-        value={
-            "智能 YAML 导入": "YAML 导入",
-            "订阅链接": "远程订阅",
-            "分享链接": "分享链接",
-            "手动添加": "手动添加",
-        }[import_method],
-        key=f"import_source_name_{import_method}",
-        help="用于节点管理中的来源标签，不会写入最终订阅 YAML。",
-    )
+    # 旧草稿仍保留来源元数据以兼容存储结构，但界面不再要求用户维护重复的来源名称。
+    source_name = {
+        "智能 YAML 导入": "YAML 导入",
+        "订阅链接": "远程订阅",
+        "分享链接": "分享链接",
+        "手动添加": "手动添加",
+    }[import_method]
     raw_yaml_input = ""
     subscription_url = ""
     share_link = ""
@@ -3567,7 +3473,7 @@ with tab1:
                 "分享链接": "share",
             }[import_method]
             if not new_proxies:
-                st.info("本次没有可加入的节点，未创建空导入来源。")
+                st.info("本次没有可加入的节点。")
             else:
                 tagged_proxies = register_import_source(source_name, source_type, new_proxies)
                 st.session_state.proxies_data.extend(tagged_proxies)
@@ -3578,23 +3484,6 @@ with tab1:
             st.error(f"导入失败: {e}")
             if import_method == "订阅链接":
                 st.info("确认远程地址返回 YAML 或节点订阅，并检查反向代理路径是否正确。")
-
-    if st.session_state.import_sources:
-        with st.expander(f"导入来源（{len(st.session_state.import_sources)}）", expanded=False):
-            for source in st.session_state.import_sources:
-                source_name_label = html.escape(str(source.get("name") or "未命名来源"))
-                source_type_label = html.escape(str(source.get("type") or "unknown"))
-                imported_at = html.escape(str(source.get("imported_at") or "历史数据"))
-                node_count = int(source.get("node_count") or 0)
-                st.markdown(
-                    f"""
-<div class="import-source-row">
-  <div><strong>{source_name_label}</strong><span>{source_type_label}</span></div>
-  <div><strong>{node_count}</strong><span>节点 · {imported_at}</span></div>
-</div>
-""",
-                    unsafe_allow_html=True,
-                )
 
     if import_method == "手动添加":
         render_workflow_step(
@@ -4106,148 +3995,7 @@ with tab1:
 
 
 with tab2:
-    # 第二步仅负责整理、筛选和编辑已有节点。
-    render_workflow_step(
-        2,
-        "整理节点",
-        "集中查看、筛选、排序和修正已导入节点，后续策略组会自动引用这里的节点。",
-    )
-    
-    if not st.session_state.proxies_data:
-        st.info("暂无节点。请先在“导入节点”中批量导入或手动添加。")
-    else:
-        total_nodes = len(st.session_state.proxies_data)
-        protocol_names = sorted({str(proxy.get("type", "unknown")) for proxy in st.session_state.proxies_data})
-        duplicate_names = total_nodes - len({proxy.get("name") for proxy in st.session_state.proxies_data})
-        metric_total, metric_protocols, metric_duplicates = st.columns(3)
-        metric_total.metric("节点总数", total_nodes)
-        metric_protocols.metric("协议类型", len(protocol_names))
-        metric_duplicates.metric("重复名称", duplicate_names)
-
-        source_names = sorted(
-            {
-                str(proxy.get("_source_name") or "历史节点")
-                for proxy in st.session_state.proxies_data
-            }
-        )
-        filter_search, filter_protocol, filter_source = st.columns([2, 1, 1])
-        with filter_search:
-            node_search = st.text_input(
-                "搜索节点",
-                placeholder="名称、服务器或协议",
-                key="node_management_search",
-            ).strip().lower()
-        with filter_protocol:
-            selected_protocol = st.selectbox(
-                "协议筛选",
-                ["全部"] + protocol_names,
-                key="node_management_protocol",
-            )
-        with filter_source:
-            selected_source = st.selectbox(
-                "来源筛选",
-                ["全部"] + source_names,
-                key="node_management_source",
-            )
-
-        visible_proxies = []
-        for original_idx, proxy in enumerate(st.session_state.proxies_data):
-            searchable = " ".join(
-                str(proxy.get(field, ""))
-                for field in ("name", "server", "type", "port")
-            ).lower()
-            if node_search and node_search not in searchable:
-                continue
-            if selected_protocol != "全部" and proxy.get("type") != selected_protocol:
-                continue
-            proxy_source = str(proxy.get("_source_name") or "历史节点")
-            if selected_source != "全部" and proxy_source != selected_source:
-                continue
-            visible_proxies.append((original_idx, proxy))
-
-        st.caption(f"当前显示 {len(visible_proxies)} / {total_nodes} 个节点")
-
-        # 紧凑节点行：摘要常显，详细 YAML 按需展开。
-        for idx, proxy in visible_proxies:
-            source_label = str(proxy.get("_source_name") or "历史节点")
-            server_label = f"{proxy.get('server', '-')}:{proxy.get('port', '-')}"
-            proxy_expander = st.expander(
-                f"{proxy['name']}  ·  {proxy.get('type', 'unknown')}  ·  {source_label}  ·  {server_label}",
-                expanded=False,
-            )
-            with proxy_expander:
-                st.caption(
-                    f"来源：{source_label}　原始名称：{proxy.get('_origin_name') or proxy['name']}"
-                )
-                col_up, col_down, col_edit, col_delete = st.columns(4)
-                with col_up:
-                    if st.button("上移", key=f"move_proxy_up_{idx}", disabled=idx == 0, use_container_width=True):
-                        st.session_state.proxies_data[idx - 1], st.session_state.proxies_data[idx] = (
-                            st.session_state.proxies_data[idx],
-                            st.session_state.proxies_data[idx - 1],
-                        )
-                        st.rerun()
-                with col_down:
-                    if st.button("下移", key=f"move_proxy_down_{idx}", disabled=idx == len(st.session_state.proxies_data) - 1, use_container_width=True):
-                        st.session_state.proxies_data[idx + 1], st.session_state.proxies_data[idx] = (
-                            st.session_state.proxies_data[idx],
-                            st.session_state.proxies_data[idx + 1],
-                        )
-                        st.rerun()
-                with col_edit:
-                    if st.button("编辑", key=f"edit_proxy_{idx}", use_container_width=True):
-                        st.session_state.editing_proxy_idx = idx
-                        st.session_state.editing_proxy_data = proxy.copy()
-                        st.rerun()
-                with col_delete:
-                    if st.button("移除", key=f"delete_proxy_{idx}", use_container_width=True):
-                        st.session_state.proxies_data.pop(idx)
-                        st.rerun()
-        
-        # 检查是否有正在编辑的节点
-        if 'editing_proxy_idx' in st.session_state and 'editing_proxy_data' in st.session_state:
-            editing_idx = st.session_state.editing_proxy_idx
-            editing_data = st.session_state.editing_proxy_data
-            
-            st.subheader("编辑节点")
-            st.info(f"正在编辑节点: {editing_data['name']}")
-            
-            # 将节点数据转换为YAML格式
-            yaml_data = yaml.dump([editing_data], default_flow_style=False, allow_unicode=True)
-            
-            # 允许用户编辑YAML格式的节点配置
-            updated_yaml = st.text_area("编辑节点配置 (YAML格式)", value=yaml_data, height=300)
-            
-            if st.button("保存修改"):
-                try:
-                    # 解析YAML格式的节点配置
-                    updated_data = yaml.safe_load(updated_yaml)
-                    if isinstance(updated_data, list) and len(updated_data) > 0:
-                        updated_proxy = updated_data[0]
-                        
-                        # 验证必要的字段
-                        if 'name' in updated_proxy and 'type' in updated_proxy and 'server' in updated_proxy and 'port' in updated_proxy:
-                            # 更新节点信息
-                            internal_metadata = {
-                                key: value
-                                for key, value in editing_data.items()
-                                if str(key).startswith("_")
-                            }
-                            updated_proxy.update(internal_metadata)
-                            st.session_state.proxies_data[editing_idx] = updated_proxy
-                            
-                            # 清除编辑状态
-                            del st.session_state.editing_proxy_idx
-                            del st.session_state.editing_proxy_data
-                            
-                            st.success("节点信息已更新")
-                            st.rerun()
-                        else:
-                            st.error("YAML格式错误：节点配置缺少必要的字段 (name, type, server, port)")
-                    else:
-                        st.error("YAML格式错误：请确保输入的是有效的节点配置")
-                except Exception as e:
-                    st.error(f"YAML解析错误: {e}")
+    render_node_management(render_workflow_step)
 
 with tab3:
     render_workflow_step(
@@ -4316,22 +4064,7 @@ with tab3:
         # ==========================
         st.subheader("可视化规则编辑")
         
-        # 获取所有策略组名称用于下拉菜单
-        all_groups = [group['name'] for group in proxy_groups]
-        all_groups.extend(['DIRECT', 'REJECT', 'REJECT-DROP', 'Proxy'])
-        all_groups = sorted(set(all_groups))
-        available_proxy_names = [
-            proxy.get("name")
-            for proxy in st.session_state.proxies_data
-            if proxy.get("name")
-        ]
-        all_targets = sorted(
-            set(
-                all_groups
-                + available_proxy_names
-                + ["DIRECT", "REJECT", "REJECT-DROP", "Proxy"]
-            )
-        )
+        all_targets = collect_rule_targets(proxy_groups, st.session_state.proxies_data)
 
         if rule_type in {"dustinwin规则", "lhie1规则"}:
             if rule_type == "dustinwin规则":
@@ -4406,55 +4139,7 @@ with tab3:
             preview_config = {}
             st.error(f"应用预设规则目标后重新生成预览失败：{exc}")
         
-        st.markdown("#### 单条规则")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**规则类型**")
-            rule_select = st.selectbox("选择规则类型", 
-                                     ["DOMAIN-SUFFIX", "DOMAIN", "DOMAIN-KEYWORD", "IP-CIDR", "GEOIP", "MATCH"],
-                                     key="rule_type_select_v3")
-        with col2:
-            st.write("**目标策略**")
-            # 增加自定义组输入
-            group_mode = st.selectbox("选择目标策略组模式", ["从列表中选择", "手动输入名称"], label_visibility="collapsed", key="group_mode_select")
-            
-            if group_mode == "从列表中选择":
-                group_select = st.selectbox("选择目标策略或节点", all_targets, key="target_group_select_v3")
-                final_group = group_select
-            else:
-                custom_group_input = st.text_input("输入策略组名称", placeholder="例如: MyGroup", key="custom_group_input_v3")
-                final_group = custom_group_input
-
-        rule_value = ""
-        if rule_select not in ["MATCH"]:
-            rule_value = st.text_input("输入值 (域名/IP/国家代码)", placeholder="例如: google.com", key="rule_value_input_v3")
-        
-        # 添加规则按钮
-        if st.button("➕ 添加规则", key="add_rule_v3"):            
-            if not final_group:
-                 st.error("请选择或输入目标策略组")
-            elif rule_select != "MATCH" and not rule_value:
-                 st.error("请输入规则值")
-            else:
-                new_rule = f"{rule_select},{rule_value},{final_group}" if rule_select != "MATCH" else f"MATCH,{final_group}"
-                if new_rule not in st.session_state.custom_rules:
-                    st.session_state.custom_rules.append(new_rule)
-                    st.success(f"规则已添加: {new_rule}")
-                    st.rerun()
-                else:
-                    st.warning("该规则已存在")
-        
-        # 自定义规则列表展示 (移至此处)
-        if st.session_state.custom_rules:
-            st.subheader(f"已添加的自定义规则 ({len(st.session_state.custom_rules)})")
-            for i, rule in enumerate(st.session_state.custom_rules):
-                col_rule, col_action = st.columns([4, 1])
-                with col_rule:
-                    st.text(f"{i+1}. {rule}")
-                with col_action:
-                    if st.button(f"🗑️", key=f"delete_custom_rule_{i}", help="删除此规则"):
-                        st.session_state.custom_rules.pop(i)
-                        st.rerun()
+        render_single_rule_editor(all_targets)
                         
         st.divider()
 
@@ -4464,7 +4149,7 @@ with tab3:
         st.subheader("规则集")
         st.caption("规则集使用介绍: https://wiki.metacubex.one/config/rule-providers/content/")
         
-        with st.expander("➕ 添加新规则集", expanded=True):
+        with st.expander("➕ 添加新规则集", expanded=False):
             # 配置文件选项移除，默认全部
             rp_name = st.text_input("别名 (请勿重名)", placeholder="Rule-provider - " + str(uuid.uuid4())[:8], key="rp_name")
             
@@ -4552,18 +4237,7 @@ with tab3:
                     st.success(f"规则集 {safe_rp_name} 已添加")
                     st.rerun()
         
-        st.subheader("已添加规则")
-
-        # 显示已添加的规则集
-        if st.session_state.custom_rule_providers:
-            st.write(f"**已添加的规则集列表 ({len(st.session_state.custom_rule_providers)})**")
-            for name, config in list(st.session_state.custom_rule_providers.items()):
-                target_group = config.get('target', '未指定')
-                with st.expander(f"{name} ({target_group})"):
-                    st.json(config)
-                    if st.button(f"删除 {name}", key=f"del_rp_{name}"):
-                        del st.session_state.custom_rule_providers[name]
-                        st.rerun()
+        render_rule_provider_list()
 
 with tab4:
     render_workflow_step(
@@ -4640,24 +4314,8 @@ with tab4:
     published_stats = config_summary(published_config)
     has_unpublished_changes = draft_yaml != (saved_config.get("final_yaml") or "")
 
-    status_class = "draft-status-pending" if has_unpublished_changes else "draft-status-clean"
-    status_text = "有待发布修改" if has_unpublished_changes else "草稿与线上一致"
     published_at = saved_config.get("published_at") or saved_config.get("validated_at") or "尚未发布"
-    st.markdown(
-        f"""
-<div class="draft-status {status_class}">
-  <div><strong>{status_text}</strong><span>已发布：{html.escape(str(published_at))}</span></div>
-  <span>草稿会自动保存，但只有点击发布才会更新订阅链接内容。</span>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    labels = (("节点", "nodes"), ("策略组", "groups"), ("规则集", "providers"), ("规则", "rules"))
-    metric_columns = st.columns(4)
-    for column, (label, key) in zip(metric_columns, labels):
-        delta = draft_stats[key] - published_stats[key]
-        column.metric(label, draft_stats[key], delta=delta if delta else None)
+    render_publish_summary(has_unpublished_changes, str(published_at), draft_stats, published_stats)
 
     if draft_build_error:
         st.error(f"草稿生成失败：{draft_build_error}")
@@ -4782,3 +4440,15 @@ if current_signature != st.session_state.get("persisted_draft_signature"):
     st.session_state.pop("checked_draft_validation_status", None)
     st.session_state.pop("checked_draft_validation_message", None)
     persist_current_draft()
+
+
+st.markdown(
+    f"""
+<footer class="ccg-footer" aria-label="产品与服务信息">
+  <div class="ccg-footer-brand"><span class="ccg-footer-signal" aria-hidden="true"></span>Clash Config Gen <span>· 已登录会话</span></div>
+  <div class="ccg-footer-meta"><span>Docker · mihomo 内核校验</span><span>配置草稿与已发布订阅分离</span></div>
+  <nav class="ccg-footer-links" aria-label="帮助链接"><a href="{PROJECT_REPOSITORY_URL}" target="_blank" rel="noopener noreferrer">项目文档</a><a href="{MIHOMO_DOCUMENTATION_URL}" target="_blank" rel="noopener noreferrer">Mihomo 帮助</a><span>© 2026</span></nav>
+</footer>
+""",
+    unsafe_allow_html=True,
+)

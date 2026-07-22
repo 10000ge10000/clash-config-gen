@@ -31,6 +31,42 @@ jobs:
       - name: Run unit tests
         run: PYTHONPATH=src python -m unittest discover -s tests -v
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install browser regression dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Build local browser-test image
+        run: docker build -t clash-config-gen-ui-test .
+
+      - name: Run browser regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name clash-config-gen-ui-test \
+            -p 8501:8501 -p 8000:8000 \
+            -e PUBLIC_BASE_URL=http://127.0.0.1:18501 \
+            -e APP_DB_PATH=/tmp/app.db \
+            -e ALLOW_REGISTRATION=true \
+            -e AUTH_COOKIE_SECURE=false \
+            -e CSRF_SECRET=ci-only-secret-that-is-longer-than-thirty-two-characters \
+            -e RULESET_CACHE_ENABLED=false \
+            clash-config-gen-ui-test
+          node tests/reverse-proxy.mjs &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" 2>/dev/null || true; docker rm -f clash-config-gen-ui-test >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:18501/health >/dev/null; then break; fi
+            sleep 1
+          done
+          npm run test:ui
+
       - name: Install mihomo for sample validation
         shell: bash
         run: |

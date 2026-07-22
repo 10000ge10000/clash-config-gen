@@ -17,5 +17,5 @@ services:
       - RULESET_UPDATE_INTERVAL=604800
       - RULESET_CACHE_DIR=/app/ruleset/dustinwin
     volumes:
-      - ./data:/app/data # 持久化用户、节点与订阅 Token
+      - /opt/1panel/docker/compose/clash-config-gen/data:/app/data # 持久化用户、节点与订阅 Token
       - ./ruleset:/app/ruleset # 持久化自定义规则集（可选）
