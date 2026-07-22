@@ -27,7 +27,7 @@ test('节点工作流和响应式契约保持可用', async ({ page }) => {
 
   await page.getByRole('tab', { name: '节点管理' }).click();
   const components = page.locator('[data-testid="stCustomComponentV1"]');
-  await expect(components).toHaveCount(3);
+  await expect(components).toHaveCount(3, { timeout: 30_000 });
   const firstHandle = components.nth(0).contentFrame().getByRole('button');
   const lastHandle = components.nth(2).contentFrame().getByRole('button');
   await firstHandle.dragTo(lastHandle);
@@ -44,6 +44,11 @@ test('节点工作流和响应式契约保持可用', async ({ page }) => {
     await expect(details).toBeVisible({ timeout: 30_000 });
     expect(await details.evaluate((element) => element.open)).toBe(false);
   }
+
+  await page.getByRole('tab', { name: '生成与检查' }).click();
+  await page.getByRole('button', { name: '检查草稿' }).click();
+  await expect(page.getByText('草稿已通过结构检查和 mihomo 内核校验，可以发布。')).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByRole('tabpanel', { name: '生成与检查' }).getByText('发布差异')).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   const widths = await page.evaluate(() => ({

@@ -2,6 +2,8 @@ import html
 
 import streamlit as st
 
+PUBLISH_DIFF_LABELS = (("节点", "nodes"), ("策略组", "groups"), ("规则集", "providers"), ("规则", "rules"))
+
 
 def render_publish_summary(
     has_unpublished_changes: bool,
@@ -21,7 +23,6 @@ def render_publish_summary(
         """,
         unsafe_allow_html=True,
     )
-    labels = (("节点", "nodes"), ("策略组", "groups"), ("规则集", "providers"), ("规则", "rules"))
-    for column, (label, key) in zip(st.columns(4), labels):
+    for column, (label, key) in zip(st.columns(4), PUBLISH_DIFF_LABELS):
         delta = draft_stats[key] - published_stats[key]
         column.metric(label, draft_stats[key], delta=delta if delta else None)

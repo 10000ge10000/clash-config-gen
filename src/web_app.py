@@ -40,7 +40,7 @@ from storage import (
 )
 from ui.auth_view import render_auth_gate
 from ui.node_view import render_node_management
-from ui.publish_view import render_publish_summary
+from ui.publish_view import PUBLISH_DIFF_LABELS, render_publish_summary
 from ui.rule_view import collect_rule_targets, render_rule_provider_list, render_single_rule_editor
 
 MAX_REMOTE_SUBSCRIPTION_BYTES = 5 * 1024 * 1024
@@ -4416,7 +4416,7 @@ with tab4:
                 use_container_width=True,
             )
         with diff_tab:
-            for label, key in labels:
+            for label, key in PUBLISH_DIFF_LABELS:
                 delta = draft_stats[key] - published_stats[key]
                 st.write(f"{label}：已发布 {published_stats[key]} → 草稿 {draft_stats[key]}（{delta:+d}）")
             published_node_names = set(extract_proxy_names(published_config))
