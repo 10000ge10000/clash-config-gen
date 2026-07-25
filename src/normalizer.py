@@ -33,7 +33,7 @@ PROTOCOL_REQUIRED_FIELDS = {
     "tuic": {"name", "type", "server", "port", "uuid", "password"},
     "anytls": {"name", "type", "server", "port", "password"},
     "wireguard": {"name", "type", "server", "port", "ip", "private-key", "public-key"},
-    "masque": {"name", "type", "server", "port", "private-key", "public-key", "network", "sni"},
+    "masque": {"name", "type", "server", "port", "private-key", "public-key"},
 }
 
 
@@ -302,8 +302,9 @@ def validate_proxy_fields(proxy: dict[str, Any]) -> list[str]:
     if isinstance(port, int) and not 1 <= port <= 65535:
         errors.append("端口超出 1-65535")
     if proxy_type == "masque":
-        if proxy.get("network") != "h3-l4proxy":
-            errors.append("当前仅支持 MASQUE network=h3-l4proxy")
-        if proxy.get("udp") is not False:
-            errors.append("MASQUE h3-l4proxy 必须设置 udp: false")
+        if proxy.get("network") == "h3-l4proxy":
+            if not proxy.get("sni"):
+                errors.append("MASQUE h3-l4proxy 缺少必填字段: sni")
+            if proxy.get("udp") is not False:
+                errors.append("MASQUE h3-l4proxy 必须设置 udp: false")
     return errors

@@ -153,6 +153,28 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertNotIn("ipv6", proxy)
         self.assertNotIn("mtu", proxy)
 
+    def test_legacy_masque_tunnel_fields_are_preserved(self):
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "masque",
+                "type": "masque",
+                "server": "example.com",
+                "port": 443,
+                "private-key": "private",
+                "public-key": "public",
+                "ip": "172.16.0.2/32",
+                "ipv6": "2606:4700::1/128",
+                "mtu": 1280,
+                "sni": "www.bing.com",
+                "congestion-controller": "bbr",
+            }
+        )
+
+        self.assertEqual("172.16.0.2/32", proxy["ip"])
+        self.assertEqual("2606:4700::1/128", proxy["ipv6"])
+        self.assertEqual(1280, proxy["mtu"])
+        self.assertNotIn("network", proxy)
+
     def test_build_config_strips_internal_import_source_metadata(self):
         """导入来源只用于管理界面，不能泄漏到最终订阅 YAML。"""
         config = build_config(
