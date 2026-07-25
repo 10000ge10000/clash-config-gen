@@ -8,16 +8,24 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 
 from auth import get_bool_env
+from config_defaults import build_default_global_config
 from config_builder import DUSTINWIN_PROVIDERS_MAP
-from config_builder import build_subscription_headers, build_yaml, validate_config
+from config_builder import (
+    DEFAULT_RULE_TYPE,
+    build_config,
+    build_subscription_headers,
+    build_yaml,
+    validate_config,
+)
 from diagnostics import build_subscription_diagnostics
+from mihomo_validator import validate_with_mihomo
 from normalizer import normalize_proxies_for_mihomo
 from ruleset_updater import get_ruleset_cache_path, start_ruleset_update_worker
 from security import is_trusted_request_origin, request_client_ip, validate_csrf_token
 from storage import (
     authenticate_user,
     create_auth_session,
-    create_user,
+    create_user_with_published_config,
     ensure_admin_from_env,
     get_config_by_token,
     get_public_base_url,
@@ -27,7 +35,9 @@ from storage import (
     recent_login_failure_counts,
     record_auth_audit_event,
     revoke_auth_session,
+    validate_new_user_credentials,
 )
+from warp_provisioner import WarpProvisionError, provision_warp_masque
 
 
 @asynccontextmanager
@@ -84,6 +94,26 @@ def _positive_int_env(name: str, default: int) -> int:
         return max(1, int(os.getenv(name, str(default))))
     except ValueError:
         return default
+
+
+def _build_initial_warp_subscription() -> tuple[dict, dict, str]:
+    proxy = provision_warp_masque()
+    global_config = build_default_global_config()
+    config = build_config(
+        [proxy],
+        global_config,
+        custom_rules=[],
+        custom_rule_providers={},
+        selected_rule_type=DEFAULT_RULE_TYPE,
+    )
+    errors, _warnings = validate_config(config)
+    if errors:
+        raise ValueError("生成的初始订阅未通过结构检查")
+    final_yaml = build_yaml(config)
+    validation = validate_with_mihomo(final_yaml)
+    if not validation.ok:
+        raise ValueError("生成的初始订阅未通过 Mihomo 内核检查")
+    return proxy, global_config, final_yaml
 
 
 @app.get("/sub/assets/auth-future-city.png")
@@ -161,10 +191,28 @@ def register(
         record_auth_audit_event("register", normalized_username, client_ip, False, "password_mismatch")
         return _auth_redirect("两次输入的密码不一致。")
     try:
-        user = create_user(username, password, is_admin=False)
-    except Exception as exc:
+        normalized_username = validate_new_user_credentials(username, password)
+        proxy, global_config, final_yaml = _build_initial_warp_subscription()
+        user = create_user_with_published_config(
+            normalized_username,
+            password,
+            proxies=[proxy],
+            global_config=global_config,
+            custom_rules=[],
+            custom_rule_providers={},
+            selected_rule_type=DEFAULT_RULE_TYPE,
+            final_yaml=final_yaml,
+            import_sources=[],
+        )
+    except WarpProvisionError as exc:
         record_auth_audit_event("register", normalized_username, client_ip, False, type(exc).__name__)
         return _auth_redirect(f"注册失败：{exc}")
+    except ValueError as exc:
+        record_auth_audit_event("register", normalized_username, client_ip, False, type(exc).__name__)
+        return _auth_redirect(f"注册失败：{exc}")
+    except Exception as exc:
+        record_auth_audit_event("register", normalized_username, client_ip, False, type(exc).__name__)
+        return _auth_redirect("注册失败：服务暂时不可用，请稍后重试。")
 
     token = create_auth_session(int(user["id"]), days=AUTH_COOKIE_DAYS)
     response = _auth_redirect()

@@ -130,6 +130,29 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertNotIn("fingerprint", config["proxies"][0])
         self.assertEqual("firefox", config["proxies"][0]["client-fingerprint"])
 
+    def test_masque_h3_l4proxy_removes_tunnel_fields_and_disables_udp(self):
+        proxy = normalize_proxy_for_mihomo(
+            {
+                "name": "预制masque",
+                "type": "masque",
+                "server": "saas.sin.fan",
+                "port": 443,
+                "private-key": "private",
+                "public-key": "public",
+                "network": "h3-l4proxy",
+                "sni": "consumer-masque-proxy.cloudflareclient.com",
+                "udp": True,
+                "ip": "172.16.0.2/32",
+                "ipv6": "2606:4700::1/128",
+                "mtu": 1280,
+            }
+        )
+
+        self.assertIs(False, proxy["udp"])
+        self.assertNotIn("ip", proxy)
+        self.assertNotIn("ipv6", proxy)
+        self.assertNotIn("mtu", proxy)
+
     def test_build_config_strips_internal_import_source_metadata(self):
         """导入来源只用于管理界面，不能泄漏到最终订阅 YAML。"""
         config = build_config(

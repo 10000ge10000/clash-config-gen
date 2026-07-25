@@ -51,9 +51,12 @@ jobs:
           set -euo pipefail
           docker run -d --name clash-config-gen-ui-test \
             -p 8501:8501 -p 8000:8000 \
+            --add-host host.docker.internal:host-gateway \
             -e PUBLIC_BASE_URL=http://127.0.0.1:18501 \
             -e APP_DB_PATH=/tmp/app.db \
             -e ALLOW_REGISTRATION=true \
+            -e WARP_PROVISION_ENABLED=true \
+            -e WARP_API_BASE_URL=http://host.docker.internal:18502 \
             -e AUTH_COOKIE_SECURE=false \
             -e CSRF_SECRET=ci-only-secret-that-is-longer-than-thirty-two-characters \
             -e RULESET_CACHE_ENABLED=false \
@@ -71,8 +74,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="v1.19.24"
+          version="v1.19.29"
+          sha256="60de76a35a6cbf7b4fa4a20f5c257c24345d1d635ab1aa3877022a1997ef413c"
           curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/${version}/mihomo-linux-amd64-${version}.gz" -o /tmp/mihomo.gz
+          echo "${sha256}  /tmp/mihomo.gz" | sha256sum -c -
           gunzip /tmp/mihomo.gz
           chmod +x /tmp/mihomo
           /tmp/mihomo -v
@@ -82,7 +87,14 @@ jobs:
         run: |
           set -euo pipefail
           PYTHONPATH=src python - <<'PY'
+          import base64
+
+          from cryptography.hazmat.primitives import serialization
+          from cryptography.hazmat.primitives.asymmetric import ec
           from config_builder import build_config, build_yaml
+
+          client_key = ec.generate_private_key(ec.SECP256R1())
+          server_key = ec.generate_private_key(ec.SECP256R1()).public_key()
 
           config = build_config(
               [
@@ -93,7 +105,25 @@ jobs:
                       "port": 8388,
                       "cipher": "aes-128-gcm",
                       "password": "password",
-                  }
+                  },
+                  {
+                      "name": "预制masque",
+                      "type": "masque",
+                      "server": "saas.sin.fan",
+                      "port": 443,
+                      "private-key": base64.b64encode(client_key.private_bytes(
+                          serialization.Encoding.DER,
+                          serialization.PrivateFormat.TraditionalOpenSSL,
+                          serialization.NoEncryption(),
+                      )).decode("ascii"),
+                      "public-key": base64.b64encode(server_key.public_bytes(
+                          serialization.Encoding.DER,
+                          serialization.PublicFormat.SubjectPublicKeyInfo,
+                      )).decode("ascii"),
+                      "udp": False,
+                      "network": "h3-l4proxy",
+                      "sni": "consumer-masque-proxy.cloudflareclient.com",
+                  },
               ],
               {"generation_profile": "minimal"},
           )

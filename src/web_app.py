@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from auth import get_bool_env
+from config_defaults import build_default_global_config
 from config_builder import (
     DEFAULT_RULE_TYPE,
     DUSTINWIN_PROVIDERS_MAP,
@@ -2277,91 +2278,6 @@ SNIFFER_FORCE_DOMAIN = [
 SNIFFER_SKIP_DOMAIN = [
     "Mijia Cloud", "dlg.io.mi.com", "+.oray.com", "+.sunlogin.net", "+.push.apple.com"
 ]
-
-
-def build_default_global_config() -> dict:
-    """返回每个用户独立的默认全局配置，避免账号切换时复用上一位用户状态。"""
-    return {
-        # 基础
-        "include_global_compat": False,
-        "include_inbound_ports": False,
-        "include_controller": False,
-        "include_router_options": False,
-        "enable_core_options": False,
-        "optional_globals_v2": True,
-        "port": 7890,
-        "socks_port": 7891,
-        "mixed_port": 7893,
-        "allow_lan": False,
-        "bind_address": "*",
-        "mode": "rule",
-        "log_level": "info",
-        "ipv6_support": False,
-        "external_controller": "0.0.0.0:9090",
-        "secret": "",
-        "redir_port": 7892,
-        "tproxy_port": 7895,
-        "interface_name": "",
-        "external_ui": "",
-        "external_ui_name": "",
-        "external_ui_url": "",
-        # 性能与网络
-        "keep_alive_interval": 15,
-        "keep_alive_idle": 600,
-        "url_test_url": "http://cp.cloudflare.com/generate_204",
-        "url_test_interval": 60,
-        "url_test_tolerance": 30,
-        "tcp_concurrent": False,
-        "unified_delay": False,
-        "find_process_mode": "strict",
-        "geodata_mode": False,
-        "geodata_loader": "standard",
-        # TUN
-        "enable_tun": False,
-        "tun_stack": "mixed",
-        "tun_device": "utun",
-        "tun_auto_route": False,
-        "tun_auto_detect_interface": False,
-        "tun_dns_hijack": False,
-        "tun_dns_hijack_value": "127.0.0.1:53",
-        "tun_endpoint_independent_nat": False,
-        "tun_auto_redirect": False,
-        "tun_strict_route": False,
-        # DNS
-        "enable_dns": False,
-        "dns_listen": "0.0.0.0:7874",
-        "dns_ipv6": False,
-        "enhanced_mode": "fake-ip",
-        "fake_ip_range": "198.18.0.1/16",
-        "fake_ip_range6": "fc00::/18",
-        "fake_ip_filter_mode": "blacklist",
-        "dns_respect_rules": False,
-        "direct_nameserver": "",
-        "proxy_server_nameserver": "",
-        "default_nameserver": "223.5.5.5\n119.29.29.29",
-        "nameserver": "https://dns.alidns.com/dns-query\nhttps://doh.pub/dns-query",
-        "fallback": "https://1.1.1.1/dns-query\ntcp://8.8.8.8",
-        # 嗅探
-        "enable_sniffer": False,
-        "sniff_override_dest": False,
-        "sniffer_parse_pure_ip": False,
-        "sniffer_force_dns_mapping": False,
-        # OpenClash / 软路由
-        "openclash_preset": False,
-        "profile_store_selected": False,
-        "profile_store_fake_ip": False,
-        "ntp_enable": False,
-        "ntp_server": "time.apple.com",
-        "ntp_port": 123,
-        "ntp_interval": 30,
-        "ntp_write_to_system": False,
-        "authentication": "",
-        # 规则
-        "generation_profile": "openclash-router",
-        "is_desktop": False,
-        "lhie1_provider_targets": {},
-        "dustinwin_provider_targets": {},
-    }
 
 
 def int_global_config(name: str, default: int, minimum: int = 0) -> int:

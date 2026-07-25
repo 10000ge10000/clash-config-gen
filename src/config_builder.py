@@ -18,7 +18,7 @@ from normalizer import (
 
 SUBSCRIPTION_GENERATOR = "Clash-Config-Gen"
 SUBSCRIPTION_PROJECT = "一万AI分享 Clash/OpenClash 订阅生成器"
-SUBSCRIPTION_USAGE = "可直接导入 OpenClash、Clash Verge、FlClash 或 mihomo 兼容客户端"
+SUBSCRIPTION_USAGE = "可直接导入 OpenClash、Nikki、Clash Verge Rev、FlClash 或其他 mihomo 兼容客户端"
 SUBSCRIPTION_GITHUB_URL = "https://github.com/10000ge10000/clash-config-gen"
 SUBSCRIPTION_PROJECT_URL = "https://clash.910501.xyz"
 SUBSCRIPTION_ANNOUNCE = "\n".join(

@@ -10,6 +10,13 @@ services:
       - PUBLIC_BASE_URL=https://clash.910501.xyz
       - APP_DB_PATH=/app/data/app.db
       - ALLOW_REGISTRATION=false
+      - WARP_PROVISION_ENABLED=true
+      - WARP_API_BASE_URL=https://api.cloudflareclient.com
+      - WARP_API_VERSION=v0a4471
+      - WARP_CLIENT_VERSION=a-6.35-4471
+      - WARP_PRESET_NAME=预制masque
+      - WARP_PRESET_SERVER=saas.sin.fan
+      - WARP_REQUEST_TIMEOUT_SECONDS=15
       - AUTH_COOKIE_SECURE=true
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=change-this-admin-password

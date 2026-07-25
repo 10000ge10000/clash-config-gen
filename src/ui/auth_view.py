@@ -1,4 +1,5 @@
 import html
+import os
 from textwrap import dedent
 
 import streamlit as st
@@ -15,6 +16,7 @@ def render_auth_gate(brand_mark_svg: str, project_url: str, documentation_url: s
     title = "创建新账号" if register_mode else "欢迎回来"
     subtitle = "建立你的专属配置空间" if register_mode else "登录以继续管理节点与订阅"
     csrf_token = html.escape(create_csrf_token("auth"), quote=True)
+    mihomo_version = html.escape(os.getenv("MIHOMO_VERSION", "v1.19.29"))
 
     if register_mode and registration_enabled:
         form_html = dedent(
@@ -30,6 +32,11 @@ def render_auth_gate(brand_mark_svg: str, project_url: str, documentation_url: s
               <label class="auth-field">确认密码
                 <input name="password_confirm" type="password" autocomplete="new-password" required minlength="8" placeholder="再次输入密码">
               </label>
+              <div class="auth-warp-notice">
+                注册将自动申请独立 WARP MASQUE 配置并立即发布到你的订阅。
+                继续注册即表示你已了解
+                <a href="https://www.cloudflare.com/application/terms/" target="_blank" rel="noopener noreferrer">Cloudflare 服务条款</a>。
+              </div>
               <button class="auth-submit" type="submit">注册并进入控制台</button>
             </form>
             """
@@ -67,12 +74,25 @@ def render_auth_gate(brand_mark_svg: str, project_url: str, documentation_url: s
             <header class="auth-brand"><div class="auth-brand-mark">{brand_mark_svg}</div><div><div class="auth-brand-name">CLASH CONFIG GEN</div><div class="auth-brand-desc">Secure configuration intelligence</div></div></header>
             <section class="auth-intro">
               <div class="auth-eyebrow">CONFIGURATION INTELLIGENCE</div>
-              <h1><span>把复杂配置变成</span><span>可控的发布流程</span></h1>
-              <p>导入节点、检查规则、生成订阅。每一步都可追踪，每一次发布都有明确差异。</p>
-              <div class="auth-flow" aria-label="配置工作流">
-                <article class="auth-flow-item"><span class="auth-flow-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h10M4 17h16"/></svg></span><strong>节点导入</strong><span>统一解析多种配置来源</span></article>
-                <article class="auth-flow-item"><span class="auth-flow-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="m5 12 4 4L19 6"/></svg></span><strong>规则检查</strong><span>先验证草稿，再确认差异</span></article>
-                <article class="auth-flow-item"><span class="auth-flow-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3v18m9-9H3"/></svg></span><strong>安全发布</strong><span>将已检查的配置发布为订阅</span></article>
+              <h1><span>一份订阅覆盖</span><span>主流 Mihomo 客户端</span></h1>
+              <p>协议、内核和客户端兼容范围公开透明；配置发布前使用真实 Mihomo 内核检查。</p>
+              <div class="auth-flow auth-capabilities" aria-label="兼容能力">
+                <article class="auth-flow-item auth-capability-card">
+                  <div class="auth-capability-heading"><span class="auth-flow-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h10M4 17h16"/></svg></span><div><strong>协议</strong><span>可视化录入与 YAML 预制</span></div></div>
+                  <div class="auth-capability-label">可视化录入</div>
+                  <div class="auth-chip-list"><span>Shadowsocks</span><span>VMess</span><span>VLESS</span><span>Trojan</span><span>AnyTLS</span><span>Hysteria2</span><span>TUIC</span></div>
+                  <div class="auth-capability-label">YAML / 系统预制</div>
+                  <div class="auth-chip-list"><span>WireGuard</span><span>MASQUE h3-l4proxy</span></div>
+                </article>
+                <article class="auth-flow-item auth-capability-card">
+                  <div class="auth-capability-heading"><span class="auth-flow-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="m5 12 4 4L19 6"/></svg></span><div><strong>内核</strong><span>构建与发布双重验证</span></div></div>
+                  <div class="auth-kernel-status"><i></i><span>Mihomo Meta {mihomo_version}</span></div>
+                  <div class="auth-chip-list auth-chip-list-wide"><span>真实内核校验</span><span>AMD64</span><span>ARM64</span></div>
+                </article>
+                <article class="auth-flow-item auth-capability-card">
+                  <div class="auth-capability-heading"><span class="auth-flow-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3v18m9-9H3"/></svg></span><div><strong>客户端</strong><span>Mihomo 配置生态</span></div></div>
+                  <div class="auth-client-list"><span>OpenClash</span><span>Nikki</span><span>Clash Verge Rev</span><span>FlClash</span><span>其他 Mihomo 兼容客户端</span></div>
+                </article>
               </div>
             </section>
             <section class="auth-card">
@@ -81,7 +101,7 @@ def render_auth_gate(brand_mark_svg: str, project_url: str, documentation_url: s
               {error_html}{form_html}
               <div class="auth-security">TLS 加密传输 · HttpOnly 会话 · 可随时撤销</div>
             </section>
-            <footer class="auth-footer"><span>Docker · mihomo 内核校验</span><span class="auth-footer-links"><a href="{project_url}" target="_blank" rel="noopener noreferrer">项目文档</a><a href="{documentation_url}" target="_blank" rel="noopener noreferrer">Mihomo 帮助</a><span>会话使用 HttpOnly Cookie 管理</span></span></footer>
+            <footer class="auth-footer"><span>Docker · Mihomo Meta {mihomo_version} · AMD64 / ARM64</span><span class="auth-footer-links"><a href="{project_url}" target="_blank" rel="noopener noreferrer">项目文档</a><a href="{documentation_url}" target="_blank" rel="noopener noreferrer">Mihomo 帮助</a><span>会话使用 HttpOnly Cookie 管理</span></span></footer>
           </main>
         </div>
         """
