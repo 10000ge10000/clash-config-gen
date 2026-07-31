@@ -29,13 +29,15 @@ def get_ruleset_cache_path(file_name: str) -> Path:
 
 
 def update_dustinwin_rulesets(timeout: int = 30) -> dict[str, int]:
-    """下载 DustinWin 规则集到本地缓存；失败不覆盖已有可用文件。"""
+    """下载内置规则集到本地缓存；失败不覆盖已有可用文件。"""
     RULESET_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     stats = {"updated": 0, "failed": 0}
-    seen_files = sorted({str(config["file"]) for config in DUSTINWIN_PROVIDERS_MAP.values()})
+    source_urls = {
+        str(config["file"]): str(config.get("url") or f"{DUSTINWIN_RULESET_BASE_URL}/{config['file']}")
+        for config in DUSTINWIN_PROVIDERS_MAP.values()
+    }
 
-    for file_name in seen_files:
-        url = f"{DUSTINWIN_RULESET_BASE_URL}/{file_name}"
+    for file_name, url in sorted(source_urls.items()):
         target_path = get_ruleset_cache_path(file_name)
         temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
         try:

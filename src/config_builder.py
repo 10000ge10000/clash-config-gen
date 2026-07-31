@@ -31,6 +31,8 @@ SUBSCRIPTION_ANNOUNCE = "\n".join(
 DUSTINWIN_RULESET_BASE_URL = "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset"
 DUSTINWIN_RULESET_INTERVAL = 604800
 DUSTINWIN_RULESET_PATH_PREFIX = "./ruleset/dustinwin"
+GOOGLE_RULESET_FILE = "google.list"
+GOOGLE_RULESET_URL = "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Google/Google.list"
 DEFAULT_RULE_TYPE = "dustinwin规则"
 
 
@@ -143,7 +145,7 @@ LHIE1_PROVIDERS_MAP = {
     "Microsoft": ("Microsoft", "Microsoft"),
     "AI Suite": ("AI%20Suite", "AI Suite"),
     "Apple": ("Apple", "Apple"),
-    "Google FCM": ("Google%20FCM", "Google FCM"),
+    "Google FCM": ("Google%20FCM", "Google"),
     "Scholar": ("Scholar", "Scholar"),
     "miHoYo": ("miHoYo", "miHoYo"),
 }
@@ -154,7 +156,8 @@ DUSTINWIN_PROVIDERS_MAP = {
     "applications": {"file": "applications.list", "behavior": "classical", "format": "text", "target": "DIRECT"},
     "microsoft-cn": {"file": "microsoft-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Microsoft"},
     "apple-cn": {"file": "apple-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Apple"},
-    "google-cn": {"file": "google-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Google FCM"},
+    "google": {"file": GOOGLE_RULESET_FILE, "behavior": "classical", "format": "text", "target": "Google", "url": GOOGLE_RULESET_URL},
+    "google-cn": {"file": "google-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Google"},
     "games-cn": {"file": "games-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Steam"},
     "games": {"file": "games.mrs", "behavior": "domain", "format": "mrs", "target": "Steam"},
     "netflix": {"file": "netflix.mrs", "behavior": "domain", "format": "mrs", "target": "Netflix"},
@@ -229,11 +232,11 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
-def get_dustinwin_provider_url(file_name: str) -> str:
+def get_dustinwin_provider_url(file_name: str, source_url: str | None = None) -> str:
     if _bool_env("RULESET_CACHE_ENABLED", True):
         public_base_url = os.getenv("PUBLIC_BASE_URL", "https://clash.910501.xyz").rstrip("/")
         return f"{public_base_url}/ruleset/dustinwin/{file_name}"
-    return f"{DUSTINWIN_RULESET_BASE_URL}/{file_name}"
+    return source_url or f"{DUSTINWIN_RULESET_BASE_URL}/{file_name}"
 
 
 def get_ruleset_update_interval() -> int:
@@ -610,12 +613,12 @@ def build_rules(
     if selected_rule_type == "dustinwin规则":
         rule_list = [
             "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
-            "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
+            "DOMAIN-SUFFIX,services.googleapis.cn,Google",
         ]
         interval = get_ruleset_update_interval()
         for name, provider_config in priority_ordered_items(
             DUSTINWIN_PROVIDERS_MAP,
-            ("ai",),
+            ("ai", "youtube", "google"),
             ("cnip",),
         ):
             file_name = str(provider_config["file"])
@@ -624,7 +627,7 @@ def build_rules(
                 "type": "http",
                 "behavior": provider_config["behavior"],
                 "format": provider_config["format"],
-                "url": get_dustinwin_provider_url(file_name),
+                "url": get_dustinwin_provider_url(file_name, provider_config.get("url")),
                 "path": f"{DUSTINWIN_RULESET_PATH_PREFIX}/{file_name}",
                 "interval": interval,
             }
@@ -635,7 +638,7 @@ def build_rules(
         base_url = "https://testingcf.jsdelivr.net/gh/dler-io/Rules@main/Clash/Provider"
         rule_list = [
             "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
-            "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
+            "DOMAIN-SUFFIX,services.googleapis.cn,Google",
         ]
         for name, (suffix, target) in priority_ordered_items(
             LHIE1_PROVIDERS_MAP,
@@ -651,13 +654,22 @@ def build_rules(
                 "interval": 86400,
             }
             rule_list.append(f"RULE-SET,{name},{target}")
+        rule_providers["google"] = {
+            "type": "http",
+            "behavior": "classical",
+            "format": "text",
+            "url": get_dustinwin_provider_url(GOOGLE_RULESET_FILE, GOOGLE_RULESET_URL),
+            "path": f"{DUSTINWIN_RULESET_PATH_PREFIX}/{GOOGLE_RULESET_FILE}",
+            "interval": 86400,
+        }
+        rule_list.append("RULE-SET,google,Google")
         rule_list.extend(["GEOIP,CN,Domestic,no-resolve", "MATCH,Others"])
     else:
         rule_list = [
             "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
-            "DOMAIN-SUFFIX,services.googleapis.cn,Proxy",
-            "DOMAIN-SUFFIX,google.com,Proxy",
-            "DOMAIN-SUFFIX,youtube.com,Proxy",
+            "DOMAIN-SUFFIX,services.googleapis.cn,Google",
+            "DOMAIN-SUFFIX,google.com,Google",
+            "DOMAIN-SUFFIX,youtube.com,Youtube",
             "GEOIP,CN,DIRECT,no-resolve",
             "MATCH,Proxy",
         ]

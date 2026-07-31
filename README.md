@@ -241,11 +241,12 @@ docker exec clash-gen python /app/backfill_warp_masque.py --apply
 
 ## 分流规则与自动更新
 
-项目默认使用 [DustinWin/ruleset_geodata](https://github.com/DustinWin/ruleset_geodata) 的 `mihomo-ruleset` 规则集增强分流，不改变现有策略组数量，只把更完整的规则内容映射到现有策略组。例如：
+项目默认使用 [DustinWin/ruleset_geodata](https://github.com/DustinWin/ruleset_geodata) 的 `mihomo-ruleset` 规则集增强分流，并为 Google 保留独立策略组。例如：
 
 | DustinWin 规则集 | 默认目标策略 |
 | --- | --- |
 | `ai.mrs` | `AI Suite` |
+| `google.list`、`google-cn.mrs` | `Google` |
 | `youtube.mrs` | `Youtube` |
 | `netflix.mrs`、`netflixip.mrs` | `Netflix` |
 | `disney.mrs` | `Disney Plus` |
@@ -257,6 +258,8 @@ docker exec clash-gen python /app/backfill_warp_masque.py --apply
 | `telegramip.mrs` | `Telegram` |
 | `ads.mrs` | `AdBlock` |
 | `gfw.mrs`、`proxy.mrs`、`tld-proxy.mrs` | `Proxy` |
+
+Google 使用独立的 `Google` 策略组；YouTube 规则优先匹配 `Youtube` 策略组，不会被通用 Google 规则覆盖。
 
 自动更新分两层：
 

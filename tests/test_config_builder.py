@@ -6,6 +6,8 @@ from config_builder import (
     DUSTINWIN_PROVIDERS_MAP,
     DEFAULT_RULE_TYPE,
     DUSTINWIN_RULESET_INTERVAL,
+    GOOGLE_RULESET_FILE,
+    GOOGLE_RULESET_URL,
     LHIE1_PROVIDERS_MAP,
     SUBSCRIPTION_GENERATOR,
     SUBSCRIPTION_GITHUB_URL,
@@ -603,7 +605,7 @@ class ValidateConfigTest(unittest.TestCase):
             "RULE-SET,TikTok,TikTok",
             "RULE-SET,Microsoft,Microsoft",
             "RULE-SET,Apple,Apple",
-            "RULE-SET,Google FCM,Google FCM",
+            "RULE-SET,Google FCM,Google",
         ]:
             rule_index = rules.index(expected_rule)
             self.assertLess(rule_index, domestic_index, expected_rule)
@@ -626,6 +628,50 @@ class ValidateConfigTest(unittest.TestCase):
 
         for expected_rule in expected_rules:
             self.assertIn(expected_rule, rules)
+
+    def test_google_policy_group_and_provider_are_generated(self):
+        """Google 请求应进入独立策略组，YouTube 保持独立策略组。"""
+        proxies = [
+            {
+                "name": "node-1",
+                "type": "ss",
+                "server": "127.0.0.1",
+                "port": 8388,
+                "cipher": "aes-128-gcm",
+                "password": "password",
+            }
+        ]
+        groups = {group["name"]: group for group in generate_proxy_groups(proxies)}
+        self.assertEqual("Proxy", groups["Google"]["proxies"][0])
+        self.assertEqual("Global TV", groups["Youtube"]["proxies"][0])
+
+        rules, providers = build_rules("dustinwin规则", [], {})
+        self.assertIn("RULE-SET,google,Google", rules)
+        self.assertIn("RULE-SET,google-cn,Google", rules)
+        self.assertIn("RULE-SET,youtube,Youtube", rules)
+        self.assertLess(rules.index("RULE-SET,youtube,Youtube"), rules.index("RULE-SET,google,Google"))
+        self.assertEqual("classical", providers["google"]["behavior"])
+        self.assertEqual("text", providers["google"]["format"])
+        self.assertEqual(f"./ruleset/dustinwin/{GOOGLE_RULESET_FILE}", providers["google"]["path"])
+        self.assertTrue(providers["google"]["url"].endswith(f"/ruleset/dustinwin/{GOOGLE_RULESET_FILE}"))
+
+    def test_google_source_url_is_used_when_service_cache_is_disabled(self):
+        """关闭服务端缓存时，Google 规则集应回退到真实上游 URL。"""
+        from unittest.mock import patch
+
+        with patch.dict("os.environ", {"RULESET_CACHE_ENABLED": "false"}, clear=False):
+            _rules, providers = build_rules("dustinwin规则", [], {})
+        self.assertEqual(GOOGLE_RULESET_URL, providers["google"]["url"])
+
+    def test_lhie1_google_provider_stays_after_youtube(self):
+        """LHIE1 也要保留 YouTube 优先于通用 Google 的规则顺序。"""
+        rules, providers = build_rules("lhie1规则", [], {})
+
+        youtube_index = rules.index("RULE-SET,YouTube,Youtube")
+        google_index = rules.index("RULE-SET,google,Google")
+        self.assertLess(youtube_index, google_index)
+        self.assertEqual("classical", providers["google"]["behavior"])
+        self.assertEqual("text", providers["google"]["format"])
 
     def test_build_config_defaults_to_dustinwin_ruleset(self):
         """默认生成路径必须使用 DustinWin，避免新用户跳过分流页时漏掉 AI/Gemini。"""

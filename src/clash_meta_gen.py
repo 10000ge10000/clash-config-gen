@@ -160,7 +160,7 @@ def generate_proxy_groups(
 
     # 4. 应用与流媒体分组 (根据你原本的 Config 还原)
     app_groups = [
-        "Microsoft", "AI Suite", "Apple", "Apple TV", "Google FCM", 
+        "Microsoft", "AI Suite", "Apple", "Apple TV", "Google", "Google FCM",
         "Scholar", "Bilibili", "Bahamut", "HBO Max", "Pornhub", 
         "Netflix", "Disney Plus", "Discovery Plus", 
         "DAZN", "Spotify", "Steam", "TikTok", "miHoYo",
