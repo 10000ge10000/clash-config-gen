@@ -15,7 +15,6 @@
 | 真实订阅链接 | 每个用户拥有独立 Token，`/sub/{token}` 返回可被 OpenClash 拉取的 YAML |
 | 持久化存储 | 使用 SQLite 保存用户、节点、规则、订阅 Token 和最终 YAML |
 | 用户系统 | 支持普通用户注册登录，管理员账号由 Docker 环境变量初始化 |
-| WARP MASQUE 预制 | 每位普通用户独立申请 consumer WARP 注册和 P-256 私钥，生成 `h3-l4proxy` 节点并立即发布 |
 | onekey 适配 | 支持导入 `onekey.sh` 打印的 OpenClash YAML 节点片段 |
 | 手动节点 | 保留手动添加 SS、VLESS、VMess、TUIC、AnyTLS、Hysteria2 等节点 |
 | 增强分流 | 默认使用 DustinWin `mihomo-ruleset`，补全 AI、流媒体、国内外域名与 IP 规则 |
@@ -25,11 +24,9 @@
 
 ## 兼容范围
 
-- **协议**：可视化录入 Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC；YAML 导入或系统预制支持 WireGuard、MASQUE `h3-l4proxy`。
+- **协议**：可视化录入 Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC；YAML 导入支持 WireGuard。项目明确拒绝 `type: masque` 节点。
 - **内核**：镜像固定 Mihomo Meta `v1.19.29`，配置发布前执行真实 `mihomo -t`；镜像支持 AMD64、ARM64。
 - **客户端**：OpenClash、Nikki、Clash Verge Rev、FlClash，以及其他支持对应 Mihomo 配置格式的客户端。
-
-> MASQUE `h3-l4proxy` 当前只支持 TCP，因此预制节点固定 `udp: false`，不写入 `ip`、`ipv6` 和 `mtu`。
 
 ## 一键部署
 
@@ -51,14 +48,6 @@ services:
       - PUBLIC_BASE_URL=https://clash.910501.xyz
       # 是否允许普通用户自行注册。公网部署建议保持 false，需要多人自助注册时再改 true。
       - ALLOW_REGISTRATION=false
-      # 为每个新注册普通用户申请独立 WARP MASQUE 节点。
-      - WARP_PROVISION_ENABLED=true
-      - WARP_API_BASE_URL=https://api.cloudflareclient.com
-      - WARP_API_VERSION=v0a4471
-      - WARP_CLIENT_VERSION=a-6.35-4471
-      - WARP_PRESET_NAME=预制masque
-      - WARP_PRESET_SERVER=saas.sin.fan
-      - WARP_REQUEST_TIMEOUT_SECONDS=15
       # HTTPS 部署保持 true；仅本地 HTTP 调试时临时设为 false。
       - AUTH_COOKIE_SECURE=true
       # 初始化管理员账号。首次启动时自动创建。
@@ -105,7 +94,7 @@ https://clash.910501.xyz/sub/用户自己的随机Token
 
 1. 启动 Docker 服务。
 2. 使用 `.env` 中的管理员账号登录。
-3. 开启公开注册后，系统会为每个普通用户申请独立 WARP MASQUE 配置并立即发布；管理员可在侧边栏禁用用户或重置订阅 Token。
+3. 开启公开注册后，新账号会以“待配置”状态创建；管理员可在侧边栏禁用用户或重置订阅 Token。
 4. 在“快速填入”中选择 `OpenClash/onekey YAML`。
 5. 粘贴 `onekey.sh` 输出的 OpenClash YAML 片段，或粘贴完整 `config.yaml`。
 6. 点击“导入节点”，节点会进入当前用户的配置列表。
@@ -212,30 +201,7 @@ MIHOMO_VALIDATE_ENABLED=false streamlit run src/web_app.py
 
 生产环境不建议关闭该选项，否则 OpenClash 只能在导入后才暴露配置错误。
 
-## WARP MASQUE 自动预制
-
-当 `ALLOW_REGISTRATION=true` 且 `WARP_PROVISION_ENABLED=true` 时，注册流程会：
-
-1. 先完成用户名、密码、重复账号、CSRF 与来源校验。
-2. 为该用户创建独立 consumer WARP 注册，并使用独立 P-256 密钥切换到 MASQUE。
-3. 生成包含 `预制masque` 的完整 Mihomo YAML，再执行结构检查和真实内核校验。
-4. 全部通过后，在单个 SQLite 事务中创建用户、订阅 Token 和已发布配置。
-
-Cloudflare 注册 ID 与 Access Token 不会写入数据库；订阅只保存运行节点必需的密钥。预制节点进入用户配置后可以正常编辑或删除。公网批量注册没有额外限流，可能触发 Cloudflare 的限制或封禁，生产默认仍建议保持 `ALLOW_REGISTRATION=false`。
-
-现有普通用户补齐前先预检：
-
-```bash
-docker exec clash-gen python /app/backfill_warp_masque.py
-```
-
-确认没有同名 `预制masque` 后执行：
-
-```bash
-docker exec clash-gen python /app/backfill_warp_masque.py --apply
-```
-
-补齐命令排除管理员；先完成所有用户的 WARP 注册和完整 YAML 校验，再统一写入数据库。任一用户失败或配置在执行期间变化，本地写入会整体回滚。
+新账号在首次发布有效节点前，订阅接口返回 HTTP 409。导入、手动保存和发布配置都会拒绝大小写不敏感的 `type: masque` 节点。
 
 如果修改了 docker-compose.yml 中的端口映射（例如将 8000 映射到 8502），需要同步修改 Nginx 配置中的 `proxy_pass` 地址。
 
@@ -335,9 +301,7 @@ src/
   auth.py             # 用户认证与密码哈希
   importers.py        # YAML / 分享链接导入解析
   config_builder.py   # Clash 配置生成与校验
-  config_defaults.py  # Web 与注册流程共享的 OpenClash 默认配置
-  warp_provisioner.py # 独立 consumer WARP MASQUE 注册
-  backfill_warp_masque.py # 现有普通用户幂等补齐命令
+  config_defaults.py  # Web 与配置生成流程共享的 OpenClash 默认配置
   clash_meta_gen.py   # 策略组生成逻辑
 
 docker-compose.yml           # 本仓库开发/自建部署模板

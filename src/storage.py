@@ -154,7 +154,7 @@ def get_user_by_id(user_id: int) -> sqlite3.Row | None:
 
 
 def validate_new_user_credentials(username: str, password: str) -> str:
-    """在调用外部 WARP 服务前完成本地可判定的注册校验。"""
+    """在创建账号前完成本地可判定的注册校验。"""
     normalized_username = username.strip()
     if not is_valid_username(normalized_username):
         raise ValueError("用户名必须是 3-32 位字母、数字、下划线、点或短横线")
@@ -190,71 +190,6 @@ def create_user(username: str, password: str, is_admin: bool = False) -> sqlite3
             (user_id, generate_token(), DEFAULT_RULE_TYPE, now, now),
         )
     user = get_user_by_id(user_id)
-    if user is None:
-        raise RuntimeError("用户创建后无法读取")
-    return user
-
-
-def create_user_with_published_config(
-    username: str,
-    password: str,
-    proxies: list[dict[str, Any]],
-    global_config: dict[str, Any],
-    custom_rules: list[str],
-    custom_rule_providers: dict[str, Any],
-    selected_rule_type: str,
-    final_yaml: str,
-    import_sources: list[dict[str, Any]] | None = None,
-) -> sqlite3.Row:
-    """在一个 SQLite 事务中创建普通用户及其已发布订阅。"""
-    username = username.strip()
-    if not is_valid_username(username):
-        raise ValueError("用户名必须是 3-32 位字母、数字、下划线、点或短横线")
-    if len(password) < 8:
-        raise ValueError("密码至少需要 8 位")
-    normalized_proxies = normalize_proxies_for_mihomo(proxies)
-    normalized_yaml = _normalize_final_yaml_proxies(final_yaml)
-    now = utc_now()
-    with _connect() as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO users (username, password_hash, is_admin, is_enabled, created_at, updated_at)
-            VALUES (?, ?, 0, 1, ?, ?)
-            """,
-            (username, hash_password(password), now, now),
-        )
-        user_id = int(cursor.lastrowid)
-        conn.execute(
-            """
-            INSERT INTO subscription_configs (
-                user_id, token, proxies_json, global_config_json, custom_rules_json,
-                custom_rule_providers_json, import_sources_json, selected_rule_type,
-                final_yaml, validation_status, validation_message, validated_at,
-                draft_validation_status, draft_validation_message, draft_validated_at,
-                published_at, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'passed', ?, ?, 'passed', ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                generate_token(),
-                json.dumps(normalized_proxies, ensure_ascii=False),
-                json.dumps(global_config, ensure_ascii=False),
-                json.dumps(custom_rules, ensure_ascii=False),
-                json.dumps(custom_rule_providers, ensure_ascii=False),
-                json.dumps(import_sources or [], ensure_ascii=False),
-                selected_rule_type,
-                normalized_yaml,
-                "mihomo 配置校验通过",
-                now,
-                "mihomo 配置校验通过",
-                now,
-                now,
-                now,
-                now,
-            ),
-        )
-        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     if user is None:
         raise RuntimeError("用户创建后无法读取")
     return user
@@ -433,32 +368,6 @@ def list_users() -> list[sqlite3.Row]:
         ).fetchall()
 
 
-def list_regular_user_configs() -> list[dict[str, Any]]:
-    """返回补齐任务需要的普通用户配置快照，管理员账号明确排除。"""
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT c.*, u.username, u.is_enabled, u.is_admin
-            FROM users u
-            JOIN subscription_configs c ON c.user_id = u.id
-            WHERE u.is_admin = 0
-            ORDER BY u.id ASC
-            """
-        ).fetchall()
-    snapshots: list[dict[str, Any]] = []
-    for row in rows:
-        config = _decode_config_row(row)
-        config.update(
-            {
-                "username": row["username"],
-                "is_enabled": bool(row["is_enabled"]),
-                "is_admin": bool(row["is_admin"]),
-            }
-        )
-        snapshots.append(config)
-    return snapshots
-
-
 def set_user_enabled(user_id: int, enabled: bool) -> None:
     with _connect() as conn:
         conn.execute(
@@ -583,62 +492,6 @@ def save_user_config(
                 user_id,
             ),
         )
-
-
-def publish_user_configs_atomically(updates: list[dict[str, Any]]) -> None:
-    """统一发布多位普通用户配置；任一快照冲突都会回滚全部本地写入。"""
-    now = utc_now()
-    with _connect() as conn:
-        for update in updates:
-            user_id = int(update["user_id"])
-            normalized_proxies = normalize_proxies_for_mihomo(update["proxies"])
-            normalized_yaml = _normalize_final_yaml_proxies(update["final_yaml"])
-            cursor = conn.execute(
-                """
-                UPDATE subscription_configs
-                SET proxies_json = ?,
-                    global_config_json = ?,
-                    custom_rules_json = ?,
-                    custom_rule_providers_json = ?,
-                    import_sources_json = ?,
-                    selected_rule_type = ?,
-                    final_yaml = ?,
-                    validation_status = 'passed',
-                    validation_message = ?,
-                    validated_at = ?,
-                    draft_validation_status = 'passed',
-                    draft_validation_message = ?,
-                    draft_validated_at = ?,
-                    published_at = ?,
-                    updated_at = ?
-                WHERE user_id = ?
-                  AND updated_at = ?
-                  AND EXISTS (
-                      SELECT 1 FROM users
-                      WHERE users.id = subscription_configs.user_id
-                        AND users.is_admin = 0
-                  )
-                """,
-                (
-                    json.dumps(normalized_proxies, ensure_ascii=False),
-                    json.dumps(update["global_config"], ensure_ascii=False),
-                    json.dumps(update["custom_rules"], ensure_ascii=False),
-                    json.dumps(update["custom_rule_providers"], ensure_ascii=False),
-                    json.dumps(update.get("import_sources") or [], ensure_ascii=False),
-                    update["selected_rule_type"],
-                    normalized_yaml,
-                    "mihomo 配置校验通过",
-                    now,
-                    "mihomo 配置校验通过",
-                    now,
-                    now,
-                    now,
-                    user_id,
-                    update["expected_updated_at"],
-                ),
-            )
-            if cursor.rowcount != 1:
-                raise ValueError(f"用户 ID {user_id} 的配置在补齐期间已变化，已回滚全部写入")
 
 
 def save_user_draft(

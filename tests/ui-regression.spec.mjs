@@ -6,11 +6,10 @@ test('节点工作流和响应式契约保持可用', async ({ page }) => {
   test.setTimeout(90_000);
   const username = `ui-${Date.now()}`;
   await page.goto(`${baseURL}/?auth=register`);
-  for (const text of ['MASQUE h3-l4proxy', 'Mihomo Meta v1.19.29', 'OpenClash', 'Nikki', 'Clash Verge Rev', 'FlClash']) {
+  for (const text of ['WireGuard', 'Mihomo Meta v1.19.29', 'OpenClash', 'Nikki', 'Clash Verge Rev', 'FlClash']) {
     await expect(page.getByText(text, { exact: false }).first()).toBeVisible();
   }
-  await expect(page.getByText(/注册将自动申请独立 WARP MASQUE 配置/)).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Cloudflare 服务条款' })).toHaveAttribute('href', /cloudflare\.com/);
+  await expect(page.getByText(/注册后账号处于待配置状态/)).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   let widths = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
@@ -39,11 +38,11 @@ test('节点工作流和响应式契约保持可用', async ({ page }) => {
 
   await page.getByRole('tab', { name: '节点管理' }).click();
   const components = page.locator('[data-testid="stCustomComponentV1"]');
-  await expect(components).toHaveCount(4, { timeout: 30_000 });
-  const firstHandle = components.nth(1).contentFrame().getByRole('button');
-  const lastHandle = components.nth(3).contentFrame().getByRole('button');
+  await expect(components).toHaveCount(3, { timeout: 30_000 });
+  const firstHandle = components.nth(0).contentFrame().getByRole('button');
+  const lastHandle = components.nth(2).contentFrame().getByRole('button');
   await firstHandle.dragTo(lastHandle);
-  await expect(page.locator('.node-card-summary strong')).toHaveText(['预制masque', 'Beta', 'Gamma', 'Alpha']);
+  await expect(page.locator('.node-card-summary strong')).toHaveText(['Beta', 'Gamma', 'Alpha']);
 
   await page.getByRole('button', { name: '编辑' }).first().click();
   const editor = page.getByRole('textbox', { name: '节点配置 YAML' });

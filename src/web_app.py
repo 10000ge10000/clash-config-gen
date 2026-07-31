@@ -3133,6 +3133,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if not st.session_state.proxies_data and not (saved_config.get("final_yaml") or "").strip():
+    st.warning("当前账号尚未配置节点。请先导入或添加节点，检查通过后再发布订阅。")
+
 
 dashboard_tab, tab1, tab2, tab3, tab4 = st.tabs(
     list(WORKSPACE_TABS),

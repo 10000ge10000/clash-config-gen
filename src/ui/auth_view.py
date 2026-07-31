@@ -32,10 +32,8 @@ def render_auth_gate(brand_mark_svg: str, project_url: str, documentation_url: s
               <label class="auth-field">确认密码
                 <input name="password_confirm" type="password" autocomplete="new-password" required minlength="8" placeholder="再次输入密码">
               </label>
-              <div class="auth-warp-notice">
-                注册将自动申请独立 WARP MASQUE 配置并立即发布到你的订阅。
-                继续注册即表示你已了解
-                <a href="https://www.cloudflare.com/application/terms/" target="_blank" rel="noopener noreferrer">Cloudflare 服务条款</a>。
+              <div class="auth-registration-notice">
+                注册后账号处于待配置状态；请先导入或添加有效节点，再发布订阅。
               </div>
               <button class="auth-submit" type="submit">注册并进入控制台</button>
             </form>
@@ -78,11 +76,9 @@ def render_auth_gate(brand_mark_svg: str, project_url: str, documentation_url: s
               <p>协议、内核和客户端兼容范围公开透明；配置发布前使用真实 Mihomo 内核检查。</p>
               <div class="auth-flow auth-capabilities" aria-label="兼容能力">
                 <article class="auth-flow-item auth-capability-card">
-                  <div class="auth-capability-heading"><span class="auth-flow-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h10M4 17h16"/></svg></span><div><strong>协议</strong><span>可视化录入与 YAML 预制</span></div></div>
+                  <div class="auth-capability-heading"><span class="auth-flow-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M4 12h10M4 17h16"/></svg></span><div><strong>协议</strong><span>可视化录入与 YAML 导入</span></div></div>
                   <div class="auth-capability-label">可视化录入</div>
                   <div class="auth-chip-list"><span>Shadowsocks</span><span>VMess</span><span>VLESS</span><span>Trojan</span><span>AnyTLS</span><span>Hysteria2</span><span>TUIC</span></div>
-                  <div class="auth-capability-label">YAML / 系统预制</div>
-                  <div class="auth-chip-list"><span>WireGuard</span><span>MASQUE h3-l4proxy</span></div>
                 </article>
                 <article class="auth-flow-item auth-capability-card">
                   <div class="auth-capability-heading"><span class="auth-flow-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="m5 12 4 4L19 6"/></svg></span><div><strong>内核</strong><span>构建与发布双重验证</span></div></div>

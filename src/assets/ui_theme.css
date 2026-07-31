@@ -658,7 +658,7 @@ label,
   box-shadow: 0 0 0 5px rgb(19 184 154 / 0.12);
 }
 
-.auth-warp-notice {
+.auth-registration-notice {
   padding: 11px 12px;
   color: #3f647f;
   border: 1px solid #c8e4f1;
@@ -667,14 +667,6 @@ label,
   font-size: 0.72rem;
   line-height: 1.55;
 }
-
-.auth-warp-notice a {
-  color: var(--ccg-blue);
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.auth-warp-notice a:hover { text-decoration: underline; }
 
 .auth-flow-item {
   position: relative;

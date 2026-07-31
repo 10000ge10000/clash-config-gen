@@ -20,7 +20,7 @@ from config_builder import (
     validate_config,
 )
 from clash_meta_gen import generate_proxy_groups
-from importers import parse_share_link
+from importers import parse_proxy_yaml, parse_share_link
 from normalizer import normalize_proxy_for_mihomo
 
 
@@ -132,50 +132,38 @@ class ValidateConfigTest(unittest.TestCase):
         self.assertNotIn("fingerprint", config["proxies"][0])
         self.assertEqual("firefox", config["proxies"][0]["client-fingerprint"])
 
-    def test_masque_h3_l4proxy_removes_tunnel_fields_and_disables_udp(self):
-        proxy = normalize_proxy_for_mihomo(
-            {
-                "name": "预制masque",
-                "type": "masque",
-                "server": "saas.sin.fan",
-                "port": 443,
-                "private-key": "private",
-                "public-key": "public",
-                "network": "h3-l4proxy",
-                "sni": "consumer-masque-proxy.cloudflareclient.com",
-                "udp": True,
-                "ip": "172.16.0.2/32",
-                "ipv6": "2606:4700::1/128",
-                "mtu": 1280,
-            }
+    def test_masque_is_rejected_case_insensitively(self):
+        config = build_config(
+            [
+                {
+                    "name": "removed-protocol",
+                    "type": "MaSqUe",
+                    "server": "example.com",
+                    "port": 443,
+                    "private-key": "private",
+                    "public-key": "public",
+                }
+            ],
+            {},
         )
 
-        self.assertIs(False, proxy["udp"])
-        self.assertNotIn("ip", proxy)
-        self.assertNotIn("ipv6", proxy)
-        self.assertNotIn("mtu", proxy)
+        errors, _warnings = validate_config(config)
 
-    def test_legacy_masque_tunnel_fields_are_preserved(self):
-        proxy = normalize_proxy_for_mihomo(
-            {
-                "name": "masque",
-                "type": "masque",
-                "server": "example.com",
-                "port": 443,
-                "private-key": "private",
-                "public-key": "public",
-                "ip": "172.16.0.2/32",
-                "ipv6": "2606:4700::1/128",
-                "mtu": 1280,
-                "sni": "www.bing.com",
-                "congestion-controller": "bbr",
-            }
-        )
+        self.assertIn("不再支持 MASQUE 节点", "\n".join(errors))
 
-        self.assertEqual("172.16.0.2/32", proxy["ip"])
-        self.assertEqual("2606:4700::1/128", proxy["ipv6"])
-        self.assertEqual(1280, proxy["mtu"])
-        self.assertNotIn("network", proxy)
+    def test_masque_yaml_import_is_rejected(self):
+        raw_yaml = """
+proxies:
+  - name: removed-protocol
+    type: masque
+    server: example.com
+    port: 443
+    private-key: private
+    public-key: public
+"""
+
+        with self.assertRaisesRegex(ValueError, "没有解析出任何有效节点"):
+            parse_proxy_yaml(raw_yaml)
 
     def test_build_config_strips_internal_import_source_metadata(self):
         """导入来源只用于管理界面，不能泄漏到最终订阅 YAML。"""

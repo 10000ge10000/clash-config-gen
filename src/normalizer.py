@@ -33,7 +33,6 @@ PROTOCOL_REQUIRED_FIELDS = {
     "tuic": {"name", "type", "server", "port", "uuid", "password"},
     "anytls": {"name", "type", "server", "port", "password"},
     "wireguard": {"name", "type", "server", "port", "ip", "private-key", "public-key"},
-    "masque": {"name", "type", "server", "port", "private-key", "public-key"},
 }
 
 
@@ -80,13 +79,6 @@ def normalize_proxy(proxy: dict[str, Any]) -> NormalizationResult:
             warnings.append("已移除无法解析为正整数秒的 hop-interval")
         else:
             normalized["hop-interval"] = hop_interval
-
-    if normalized.get("type") == "masque" and normalized.get("network") == "h3-l4proxy":
-        normalized["udp"] = False
-        for unsupported_field in ("ip", "ipv6", "mtu"):
-            if unsupported_field in normalized:
-                normalized.pop(unsupported_field, None)
-                warnings.append(f"h3-l4proxy 不使用 {unsupported_field}，已移除")
 
     if "ech-opts" in normalized:
         ech_opts, ech_warning = _normalize_ech_opts(normalized.get("ech-opts"))
@@ -293,6 +285,8 @@ def _normalize_bool_value(value: Any) -> bool | None:
 def validate_proxy_fields(proxy: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     proxy_type = str(proxy.get("type", "")).strip().lower()
+    if proxy_type == "masque":
+        return ["不再支持 MASQUE 节点"]
     required_fields = PROTOCOL_REQUIRED_FIELDS.get(proxy_type, {"name", "type", "server", "port"})
     missing = [field for field in sorted(required_fields) if proxy.get(field) in (None, "")]
     if missing:
@@ -301,10 +295,4 @@ def validate_proxy_fields(proxy: dict[str, Any]) -> list[str]:
     port = proxy.get("port")
     if isinstance(port, int) and not 1 <= port <= 65535:
         errors.append("端口超出 1-65535")
-    if proxy_type == "masque":
-        if proxy.get("network") == "h3-l4proxy":
-            if not proxy.get("sni"):
-                errors.append("MASQUE h3-l4proxy 缺少必填字段: sni")
-            if proxy.get("udp") is not False:
-                errors.append("MASQUE h3-l4proxy 必须设置 udp: false")
     return errors
