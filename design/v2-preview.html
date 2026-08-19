@@ -1,0 +1,2101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenClash Config Gen · V2</title>
+<style>
+/* ============ 设计变量（浅色为默认主题） ============ */
+:root {
+  color-scheme: light;
+  --bg: #f2f6fb;
+  --bg-2: #e9eef6;
+  --card: rgba(255, 255, 255, 0.72);
+  --card-hover: rgba(255, 255, 255, 0.98);
+  --border: rgba(23, 43, 88, 0.13);
+  --border-glow: rgba(8, 145, 178, 0.4);
+  --text: #16233c;
+  --text-dim: #4e5e79;
+  --text-faint: #7f8fa8;
+  --accent: #0891b2;
+  --accent-2: #4f46e5;
+  --accent-3: #7c3aed;
+  --success: #059669;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --grad-main: linear-gradient(135deg, #06b6d4 0%, #4f46e5 55%, #7c3aed 100%);
+  --on-accent: #ffffff;
+  --panel-bg: rgba(255, 255, 255, 0.72);
+  --topbar-bg: rgba(246, 249, 253, 0.85);
+  --bar-bg: rgba(246, 249, 253, 0.92);
+  --toast-bg: rgba(255, 255, 255, 0.97);
+  --toast-shadow: 0 12px 34px -8px rgba(23, 43, 88, 0.22), 0 0 20px -6px rgba(5, 150, 105, 0.14);
+  --input-bg: rgba(240, 245, 251, 0.92);
+  --input-bg-2: rgba(235, 242, 250, 0.95);
+  --code-bg: rgba(245, 248, 252, 0.96);
+  --shadow-card: 0 14px 34px -14px rgba(23, 43, 88, 0.22);
+  --accent-text: #0e7490;
+  --code-inline: #0e7490;
+  --nav-active-text: #0e7490;
+  --preset-text: #0e7490;
+  --textarea-text: #164e63;
+  --rule-value: #075985;
+  --lhie1-t: #6d28d9;
+  --grid-line: rgba(79, 70, 229, 0.075);
+  --orb-opacity: 0.3;
+  --scanline: rgba(8, 145, 178, 0.45);
+  --ln: #9aa8bd;
+  --y-key: #0369a1;
+  --y-str: #047857;
+  --y-num: #b45309;
+  --y-bool: #6d28d9;
+  --y-comment: #8795a9;
+  --y-dash: #4f46e5;
+  --font: "Inter", "SF Pro Display", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
+  --radius: 14px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --sidebar-w: 300px;
+}
+
+/* ============ 暗色主题覆盖 ============ */
+html.dark {
+  color-scheme: dark;
+  --bg: #070b14;
+  --bg-2: #0b1120;
+  --card: rgba(148, 163, 184, 0.045);
+  --card-hover: rgba(148, 163, 184, 0.08);
+  --border: rgba(148, 163, 184, 0.14);
+  --border-glow: rgba(34, 211, 238, 0.4);
+  --text: #e6edf7;
+  --text-dim: #8b98ad;
+  --text-faint: #5b6779;
+  --accent: #22d3ee;
+  --accent-2: #6366f1;
+  --accent-3: #a78bfa;
+  --success: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --grad-main: linear-gradient(135deg, #22d3ee 0%, #6366f1 55%, #a78bfa 100%);
+  --on-accent: #051018;
+  --panel-bg: rgba(11, 17, 32, 0.62);
+  --topbar-bg: rgba(7, 11, 20, 0.72);
+  --bar-bg: rgba(7, 11, 20, 0.82);
+  --toast-bg: rgba(11, 20, 36, 0.92);
+  --toast-shadow: 0 12px 34px -8px rgba(0, 0, 0, 0.6), 0 0 20px -6px rgba(52, 211, 153, 0.2);
+  --input-bg: rgba(4, 8, 16, 0.6);
+  --input-bg-2: rgba(4, 8, 16, 0.55);
+  --code-bg: rgba(3, 6, 12, 0.8);
+  --shadow-card: 0 14px 34px -12px rgba(0, 0, 0, 0.6);
+  --accent-text: #67e8f9;
+  --code-inline: #94e8f8;
+  --nav-active-text: #ffffff;
+  --preset-text: #a5f3fc;
+  --textarea-text: #b8e8f5;
+  --rule-value: #bae6fd;
+  --lhie1-t: #c4b5fd;
+  --grid-line: rgba(99, 102, 241, 0.05);
+  --orb-opacity: 0.5;
+  --scanline: rgba(34, 211, 238, 0.5);
+  --ln: #3b4557;
+  --y-key: #7dd3fc;
+  --y-str: #a5f3d0;
+  --y-num: #fbbf24;
+  --y-bool: #c4b5fd;
+  --y-comment: #4b5768;
+  --y-dash: #818cf8;
+}
+
+/* 主题切换过渡（仅切换瞬间生效） */
+html.theme-anim, html.theme-anim body, html.theme-anim * {
+  transition: background-color .4s ease, color .4s ease, border-color .4s ease, box-shadow .4s ease !important;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scrollbar-color: rgba(139,152,173,.25) transparent; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: rgba(34, 211, 238, 0.25); }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(139,152,173,.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(139,152,173,.35); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ============ 背景层 ============ */
+.bg-layer { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+
+.bg-grid {
+  position: absolute; inset: -100%;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 52px 52px;
+  animation: gridMove 60s linear infinite;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%);
+}
+@keyframes gridMove { to { transform: translate(52px, 52px); } }
+
+.glow-orb {
+  position: absolute; border-radius: 50%; filter: blur(110px); opacity: var(--orb-opacity);
+}
+.orb-1 { width: 620px; height: 620px; top: -280px; left: 8%;
+  background: radial-gradient(circle, rgba(34,211,238,.28), transparent 65%);
+  animation: drift1 26s ease-in-out infinite alternate; }
+.orb-2 { width: 560px; height: 560px; top: 30%; right: -180px;
+  background: radial-gradient(circle, rgba(99,102,241,.3), transparent 65%);
+  animation: drift2 32s ease-in-out infinite alternate; }
+.orb-3 { width: 420px; height: 420px; bottom: -200px; left: 34%;
+  background: radial-gradient(circle, rgba(167,139,250,.18), transparent 65%);
+  animation: drift1 40s ease-in-out infinite alternate-reverse; }
+@keyframes drift1 { to { transform: translate(90px, 60px) scale(1.12); } }
+@keyframes drift2 { to { transform: translate(-70px, -90px) scale(0.92); } }
+
+.scanline {
+  position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--scanline), transparent);
+  animation: scan 9s ease-in-out infinite;
+  opacity: .6;
+}
+@keyframes scan {
+  0%, 100% { top: 0; opacity: 0; }
+  8% { opacity: .7; }
+  50% { top: 100%; opacity: .5; }
+  92% { opacity: 0; }
+}
+
+.noise {
+  position: absolute; inset: 0; opacity: .025;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+}
+
+/* ============ 入场动画 ============ */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popIn {
+  from { opacity: 0; transform: scale(.92) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.stagger > * { animation: fadeUp .7s var(--ease-out) both; }
+.stagger > *:nth-child(1) { animation-delay: .05s; }
+.stagger > *:nth-child(2) { animation-delay: .13s; }
+.stagger > *:nth-child(3) { animation-delay: .21s; }
+.stagger > *:nth-child(4) { animation-delay: .29s; }
+.stagger > *:nth-child(5) { animation-delay: .37s; }
+.stagger > *:nth-child(6) { animation-delay: .45s; }
+
+/* ============ 顶栏 ============ */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: 62px;
+  display: flex; align-items: center; gap: 20px;
+  padding: 0 26px;
+  background: var(--topbar-bg);
+  backdrop-filter: blur(18px) saturate(1.5);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.09);
+}
+.topbar::after {
+  content: ""; position: absolute; bottom: -1px; left: 20%; right: 20%; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(34,211,238,.45), transparent);
+  animation: topbarShimmer 6s ease-in-out infinite;
+}
+@keyframes topbarShimmer {
+  0%, 100% { left: 15%; right: 15%; opacity: .4; }
+  50% { left: 35%; right: 55%; opacity: 1; }
+}
+
+.logo { display: flex; align-items: center; gap: 11px; user-select: none; }
+.logo-mark {
+  width: 34px; height: 34px; border-radius: 10px;
+  background: var(--grad-main);
+  display: grid; place-items: center;
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.35), inset 0 0 12px rgba(255,255,255,.18);
+  animation: logoPulse 4s ease-in-out infinite;
+  position: relative; overflow: hidden;
+}
+.logo-mark::before {
+  content: ""; position: absolute; inset: -60%;
+  background: conic-gradient(from 0deg, transparent, rgba(255,255,255,.5), transparent 30%);
+  animation: spin 6s linear infinite;
+}
+.logo-mark svg { position: relative; z-index: 1; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes logoPulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(34,211,238,.3), inset 0 0 12px rgba(255,255,255,.18); }
+  50% { box-shadow: 0 0 26px rgba(99,102,241,.5), inset 0 0 12px rgba(255,255,255,.18); }
+}
+.logo-text { font-size: 15.5px; font-weight: 700; letter-spacing: .2px; }
+.logo-text em {
+  font-style: normal; font-size: 10px; font-weight: 700; vertical-align: super;
+  background: var(--grad-main); -webkit-background-clip: text; background-clip: text; color: transparent;
+  margin-left: 5px; letter-spacing: 1px;
+}
+
+/* 顶部工作区导航 */
+.workspace-nav { display: flex; gap: 4px; margin-left: 14px; position: relative; }
+.wnav-item {
+  padding: 8px 16px; border-radius: 10px; font-size: 13.5px; font-weight: 550;
+  color: var(--text-dim); cursor: pointer; border: 1px solid transparent;
+  transition: color .25s, background .25s, border-color .25s;
+  display: flex; align-items: center; gap: 7px;
+  position: relative; user-select: none;
+}
+.wnav-item:hover { color: var(--text); background: rgba(148,163,184,.07); }
+.wnav-item.active { color: var(--nav-active-text); background: rgba(34,211,238,.1); border-color: rgba(34,211,238,.22); }
+.wnav-item.active .wnum { background: var(--grad-main); color: var(--on-accent); }
+.wnum {
+  font-size: 10px; font-family: var(--mono); font-weight: 700;
+  width: 17px; height: 17px; border-radius: 5px;
+  display: grid; place-items: center;
+  background: rgba(148,163,184,.14); color: var(--text-dim);
+  transition: all .25s;
+}
+
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+
+.sub-status {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-dim);
+  padding: 6px 12px; border-radius: 99px;
+  background: rgba(52, 211, 153, 0.07); border: 1px solid rgba(52, 211, 153, 0.18);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); position: relative; }
+.dot::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 50%;
+  border: 1px solid var(--success);
+  animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
+
+.avatar {
+  width: 34px; height: 34px; border-radius: 10px; cursor: pointer;
+  background: linear-gradient(135deg, #312e81, #0e7490);
+  display: grid; place-items: center;
+  font-size: 13px; font-weight: 700; color: #e0f2fe;
+  border: 1px solid rgba(148,163,184,.25);
+  transition: transform .25s var(--ease-out), box-shadow .25s;
+}
+.avatar:hover { transform: scale(1.08); box-shadow: 0 0 16px rgba(34,211,238,.3); }
+
+.btn-icon {
+  width: 34px; height: 34px; border-radius: 10px; cursor: pointer;
+  background: rgba(148,163,184,.08); border: 1px solid var(--border);
+  display: grid; place-items: center; color: var(--text-dim);
+  transition: all .25s;
+}
+.btn-icon:hover { color: var(--text); border-color: rgba(34,211,238,.4); background: rgba(34,211,238,.08); transform: translateY(-1px); }
+#themeToggle .ico-moon { display: none; }
+html.dark #themeToggle .ico-sun { display: none; }
+html.dark #themeToggle .ico-moon { display: block; }
+#themeToggle { overflow: hidden; }
+#themeToggle svg { animation: popIn .4s var(--ease-out); }
+
+/* ============ 主布局 ============ */
+.layout {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  gap: 22px;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 86px 26px 76px;
+  transition: grid-template-columns .45s var(--ease-out);
+}
+.layout.side-hidden { grid-template-columns: 0 1fr; }
+.layout.side-hidden .settings-panel { opacity: 0; transform: translateX(-24px); pointer-events: none; }
+
+/* ============ 主内容 ============ */
+.main-col { min-width: 0; order: 2; }
+
+/* Hero */
+.hero { padding: 26px 4px 24px; }
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: 2.5px; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 14px;
+  animation: fadeUp .6s var(--ease-out) both;
+}
+.hero-eyebrow::before { content: ""; width: 26px; height: 1px; background: linear-gradient(90deg, var(--accent), transparent); }
+.hero h1 {
+  font-size: clamp(26px, 3.4vw, 38px); font-weight: 800; line-height: 1.22;
+  letter-spacing: -.5px; animation: fadeUp .7s var(--ease-out) .08s both;
+}
+.hero h1 .grad {
+  background: linear-gradient(90deg, #0e7490, #4f46e5, #7c3aed, #0e7490);
+  background-size: 220% auto;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: gradShift 7s linear infinite;
+}
+html.dark .hero h1 .grad {
+  background: linear-gradient(90deg, #22d3ee, #818cf8, #c084fc, #22d3ee);
+  background-size: 220% auto;
+}
+@keyframes gradShift { to { background-position: 220% center; } }
+.hero p {
+  margin-top: 12px; max-width: 640px; color: var(--text-dim);
+  font-size: 14.5px; line-height: 1.75;
+  animation: fadeUp .7s var(--ease-out) .16s both;
+}
+
+/* 统计卡 */
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px; margin: 26px 0 8px;
+}
+.stat-card {
+  position: relative; padding: 16px 18px; border-radius: var(--radius);
+  background: var(--card); border: 1px solid var(--border);
+  backdrop-filter: blur(8px); overflow: hidden;
+  transition: transform .35s var(--ease-out), border-color .35s, background .35s;
+  animation: popIn .65s var(--ease-out) both;
+}
+.stat-card:nth-child(1) { animation-delay: .2s; }
+.stat-card:nth-child(2) { animation-delay: .28s; }
+.stat-card:nth-child(3) { animation-delay: .36s; }
+.stat-card:nth-child(4) { animation-delay: .44s; }
+.stat-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--edge-c, rgba(34,211,238,.6)), transparent);
+  opacity: 0; transition: opacity .4s;
+}
+.stat-card:hover { transform: translateY(-4px); background: var(--card-hover); border-color: rgba(34,211,238,.25); }
+.stat-card:hover::before { opacity: 1; }
+.stat-label { font-size: 11.5px; color: var(--text-faint); letter-spacing: 1.5px; font-weight: 600; text-transform: uppercase; }
+.stat-value { font-size: 27px; font-weight: 800; margin-top: 6px; font-family: var(--mono); letter-spacing: -.5px; }
+.stat-value .unit { font-size: 13px; font-weight: 500; color: var(--text-dim); margin-left: 3px; }
+.stat-trend { font-size: 11px; margin-top: 4px; color: var(--success); display: flex; align-items: center; gap: 4px; }
+
+/* 面板 */
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  padding: 24px;
+  position: relative; overflow: hidden;
+}
+.panel + .panel { margin-top: 18px; }
+.panel::before {
+  content: ""; position: absolute; inset: 0; border-radius: 18px; padding: 1px;
+  background: linear-gradient(140deg, rgba(34,211,238,.18), transparent 30%, transparent 70%, rgba(167,139,250,.14));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
+.panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.panel-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 9px; }
+.panel-title svg { color: var(--accent); }
+.panel-hint { font-size: 12px; color: var(--text-faint); }
+
+/* 步骤区域切换 */
+.step-section { display: none; }
+.step-section.active { display: block; animation: fadeIn .4s ease both; }
+.step-section.active .stagger > * { animation: fadeUp .6s var(--ease-out) both; }
+
+/* ============ 步骤 Banner（大区块标题） ============ */
+.step-banner {
+  position: relative; overflow: hidden;
+  border-radius: 22px;
+  padding: 36px 38px 34px;
+  margin-bottom: 20px;
+  background:
+    radial-gradient(460px 190px at 10% -10%, rgba(var(--bc), .16), transparent 68%),
+    radial-gradient(380px 170px at 96% 120%, rgba(var(--bc), .09), transparent 65%),
+    var(--panel-bg);
+  border: 1px solid rgba(var(--bc), .28);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  display: flex; align-items: center; gap: 26px;
+  animation: bannerIn .7s var(--ease-out) both;
+}
+@keyframes bannerIn {
+  from { opacity: 0; transform: translateY(20px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+.step-banner::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1.5px;
+  background: linear-gradient(90deg, transparent, rgb(var(--bc)), rgba(var(--bc), .15), transparent);
+  background-size: 220% 100%;
+  animation: bannerFlow 4.5s ease-in-out infinite;
+}
+@keyframes bannerFlow {
+  0%, 100% { background-position: 200% 0; opacity: .5; }
+  50% { background-position: -20% 0; opacity: 1; }
+}
+.sb-ico {
+  width: 66px; height: 66px; border-radius: 19px; flex-shrink: 0;
+  display: grid; place-items: center;
+  color: rgb(var(--bc));
+  background: linear-gradient(150deg, rgba(var(--bc), .2), rgba(var(--bc), .05));
+  border: 1px solid rgba(var(--bc), .38);
+  box-shadow: 0 10px 30px -10px rgba(var(--bc), .5), inset 0 0 18px rgba(var(--bc), .1);
+  transition: transform .35s var(--ease-out), box-shadow .35s;
+}
+.step-banner:hover .sb-ico {
+  transform: scale(1.07) rotate(-2deg);
+  box-shadow: 0 14px 38px -10px rgba(var(--bc), .6), inset 0 0 22px rgba(var(--bc), .14);
+}
+.sb-body { min-width: 0; position: relative; z-index: 1; }
+.sb-eyebrow {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 11px; font-weight: 700; letter-spacing: 3.5px; text-transform: uppercase;
+  color: rgb(var(--bc)); margin-bottom: 10px; font-family: var(--mono);
+}
+.sb-eyebrow::before { content: ""; width: 22px; height: 1.5px; background: linear-gradient(90deg, rgb(var(--bc)), transparent); }
+.sb-title {
+  font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; letter-spacing: -.6px; line-height: 1.15;
+}
+.sb-desc { margin-top: 9px; font-size: 13.5px; color: var(--text-dim); line-height: 1.7; max-width: 560px; }
+.sb-num {
+  margin-left: auto; flex-shrink: 0; position: relative; z-index: 1;
+  font-family: var(--mono); font-size: clamp(64px, 7vw, 96px); font-weight: 900;
+  line-height: 1; letter-spacing: -4px; user-select: none;
+  background: linear-gradient(180deg, rgba(var(--bc), .95), rgba(var(--bc), .08));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  transition: transform .45s var(--ease-out);
+  filter: drop-shadow(0 6px 22px rgba(var(--bc), .25));
+}
+.step-banner:hover .sb-num { transform: translateY(-4px) scale(1.03); }
+@media (max-width: 720px) {
+  .step-banner { padding: 26px 22px; gap: 16px; flex-wrap: wrap; }
+  .sb-num { display: none; }
+  .sb-ico { width: 52px; height: 52px; border-radius: 15px; }
+}
+
+/* ============ Step1 导入 ============ */
+.method-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
+.method-card {
+  padding: 17px 16px; border-radius: 13px; cursor: pointer;
+  background: var(--card); border: 1.5px solid var(--border);
+  transition: all .3s var(--ease-out); position: relative; overflow: hidden;
+}
+.method-card:hover { transform: translateY(-3px); border-color: rgba(34,211,238,.35); background: var(--card-hover); }
+.method-card.active {
+  border-color: rgba(34,211,238,.65);
+  background: linear-gradient(160deg, rgba(34,211,238,.1), rgba(99,102,241,.06));
+  box-shadow: 0 0 0 1px rgba(34,211,238,.25), 0 8px 30px -8px rgba(34,211,238,.25);
+}
+.method-card.active .m-icon { background: var(--grad-main); color: var(--on-accent); box-shadow: 0 0 16px rgba(34,211,238,.4); }
+.m-icon {
+  width: 38px; height: 38px; border-radius: 11px;
+  background: rgba(148,163,184,.1); color: var(--text-dim);
+  display: grid; place-items: center; margin-bottom: 12px;
+  transition: all .3s;
+}
+.method-card h4 { font-size: 14px; font-weight: 650; margin-bottom: 5px; }
+.method-card p { font-size: 12px; color: var(--text-faint); line-height: 1.6; }
+
+.paste-zone {
+  margin-top: 16px; position: relative;
+}
+.paste-zone textarea {
+  width: 100%; min-height: 240px; resize: vertical;
+  background: var(--input-bg);
+  border: 1px solid var(--border); border-radius: 13px;
+  color: var(--textarea-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.8;
+  padding: 18px 20px; outline: none;
+  transition: border-color .3s, box-shadow .3s;
+}
+.paste-zone textarea:focus {
+  border-color: rgba(34,211,238,.55);
+  box-shadow: 0 0 0 3px rgba(34,211,238,.1), inset 0 0 30px rgba(34,211,238,.03);
+}
+.paste-zone textarea::placeholder { color: var(--text-faint); }
+
+/* ============ 通用按钮 ============ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 20px; border-radius: 11px; border: 1px solid var(--border);
+  background: rgba(148,163,184,.08); color: var(--text);
+  font-size: 13.5px; font-weight: 600; font-family: var(--font);
+  cursor: pointer; transition: all .28s var(--ease-out);
+  position: relative; overflow: hidden; user-select: none;
+}
+.btn:hover { border-color: rgba(148,163,184,.4); background: rgba(148,163,184,.14); transform: translateY(-1px); }
+.btn:active { transform: translateY(0) scale(.98); }
+.btn-primary {
+  background: var(--grad-main); background-size: 160% auto;
+  border: none; color: var(--on-accent); font-weight: 700;
+  box-shadow: 0 4px 18px -4px rgba(34,211,238,.45);
+}
+.btn-primary:hover {
+  background-position: right center;
+  box-shadow: 0 6px 26px -4px rgba(99,102,241,.6);
+  transform: translateY(-2px);
+}
+.btn-lg { padding: 14px 30px; font-size: 15px; border-radius: 13px; }
+.btn-block { width: 100%; }
+.btn-ghost { background: transparent; }
+
+/* 涟漪 */
+.ripple {
+  position: absolute; border-radius: 50%; transform: scale(0);
+  background: rgba(255,255,255,.35); animation: ripple .6s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes ripple { to { transform: scale(3.2); opacity: 0; } }
+
+/* ============ Step2 节点 ============ */
+.node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 14px; }
+.node-card {
+  padding: 16px; border-radius: 14px;
+  background: var(--card); border: 1px solid var(--border);
+  transition: transform .35s var(--ease-out), border-color .35s, box-shadow .35s;
+  position: relative; overflow: hidden;
+  animation: popIn .55s var(--ease-out) both;
+}
+.node-card::before {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 50%), rgba(34,211,238,.09), transparent 45%);
+  opacity: 0; transition: opacity .35s; pointer-events: none;
+}
+.node-card:hover { transform: translateY(-5px); border-color: rgba(34,211,238,.3); box-shadow: var(--shadow-card); }
+.node-card:hover::before { opacity: 1; }
+.node-card:nth-child(1) { animation-delay: .05s; } .node-card:nth-child(2) { animation-delay: .1s; }
+.node-card:nth-child(3) { animation-delay: .15s; } .node-card:nth-child(4) { animation-delay: .2s; }
+.node-card:nth-child(5) { animation-delay: .25s; } .node-card:nth-child(6) { animation-delay: .3s; }
+
+.node-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
+.node-name { font-size: 13.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge {
+  font-size: 10px; font-weight: 800; letter-spacing: 1px;
+  padding: 4px 9px; border-radius: 6px; text-transform: uppercase;
+  font-family: var(--mono); flex-shrink: 0;
+}
+.b-hy2 { background: rgba(225,29,72,.08); color: #be123c; border: 1px solid rgba(225,29,72,.28); }
+.b-vless { background: rgba(8,145,178,.09); color: #0e7490; border: 1px solid rgba(8,145,178,.3); }
+.b-ss { background: rgba(59,130,246,.09); color: #1d4ed8; border: 1px solid rgba(59,130,246,.3); }
+.b-vmess { background: rgba(139,92,246,.09); color: #6d28d9; border: 1px solid rgba(139,92,246,.3); }
+.b-tuic { background: rgba(5,150,105,.09); color: #047857; border: 1px solid rgba(5,150,105,.3); }
+.b-trojan { background: rgba(236,72,153,.09); color: #be185d; border: 1px solid rgba(236,72,153,.3); }
+html.dark .b-hy2 { background: rgba(251,113,133,.14); color: #fb7185; border-color: rgba(251,113,133,.3); }
+html.dark .b-vless { background: rgba(34,211,238,.12); color: #22d3ee; border-color: rgba(34,211,238,.3); }
+html.dark .b-ss { background: rgba(96,165,250,.12); color: #60a5fa; border-color: rgba(96,165,250,.3); }
+html.dark .b-vmess { background: rgba(167,139,250,.12); color: #a78bfa; border-color: rgba(167,139,250,.3); }
+html.dark .b-tuic { background: rgba(52,211,153,.12); color: #34d399; border-color: rgba(52,211,153,.3); }
+html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-color: rgba(244,114,182,.3); }
+
+.node-server {
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-faint);
+  display: flex; align-items: center; gap: 6px; margin-bottom: 13px;
+}
+.node-server svg { flex-shrink: 0; opacity: .6; }
+
+.latency-row { display: flex; align-items: center; gap: 10px; }
+.latency-bar { flex: 1; height: 4px; border-radius: 3px; background: rgba(148,163,184,.12); overflow: hidden; }
+.latency-fill { height: 100%; border-radius: 3px; transform-origin: left; animation: barGrow 1.2s var(--ease-out) both; }
+@keyframes barGrow { from { transform: scaleX(0); } }
+.latency-num { font-family: var(--mono); font-size: 11px; font-weight: 700; min-width: 52px; text-align: right; }
+.lat-good .latency-fill { background: linear-gradient(90deg, #34d399, #2dd4bf); box-shadow: 0 0 8px rgba(52,211,153,.5); }
+.lat-good .latency-num { color: #34d399; }
+.lat-mid .latency-fill { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.lat-mid .latency-num { color: #fbbf24; }
+
+.node-actions {
+  display: flex; gap: 6px; margin-top: 13px; padding-top: 12px;
+  border-top: 1px solid rgba(148,163,184,.08);
+  opacity: 0; transform: translateY(4px); transition: all .3s var(--ease-out);
+}
+.node-card:hover .node-actions { opacity: 1; transform: translateY(0); }
+.chip-btn {
+  padding: 5px 12px; border-radius: 8px; font-size: 11.5px; font-weight: 600;
+  background: rgba(148,163,184,.09); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer; transition: all .22s; font-family: var(--font);
+}
+.chip-btn:hover { color: var(--text); border-color: rgba(34,211,238,.4); background: rgba(34,211,238,.09); }
+.chip-btn.danger:hover { color: #fca5a5; border-color: rgba(248,113,113,.45); background: rgba(248,113,113,.1); }
+
+.add-node-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.protocol-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.pill {
+  padding: 7px 15px; border-radius: 99px; font-size: 12.5px; font-weight: 650;
+  font-family: var(--mono); cursor: pointer;
+  background: rgba(148,163,184,.07); border: 1px solid var(--border); color: var(--text-dim);
+  transition: all .25s var(--ease-out); user-select: none;
+}
+.pill:hover { color: var(--text); border-color: rgba(148,163,184,.4); transform: translateY(-1px); }
+.pill.active {
+  color: var(--on-accent); background: var(--grad-main); border-color: transparent;
+  box-shadow: 0 3px 14px -2px rgba(34,211,238,.5);
+}
+
+/* ============ Step3 规则 ============ */
+.rules-layout { display: grid; grid-template-columns: 5fr 7fr; gap: 18px; }
+@media (max-width: 1100px) { .rules-layout { grid-template-columns: 1fr; } }
+
+/* 基础规则源 */
+.source-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin-bottom: 20px; }
+@media (max-width: 900px) { .source-cards { grid-template-columns: 1fr; } }
+.source-card {
+  padding: 16px 15px; border-radius: 14px; cursor: pointer;
+  background: var(--card); border: 1.5px solid var(--border);
+  display: flex; gap: 12px; align-items: flex-start;
+  transition: all .3s var(--ease-out); position: relative;
+}
+.source-card:hover { transform: translateY(-2px); border-color: rgba(167,139,250,.4); background: var(--card-hover); }
+.source-card.active {
+  border-color: rgba(167,139,250,.6);
+  background: linear-gradient(160deg, rgba(167,139,250,.12), rgba(99,102,241,.06));
+  box-shadow: 0 0 0 1px rgba(167,139,250,.22), 0 8px 30px -10px rgba(167,139,250,.3);
+}
+.sc-radio {
+  width: 17px; height: 17px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
+  border: 2px solid var(--text-faint); transition: all .28s var(--ease-out);
+}
+.source-card.active .sc-radio {
+  border-color: #a78bfa;
+  background: radial-gradient(circle, #a78bfa 42%, transparent 52%);
+  box-shadow: 0 0 10px rgba(167,139,250,.65);
+}
+.sc-body h4 {
+  font-size: 13.5px; font-weight: 700;
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+}
+.sc-badge {
+  font-size: 9px; font-weight: 800; letter-spacing: .8px; padding: 2.5px 7px; border-radius: 5px;
+  background: var(--grad-main); color: var(--on-accent); text-transform: uppercase;
+}
+.sc-badge.weekly {
+  background: rgba(52,211,153,.13); color: var(--success);
+  border: 1px solid rgba(52,211,153,.35);
+}
+.sc-body p { font-size: 11.5px; color: var(--text-faint); margin-top: 5px; line-height: 1.65; }
+.preset-block { animation: fadeUp .5s var(--ease-out) both; }
+.preset-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin: 2px 0 11px; font-size: 12.5px; font-weight: 700; color: var(--text-dim);
+  border-top: 1px dashed var(--border); padding-top: 16px;
+}
+.preset-head small { font-size: 10.5px; font-weight: 400; color: var(--text-faint); letter-spacing: .3px; }
+
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 7px; letter-spacing: .3px; }
+.field input, .field select {
+  width: 100%; padding: 10px 13px; border-radius: 10px;
+  background: var(--input-bg); border: 1px solid var(--border);
+  color: var(--text); font-size: 13px; font-family: var(--font);
+  outline: none; transition: border-color .25s, box-shadow .25s;
+}
+.field select { cursor: pointer; appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238b98ad' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 13px center;
+}
+.field input:focus, .field select:focus {
+  border-color: rgba(34,211,238,.55);
+  box-shadow: 0 0 0 3px rgba(34,211,238,.1);
+}
+.field input::placeholder { color: var(--text-faint); }
+
+.rule-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; border-radius: 11px;
+  background: rgba(148,163,184,.05); border: 1px solid rgba(148,163,184,.09);
+  margin-bottom: 8px;
+  animation: ruleIn .5s var(--ease-out) both;
+  transition: border-color .25s, background .25s;
+}
+.rule-item:hover { border-color: rgba(34,211,238,.25); background: rgba(34,211,238,.05); }
+@keyframes ruleIn { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: translateX(0); } }
+.rule-idx { font-family: var(--mono); font-size: 11px; color: var(--text-faint); min-width: 22px; }
+.rule-type {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+  padding: 3px 8px; border-radius: 6px; letter-spacing: .5px;
+  background: rgba(99,102,241,.13); color: #a5b4fc; border: 1px solid rgba(99,102,241,.25);
+  flex-shrink: 0;
+}
+.rule-value { font-family: var(--mono); font-size: 12.5px; color: var(--rule-value); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rule-target {
+  font-size: 11.5px; font-weight: 650; color: var(--text-dim);
+  display: flex; align-items: center; gap: 5px; flex-shrink: 0;
+}
+.rule-target .arrow { color: var(--accent); }
+.rule-del {
+  width: 24px; height: 24px; border-radius: 7px; cursor: pointer;
+  display: grid; place-items: center; color: var(--text-faint);
+  background: transparent; border: none; transition: all .22s; flex-shrink: 0;
+}
+.rule-del:hover { color: #f87171; background: rgba(248,113,113,.12); }
+
+.lhie1-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 9px; }
+.lhie1-cell {
+  padding: 10px 12px; border-radius: 10px; font-size: 12px;
+  background: rgba(148,163,184,.05); border: 1px solid rgba(148,163,184,.1);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  cursor: pointer; transition: all .25s; color: var(--text-dim);
+}
+.lhie1-cell:hover { border-color: rgba(167,139,250,.45); color: var(--text); background: rgba(167,139,250,.07); }
+.lhie1-cell .t { font-family: var(--mono); font-size: 10.5px; color: var(--lhie1-t); }
+
+/* ============ Step4 生成 ============ */
+.generate-hero { text-align: center; padding: 34px 20px 26px; }
+.generate-hero h3 { font-size: 20px; font-weight: 750; margin-bottom: 8px; }
+.generate-hero p { color: var(--text-dim); font-size: 13.5px; margin-bottom: 24px; }
+
+#generateBtn .btn-scan {
+  position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.5) 50%, transparent 70%);
+  transform: translateX(-110%);
+}
+#generateBtn.loading .btn-scan { animation: btnScan 1.1s ease-in-out infinite; }
+@keyframes btnScan { to { transform: translateX(110%); } }
+#generateBtn.loading { pointer-events: none; opacity: .85; }
+
+.check-results { display: none; margin-top: 20px; }
+.check-results.show { display: block; }
+.check-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 15px; border-radius: 11px; margin-bottom: 9px;
+  animation: fadeUp .5s var(--ease-out) both;
+  border: 1px solid rgba(52,211,153,.18); background: rgba(52,211,153,.05);
+}
+.check-item.warn { border-color: rgba(251,191,36,.18); background: rgba(251,191,36,.05); }
+.check-item .icon-circle {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center;
+}
+.check-item.ok .icon-circle { background: rgba(52,211,153,.15); color: var(--success); }
+.check-item.warn .icon-circle { background: rgba(251,191,36,.15); color: var(--warn); }
+.check-item span { font-size: 13px; font-weight: 550; }
+.check-item .detail { margin-left: auto; font-size: 11.5px; color: var(--text-faint); font-family: var(--mono); }
+.check-item:nth-child(1) { animation-delay: .1s; }
+.check-item:nth-child(2) { animation-delay: .22s; }
+.check-item:nth-child(3) { animation-delay: .34s; }
+.check-item:nth-child(4) { animation-delay: .46s; }
+
+.yaml-wrap { display: none; margin-top: 18px; }
+.yaml-wrap.show { display: block; animation: fadeIn .5s both; }
+.yaml-head {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  font-family: var(--mono); font-size: 12px; color: var(--text-dim);
+}
+.yaml-dots { display: flex; gap: 6px; }
+.yaml-dots i { width: 10px; height: 10px; border-radius: 50%; }
+.yaml-dots i:nth-child(1) { background: #f87171; }
+.yaml-dots i:nth-child(2) { background: #fbbf24; }
+.yaml-dots i:nth-child(3) { background: #34d399; }
+.yaml-code {
+  background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 13px; padding: 18px 0; overflow: auto; max-height: 420px;
+  font-family: var(--mono); font-size: 12px; line-height: 1.75;
+}
+.yaml-line { display: flex; padding: 0 18px; white-space: pre; }
+.yaml-line:hover { background: rgba(34,211,238,.04); }
+.ln { color: var(--ln); min-width: 34px; padding-right: 16px; text-align: right; user-select: none; }
+.y-key { color: var(--y-key); }
+.y-str { color: var(--y-str); }
+.y-num { color: var(--y-num); }
+.y-bool { color: var(--y-bool); }
+.y-comment { color: var(--y-comment); font-style: italic; }
+.y-dash { color: var(--y-dash); }
+
+.gen-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+/* ============ 左侧设置面板 ============ */
+.settings-panel {
+  order: 1;
+  position: sticky; top: 86px; align-self: start;
+  max-height: calc(100vh - 110px); overflow-y: auto;
+  transition: opacity .4s var(--ease-out), transform .4s var(--ease-out);
+  animation: fadeUp .8s var(--ease-out) .35s both;
+  padding-bottom: 10px;
+}
+.sp-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--border); border-radius: 16px;
+  backdrop-filter: blur(14px);
+  padding: 18px; margin-bottom: 14px;
+}
+.sp-title {
+  font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--text-faint); margin-bottom: 14px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.mode-switch { position: relative; display: grid; grid-template-columns: 1fr 1fr; background: var(--input-bg-2); border: 1px solid var(--border); border-radius: 11px; padding: 4px; }
+.mode-switch .indicator {
+  position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px);
+  background: var(--grad-main); border-radius: 8px;
+  transition: transform .38s var(--ease-out);
+  box-shadow: 0 2px 14px -2px rgba(34,211,238,.5);
+}
+.mode-switch.router .indicator { transform: translateX(100%); }
+.mode-switch button {
+  position: relative; z-index: 1; padding: 8px 4px; border: none; background: transparent;
+  color: var(--text-dim); font-size: 12px; font-weight: 650; cursor: pointer;
+  font-family: var(--font); transition: color .3s; border-radius: 8px;
+}
+.mode-switch:not(.router) button:nth-child(2) { color: var(--on-accent); }
+.mode-switch.router button:nth-child(3) { color: var(--on-accent); }
+
+.preset-btn {
+  width: 100%; padding: 11px 13px; border-radius: 11px; margin-bottom: 8px;
+  background: rgba(34,211,238,.06); border: 1px solid rgba(34,211,238,.22);
+  color: var(--preset-text); font-size: 12.5px; font-weight: 600; font-family: var(--font);
+  cursor: pointer; text-align: left; transition: all .28s var(--ease-out);
+  display: flex; align-items: center; gap: 10px;
+}
+.preset-btn:last-child { margin-bottom: 0; }
+.preset-btn:hover { background: rgba(34,211,238,.12); transform: translateY(-1px); box-shadow: 0 6px 18px -6px rgba(34,211,238,.3); }
+.preset-btn .p-ico {
+  width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: rgba(34,211,238,.12);
+}
+.preset-btn small { display: block; font-weight: 400; color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+
+.accordion { border-top: 1px solid rgba(148,163,184,.09); }
+.accordion-item { border-bottom: 1px solid rgba(148,163,184,.09); }
+.acc-head {
+  display: flex; align-items: center; gap: 10px; padding: 13px 2px;
+  cursor: pointer; font-size: 13px; font-weight: 650; color: var(--text-dim);
+  transition: color .25s; user-select: none;
+}
+.acc-head:hover { color: var(--text); }
+.acc-head .chev { margin-left: auto; transition: transform .32s var(--ease-out); color: var(--text-faint); }
+.accordion-item.open .acc-head { color: var(--accent); }
+.accordion-item.open .chev { transform: rotate(180deg); }
+.acc-body { max-height: 0; overflow: hidden; transition: max-height .45s var(--ease-out); }
+.accordion-item.open .acc-body { max-height: 560px; }
+.acc-inner { padding: 4px 2px 16px; }
+
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 0;
+}
+.setting-row .s-label { font-size: 12.5px; color: var(--text-dim); }
+.setting-row .s-label small { display: block; font-size: 10.5px; color: var(--text-faint); margin-top: 2px; }
+
+/* Toggle 开关 */
+.toggle {
+  position: relative; width: 40px; height: 22px; border-radius: 99px;
+  background: rgba(148,163,184,.18); cursor: pointer; flex-shrink: 0;
+  transition: background .3s; border: none;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 16px; height: 16px; border-radius: 50%; background: #94a3b8;
+  transition: transform .32s var(--ease-out), background .32s, box-shadow .32s;
+}
+.toggle.on { background: linear-gradient(90deg, #0e7490, #22d3ee); }
+.toggle.on::after {
+  transform: translateX(18px); background: #fff;
+  box-shadow: 0 0 10px rgba(34,211,238,.8);
+}
+
+.mini-input {
+  width: 90px; padding: 6px 10px; border-radius: 8px;
+  background: var(--input-bg); border: 1px solid var(--border);
+  color: var(--text); font-family: var(--mono); font-size: 12px; outline: none;
+  transition: border-color .25s; text-align: right;
+}
+.mini-input:focus { border-color: rgba(34,211,238,.5); }
+
+.sub-link-card {
+  display: flex; align-items: center; gap: 9px;
+  padding: 11px 13px; border-radius: 11px;
+  background: var(--input-bg-2); border: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.sub-link-card code {
+  font-family: var(--mono); font-size: 11px; color: var(--code-inline);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.copy-btn {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+  background: rgba(34,211,238,.1); border: 1px solid rgba(34,211,238,.25);
+  color: var(--accent-text); display: grid; place-items: center; transition: all .25s;
+}
+.copy-btn:hover { background: rgba(34,211,238,.2); transform: translateY(-1px); }
+.copy-btn.copied { background: rgba(52,211,153,.15); border-color: rgba(52,211,153,.4); color: var(--success); }
+
+/* ============ 底部状态栏 ============ */
+.statusbar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
+  height: 38px; display: flex; align-items: center;
+  padding: 0 24px; gap: 26px;
+  background: var(--bar-bg);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(148, 163, 184, 0.09);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.statusbar .sb-item { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.statusbar .sb-live { color: var(--success); }
+.sb-spacer { flex: 1; }
+.latency-live { color: var(--accent-text); }
+@keyframes blink { 50% { opacity: .25; } }
+.blink { animation: blink 2s ease-in-out infinite; }
+
+/* ============ Toast ============ */
+.toast-wrap { position: fixed; top: 78px; right: 26px; z-index: 200; display: flex; flex-direction: column; gap: 10px; }
+.toast {
+  display: flex; align-items: center; gap: 11px;
+  padding: 13px 18px; border-radius: 13px;
+  background: var(--toast-bg);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--toast-shadow);
+  font-size: 13px; font-weight: 550;
+  animation: toastIn .5s var(--ease-out) both;
+  max-width: 360px;
+}
+.toast.out { animation: toastOut .4s var(--ease-out) both; }
+.toast .t-ico {
+  width: 24px; height: 24px; border-radius: 8px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: rgba(52,211,153,.15); color: var(--success);
+}
+.toast.info { border-color: rgba(34,211,238,.35); }
+.toast.info .t-ico { background: rgba(34,211,238,.13); color: var(--accent); }
+@keyframes toastIn { from { opacity: 0; transform: translateX(60px) scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes toastOut { to { opacity: 0; transform: translateX(60px) scale(.94); } }
+
+/* ============ 响应式 ============ */
+@media (max-width: 1180px) {
+  .layout { grid-template-columns: 1fr; }
+  .main-col { order: 1; }
+  .settings-panel { order: 2; position: static; max-height: none; }
+  .workspace-nav .wlabel { display: none; }
+}
+@media (max-width: 720px) {
+  .method-cards { grid-template-columns: 1fr; }
+  .sub-status .st-text { display: none; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<!-- 背景层 -->
+<div class="bg-layer">
+  <div class="bg-grid"></div>
+  <div class="glow-orb orb-1"></div>
+  <div class="glow-orb orb-2"></div>
+  <div class="glow-orb orb-3"></div>
+  <div class="scanline"></div>
+  <div class="noise"></div>
+</div>
+
+<!-- 顶栏 -->
+<header class="topbar">
+  <div class="logo">
+    <div class="logo-mark">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2L21 7v10l-9 5-9-5V7l9-5z" stroke="#051018" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M12 22V12M12 12L3 7M12 12l9-5" stroke="#051018" stroke-width="1.6" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="logo-text">OpenClash Config Gen<em>V2</em></div>
+  </div>
+
+  <nav class="workspace-nav" id="workspaceNav">
+    <div class="wnav-item active" data-step="1">
+      <span class="wnum">01</span><span class="wlabel">导入节点</span>
+    </div>
+    <div class="wnav-item" data-step="2">
+      <span class="wnum">02</span><span class="wlabel">节点管理</span>
+    </div>
+    <div class="wnav-item" data-step="3">
+      <span class="wnum">03</span><span class="wlabel">分流规则</span>
+    </div>
+    <div class="wnav-item" data-step="4">
+      <span class="wnum">04</span><span class="wlabel">生成与检查</span>
+    </div>
+  </nav>
+
+  <div class="topbar-right">
+    <div class="sub-status">
+      <span class="dot"></span>
+      <span class="st-text">订阅在线</span>
+    </div>
+    <div class="btn-icon" id="themeToggle" title="切换浅色 / 暗色主题">
+      <svg class="ico-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+      </svg>
+      <svg class="ico-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+      </svg>
+    </div>
+    <div class="btn-icon" id="sidebarToggle" title="折叠设置面板">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M4 6h16M4 12h10M4 18h16"/>
+      </svg>
+    </div>
+    <div class="avatar" title="admin">A</div>
+  </div>
+</header>
+
+<div class="layout" id="layout">
+  <div class="main-col">
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-eyebrow">Subscription Workspace</div>
+      <h1>从节点导入到订阅生效，<span class="grad">一套流程直接闭环</span></h1>
+      <p>面向 Docker 自部署、OpenClash 软路由与 mihomo 客户端的订阅生成工具。导入节点、编辑规则、生成订阅、校验 YAML —— 全程用户隔离，Token 订阅即时生效。</p>
+
+      <div class="stats">
+        <div class="stat-card" style="--edge-c: rgba(34,211,238,.6)">
+          <div class="stat-label">节点</div>
+          <div class="stat-value"><span data-count="6">0</span></div>
+          <div class="stat-trend">▲ 2 个新增</div>
+        </div>
+        <div class="stat-card" style="--edge-c: rgba(99,102,241,.6)">
+          <div class="stat-label">自定义规则</div>
+          <div class="stat-value"><span data-count="8">0</span></div>
+          <div class="stat-trend">▲ 规则集 3 个</div>
+        </div>
+        <div class="stat-card" style="--edge-c: rgba(167,139,250,.6)">
+          <div class="stat-label">策略组</div>
+          <div class="stat-value"><span data-count="16">0</span></div>
+          <div class="stat-trend">DustinWin 预设</div>
+        </div>
+        <div class="stat-card" style="--edge-c: rgba(52,211,153,.6)">
+          <div class="stat-label">订阅状态</div>
+          <div class="stat-value" style="font-size:20px; padding-top:5px;">在线</div>
+          <div class="stat-trend"><span class="dot" style="margin-right:2px;"></span> 已同步 · 3 分钟前</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== Step 1 导入 ========== -->
+    <section class="step-section active" id="step1">
+      <div class="step-banner" style="--bc: 34,211,238;">
+        <div class="sb-ico">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+          </svg>
+        </div>
+        <div class="sb-body">
+          <div class="sb-eyebrow">Step 01 · Import</div>
+          <h2 class="sb-title">导入节点</h2>
+          <p class="sb-desc">智能 YAML · 订阅链接 · 分享链接，统一解析管线，重复节点自动跳过</p>
+        </div>
+        <div class="sb-num">01</div>
+      </div>
+
+      <div class="panel stagger">
+        <div class="panel-head">
+          <div class="panel-title">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+            智能导入
+          </div>
+          <span class="panel-hint">YAML · 订阅链接 · 分享链接，统一解析管线</span>
+        </div>
+
+        <div class="method-cards">
+          <div class="method-card active" data-method="yaml">
+            <div class="m-icon">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/>
+              </svg>
+            </div>
+            <h4>智能 YAML 导入</h4>
+            <p>完整 config.yaml、proxies 片段、onekey 输出，自动修复常见缩进错误</p>
+          </div>
+          <div class="method-card" data-method="url">
+            <div class="m-icon">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+              </svg>
+            </div>
+            <h4>订阅链接</h4>
+            <p>远程拉取订阅内容，Base64 自动解码，进入统一校验流程</p>
+          </div>
+          <div class="method-card" data-method="share">
+            <div class="m-icon">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><path d="M16 6l-4-4-4 4M12 2v13"/>
+              </svg>
+            </div>
+            <h4>分享链接</h4>
+            <p>ss / vless / vmess / trojan / hy2 / tuic / anytls 单条 URI 批量粘贴</p>
+          </div>
+        </div>
+
+        <div class="paste-zone">
+          <textarea spellcheck="false" placeholder="- name: "HK-IPLC-01"
+  type: hysteria2
+  server: hk1.example.com
+  port: 29950
+  password: your-password
+  ...">- name: "HK-IPLC-01"
+  type: hysteria2
+  server: hk1.example.com
+  port: 29950
+  password: "your_password"
+  sni: www.bing.com
+  skip-cert-verify: true
+  up: 50 Mbps
+  down: 100 Mbps
+  hop-interval: 5-25
+  ports: 29950-30000
+
+- name: "JP-Reality-01"
+  type: vless
+  server: jp1.example.com
+  port: 443
+  uuid: 00000000-0000-4000-8000-000000000000
+  flow: xtls-rprx-vision
+  tls: true
+  servername: v1-dy.ixigua.com
+  reality-opts:
+    public-key: xxxxxxxx
+    short-id: "01"</textarea>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:16px; align-items:center;">
+          <button class="btn btn-primary btn-lg" data-ripple onclick="importNodes(this)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            导入节点
+          </button>
+          <button class="btn btn-ghost" onclick="toast('已清空粘贴区', 'info')">清空</button>
+          <span style="font-size:12px; color:var(--text-faint); margin-left:auto; font-family:var(--mono);">
+            已识别 <b style="color:var(--accent)">2</b> 个节点 · 重复自动跳过
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== Step 2 节点管理 ========== -->
+    <section class="step-section" id="step2">
+      <div class="step-banner" style="--bc: 99,102,241;">
+        <div class="sb-ico">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/><path d="M6 6h.01M6 18h.01"/>
+          </svg>
+        </div>
+        <div class="sb-body">
+          <div class="sb-eyebrow">Step 02 · Nodes</div>
+          <h2 class="sb-title">节点管理</h2>
+          <p class="sb-desc">按协议筛选、排序与编辑节点，悬停卡片查看延迟与快捷操作</p>
+        </div>
+        <div class="sb-num">02</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/><path d="M6 6h.01M6 18h.01"/>
+            </svg>
+            节点管理
+          </div>
+          <span class="panel-hint">悬停卡片可排序 / 删除 / 编辑</span>
+        </div>
+
+        <div class="add-node-bar">
+          <div class="protocol-pills" id="protocolPills">
+            <span class="pill active">hysteria2</span>
+            <span class="pill">vless</span>
+            <span class="pill">vmess</span>
+            <span class="pill">ss</span>
+            <span class="pill">trojan</span>
+            <span class="pill">tuic</span>
+            <span class="pill">anytls</span>
+          </div>
+          <button class="btn btn-primary" data-ripple style="margin-left:auto;" onclick="toast('V2 原型：表单联动由表单区展开', 'info')">
+            + 手动添加节点
+          </button>
+        </div>
+
+        <div class="node-grid" id="nodeGrid">
+          <div class="node-card">
+            <div class="node-top"><span class="node-name">HK-IPLC-01</span><span class="badge b-hy2">HY2</span></div>
+            <div class="node-server">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+              hk1.example.com:29950
+            </div>
+            <div class="latency-row lat-good">
+              <div class="latency-bar"><div class="latency-fill" style="width:24%"></div></div>
+              <span class="latency-num">42 ms</span>
+            </div>
+            <div class="node-actions">
+              <button class="chip-btn">上移</button>
+              <button class="chip-btn">下移</button>
+              <button class="chip-btn">编辑</button>
+              <button class="chip-btn danger">删除</button>
+            </div>
+          </div>
+
+          <div class="node-card">
+            <div class="node-top"><span class="node-name">JP-Reality-01</span><span class="badge b-vless">VLESS</span></div>
+            <div class="node-server">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+              jp1.example.com:443
+            </div>
+            <div class="latency-row lat-good">
+              <div class="latency-bar"><div class="latency-fill" style="width:31%"></div></div>
+              <span class="latency-num">58 ms</span>
+            </div>
+            <div class="node-actions">
+              <button class="chip-btn">上移</button>
+              <button class="chip-btn">下移</button>
+              <button class="chip-btn">编辑</button>
+              <button class="chip-btn danger">删除</button>
+            </div>
+          </div>
+
+          <div class="node-card">
+            <div class="node-top"><span class="node-name">US-SS-2022</span><span class="badge b-ss">SS</span></div>
+            <div class="node-server">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+              us1.example.com:8888
+            </div>
+            <div class="latency-row lat-mid">
+              <div class="latency-bar"><div class="latency-fill" style="width:62%"></div></div>
+              <span class="latency-num">168 ms</span>
+            </div>
+            <div class="node-actions">
+              <button class="chip-btn">上移</button>
+              <button class="chip-btn">下移</button>
+              <button class="chip-btn">编辑</button>
+              <button class="chip-btn danger">删除</button>
+            </div>
+          </div>
+
+          <div class="node-card">
+            <div class="node-top"><span class="node-name">SG-TUIC-01</span><span class="badge b-tuic">TUIC</span></div>
+            <div class="node-server">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+              sg1.example.com:443
+            </div>
+            <div class="latency-row lat-good">
+              <div class="latency-bar"><div class="latency-fill" style="width:38%"></div></div>
+              <span class="latency-num">76 ms</span>
+            </div>
+            <div class="node-actions">
+              <button class="chip-btn">上移</button>
+              <button class="chip-btn">下移</button>
+              <button class="chip-btn">编辑</button>
+              <button class="chip-btn danger">删除</button>
+            </div>
+          </div>
+
+          <div class="node-card">
+            <div class="node-top"><span class="node-name">TW-VMess-WS</span><span class="badge b-vmess">VMESS</span></div>
+            <div class="node-server">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+              tw1.example.com:443
+            </div>
+            <div class="latency-row lat-mid">
+              <div class="latency-bar"><div class="latency-fill" style="width:48%"></div></div>
+              <span class="latency-num">124 ms</span>
+            </div>
+            <div class="node-actions">
+              <button class="chip-btn">上移</button>
+              <button class="chip-btn">下移</button>
+              <button class="chip-btn">编辑</button>
+              <button class="chip-btn danger">删除</button>
+            </div>
+          </div>
+
+          <div class="node-card">
+            <div class="node-top"><span class="node-name">KR-Trojan-01</span><span class="badge b-trojan">TROJAN</span></div>
+            <div class="node-server">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+              kr1.example.com:443
+            </div>
+            <div class="latency-row lat-good">
+              <div class="latency-bar"><div class="latency-fill" style="width:34%"></div></div>
+              <span class="latency-num">69 ms</span>
+            </div>
+            <div class="node-actions">
+              <button class="chip-btn">上移</button>
+              <button class="chip-btn">下移</button>
+              <button class="chip-btn">编辑</button>
+              <button class="chip-btn danger">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== Step 3 分流规则 ========== -->
+    <section class="step-section" id="step3">
+      <div class="step-banner" style="--bc: 167,139,250;">
+        <div class="sb-ico">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 6h5l4 6 4 6h3M4 18h5l2.5-3.75M20 6h-3l-2.5 3.75M18 3l3 3-3 3M18 15l3 3-3 3"/>
+          </svg>
+        </div>
+        <div class="sb-body">
+          <div class="sb-eyebrow">Step 03 · Rules</div>
+          <h2 class="sb-title">分流规则</h2>
+          <p class="sb-desc">基础规则源 + 可视化规则编辑，DustinWin mihomo-ruleset 每周自动更新</p>
+        </div>
+        <div class="sb-num">03</div>
+      </div>
+
+      <!-- 基础规则源 -->
+      <div class="panel" style="margin-bottom:18px;">
+        <div class="panel-head">
+          <div class="panel-title">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12c3.5-6 14.5-6 18 0-3.5 6-14.5 6-18 0z"/><circle cx="12" cy="12" r="2.6"/>
+            </svg>
+            基础规则源
+          </div>
+          <span class="panel-hint">规则集由 OpenClash / mihomo 每周自动更新（interval 604800s）</span>
+        </div>
+
+        <div class="source-cards">
+          <div class="source-card active" data-src="dustinwin" onclick="setRuleSource('dustinwin')">
+            <div class="sc-radio"></div>
+            <div class="sc-body">
+              <h4>DustinWin mihomo-ruleset <span class="sc-badge">默认 · 推荐</span></h4>
+              <p>30 个规则集（mrs 格式）：AI / 代理 / 国内 / GFW / 流媒体 / 电报细分，经本站代理 GitHub Releases，按周自动更新</p>
+            </div>
+          </div>
+          <div class="source-card" data-src="lhie1" onclick="setRuleSource('lhie1')">
+            <div class="sc-radio"></div>
+            <div class="sc-body">
+              <h4>lhie1 规则集 <span class="sc-badge weekly">经典</span></h4>
+              <p>dler-io 社区经典规则集，覆盖流媒体、AI、国内媒体与广告拦截等 30+ 细分类目</p>
+            </div>
+          </div>
+          <div class="source-card" data-src="none" onclick="setRuleSource('none')">
+            <div class="sc-radio"></div>
+            <div class="sc-body">
+              <h4>不使用基础分流</h4>
+              <p>仅使用下方自定义规则与自定义规则集，适合完全手工控制分流的高级用户</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="preset-block" id="dustinwinPreset">
+          <div class="preset-head">DustinWin 预设规则目标 <small>30 个规则集 · mrs 格式 · 每周自动更新，点击切换目标策略组</small></div>
+          <div class="lhie1-grid">
+            <div class="lhie1-cell" onclick="cycleTarget(this)">ai<span class="t">AI Suite</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">proxy<span class="t">Proxy</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">cn<span class="t">Domestic</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">gfw<span class="t">Proxy</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">applications<span class="t">DIRECT</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">private<span class="t">DIRECT</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">ads<span class="t">AdBlock</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">apple-cn<span class="t">Apple</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">google<span class="t">Google</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">microsoft-cn<span class="t">Microsoft</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">games<span class="t">Steam</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">netflix<span class="t">Netflix</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">disney<span class="t">Disney Plus</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">youtube<span class="t">Youtube</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">tiktok<span class="t">TikTok</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">bilibili<span class="t">Bilibili</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">spotify<span class="t">Spotify</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">telegramip<span class="t">Telegram</span></div>
+          </div>
+        </div>
+
+        <div class="preset-block" id="lhie1Preset" style="display:none;">
+          <div class="preset-head">lhie1 预设规则目标 <small>点击切换目标策略组</small></div>
+          <div class="lhie1-grid">
+            <div class="lhie1-cell" onclick="cycleTarget(this)">Netflix<span class="t">Netflix</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">YouTube<span class="t">Youtube</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">Telegram<span class="t">Telegram</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">AI Suite<span class="t">AI Suite</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">Disney+<span class="t">Disney Plus</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">Steam<span class="t">Steam</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">Bilibili<span class="t">Bilibili</span></div>
+            <div class="lhie1-cell" onclick="cycleTarget(this)">Microsoft<span class="t">Microsoft</span></div>
+          </div>
+        </div>
+
+        <div class="preset-block" id="nonePreset" style="display:none;">
+          <div class="preset-head">基础分流已停用 <small>仅使用自定义规则</small></div>
+          <div style="font-size:12.5px; color:var(--text-faint); line-height:1.8; padding:6px 2px;">
+            生成配置将不包含基础规则集，请在下方「单条规则」与「自定义规则集」中维护全部分流规则，并确保 MATCH 兜底规则存在。
+          </div>
+        </div>
+      </div>
+
+      <div class="rules-layout">
+        <div class="panel stagger">
+          <div class="panel-head">
+            <div class="panel-title">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5"/>
+              </svg>
+              单条规则
+            </div>
+          </div>
+          <div class="field">
+            <label>规则类型</label>
+            <select id="ruleType">
+              <option>DOMAIN-SUFFIX</option>
+              <option>DOMAIN</option>
+              <option>DOMAIN-KEYWORD</option>
+              <option>IP-CIDR</option>
+              <option>GEOIP</option>
+              <option>MATCH</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>值（域名 / IP / 国家代码）</label>
+            <input id="ruleValue" type="text" placeholder="例如: google.com">
+          </div>
+          <div class="field">
+            <label>目标策略</label>
+            <select id="ruleTarget">
+              <option>Proxy</option>
+              <option>DIRECT</option>
+              <option>REJECT</option>
+              <option>AI Suite</option>
+              <option>Netflix</option>
+              <option>Telegram</option>
+              <option>Domestic</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-block" data-ripple onclick="addRule()">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            添加规则
+          </button>
+          <div style="margin-top:14px; font-size:11.5px; color:var(--text-faint); line-height:1.7;">
+            💡 目标策略可填策略组（Proxy / AI / Netflix…）、节点名或 DIRECT / REJECT。预设规则目标请在上方「基础规则源」中调整。
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
+              </svg>
+              已添加的规则 <span style="color:var(--accent); font-family:var(--mono);" id="ruleCount">4</span>
+            </div>
+            <span class="panel-hint">优先级从上到下</span>
+          </div>
+          <div id="ruleList">
+            <div class="rule-item">
+              <span class="rule-idx">01</span>
+              <span class="rule-type">DOMAIN-SUFFIX</span>
+              <span class="rule-value">openai.com</span>
+              <span class="rule-target"><span class="arrow">→</span> AI Suite</span>
+              <button class="rule-del" onclick="delRule(this)">✕</button>
+            </div>
+            <div class="rule-item">
+              <span class="rule-idx">02</span>
+              <span class="rule-type">DOMAIN-SUFFIX</span>
+              <span class="rule-value">github.com</span>
+              <span class="rule-target"><span class="arrow">→</span> Proxy</span>
+              <button class="rule-del" onclick="delRule(this)">✕</button>
+            </div>
+            <div class="rule-item">
+              <span class="rule-idx">03</span>
+              <span class="rule-type">DOMAIN-KEYWORD</span>
+              <span class="rule-value">bilibili</span>
+              <span class="rule-target"><span class="arrow">→</span> DIRECT</span>
+              <button class="rule-del" onclick="delRule(this)">✕</button>
+            </div>
+            <div class="rule-item">
+              <span class="rule-idx">04</span>
+              <span class="rule-type">PROCESS-NAME</span>
+              <span class="rule-value">qbittorrent</span>
+              <span class="rule-target"><span class="arrow">→</span> DIRECT</span>
+              <button class="rule-del" onclick="delRule(this)">✕</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== Step 4 生成 ========== -->
+    <section class="step-section" id="step4">
+      <div class="step-banner" style="--bc: 52,211,153;">
+        <div class="sb-ico">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 2L3 14h7l-1 8 11-13h-7l1-7z"/>
+          </svg>
+        </div>
+        <div class="sb-body">
+          <div class="sb-eyebrow">Step 04 · Generate</div>
+          <h2 class="sb-title">生成与检查</h2>
+          <p class="sb-desc">校验节点、策略组与规则依赖，序列化 YAML，订阅保存后即时生效</p>
+        </div>
+        <div class="sb-num">04</div>
+      </div>
+
+      <div class="panel">
+        <div class="generate-hero">
+          <h3>生成并检查配置文件</h3>
+          <p>校验通过后订阅立即生效 · 客户端拉取即为最新配置</p>
+          <button class="btn btn-primary btn-lg" id="generateBtn" data-ripple onclick="generate(this)">
+            <span class="btn-scan"></span>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+            </svg>
+            <span id="genBtnText">生成并检查</span>
+          </button>
+        </div>
+
+        <div class="check-results" id="checkResults">
+          <div class="check-item ok">
+            <span class="icon-circle">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            </span>
+            <span>节点完整性校验通过</span>
+            <span class="detail">6 proxies</span>
+          </div>
+          <div class="check-item ok">
+            <span class="icon-circle">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            </span>
+            <span>策略组引用检查通过</span>
+            <span class="detail">16 groups</span>
+          </div>
+          <div class="check-item ok">
+            <span class="icon-circle">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            </span>
+            <span>规则顺序与兜底检查通过</span>
+            <span class="detail">61 rules</span>
+          </div>
+          <div class="check-item warn">
+            <span class="icon-circle">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.7 3.86a2 2 0 00-3.4 0z"/></svg>
+            </span>
+            <span>检测到 respect-rules 依赖 proxy-server-nameserver</span>
+            <span class="detail">已自动补全</span>
+          </div>
+        </div>
+
+        <div class="yaml-wrap" id="yamlWrap">
+          <div class="yaml-head">
+            <div class="yaml-dots"><i></i><i></i><i></i></div>
+            <span>config.yaml — 预览</span>
+            <span style="margin-left:auto; color:var(--text-faint);" id="yamlMeta"></span>
+          </div>
+          <div class="yaml-code" id="yamlCode"></div>
+          <div class="gen-actions">
+            <button class="btn btn-primary" data-ripple onclick="toast('config.yaml 已开始下载')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+              下载 config.yaml
+            </button>
+            <button class="btn" data-ripple onclick="copySub()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              复制订阅链接
+            </button>
+            <button class="btn btn-ghost" onclick="toast('已重新保存，订阅即时生效', 'info')">保存并同步</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /main-col -->
+
+  <!-- ========== 左侧设置面板 ========== -->
+  <aside class="settings-panel">
+    <div class="sp-card">
+      <div class="sp-title">订阅链接<span style="color:var(--success); font-size:10px; letter-spacing:.5px;">● 已生效</span></div>
+      <div class="sub-link-card">
+        <code id="subUrl">https://clash.910501.xyz/sub/8f3a…c21e</code>
+        <button class="copy-btn" id="subCopyBtn" onclick="copySub()" title="复制订阅链接">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+      </div>
+      <button class="btn btn-ghost btn-block" style="font-size:12px; padding:8px;" onclick="toast('订阅 Token 已重置，旧链接立即失效', 'info')">重置订阅 Token</button>
+    </div>
+
+    <div class="sp-card">
+      <div class="sp-title">生成模式</div>
+      <div class="mode-switch" id="modeSwitch">
+        <div class="indicator"></div>
+        <button onclick="setMode(false)">全平台客户端</button>
+        <button onclick="setMode(true)">OpenClash / 软路由</button>
+      </div>
+      <div style="font-size:11.5px; color:var(--text-faint); margin-top:10px; line-height:1.7;" id="modeDesc">
+        由 YAML 接管 DNS 与 TUN，含完整防泄露配置，适合 Clash Verge / mihomo 桌面客户端。
+      </div>
+    </div>
+
+    <div class="sp-card">
+      <div class="sp-title">DNS 防泄露预设</div>
+      <button class="preset-btn" onclick="toast('已应用「完整客户端防泄露」预设')">
+        <span class="p-ico">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </span>
+        <span>完整客户端防泄露<small>TUN + fake-ip + respect-rules</small></span>
+      </button>
+      <button class="preset-btn" onclick="toast('已应用「软路由安全」预设')">
+        <span class="p-ico">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M17 17h.01M6 13V7a2 2 0 012-2h8a2 2 0 012 2v6"/></svg>
+        </span>
+        <span>OpenClash 软路由安全<small>仅节点与规则，DNS 由插件接管</small></span>
+      </button>
+    </div>
+
+    <div class="sp-card">
+      <div class="sp-title">全局设置</div>
+      <div class="accordion">
+        <div class="accordion-item open">
+          <div class="acc-head" onclick="toggleAcc(this)">
+            📡 端口与基础
+            <span class="chev">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </span>
+          </div>
+          <div class="acc-body"><div class="acc-inner">
+            <div class="setting-row">
+              <span class="s-label">混合端口<small>mixed-port</small></span>
+              <input class="mini-input" value="7893">
+            </div>
+            <div class="setting-row">
+              <span class="s-label">允许局域网<small>allow-lan</small></span>
+              <button class="toggle" onclick="flipToggle(this)"></button>
+            </div>
+            <div class="setting-row">
+              <span class="s-label">IPv6 支持<small>ipv6</small></span>
+              <button class="toggle" onclick="flipToggle(this)"></button>
+            </div>
+          </div></div>
+        </div>
+
+        <div class="accordion-item">
+          <div class="acc-head" onclick="toggleAcc(this)">
+            🛡️ TUN 模式
+            <span class="chev">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </span>
+          </div>
+          <div class="acc-body"><div class="acc-inner">
+            <div class="setting-row">
+              <span class="s-label">启用 TUN<small>接管系统流量</small></span>
+              <button class="toggle on" onclick="flipToggle(this)"></button>
+            </div>
+            <div class="setting-row">
+              <span class="s-label">协议栈 mixed<small>system + gvisor</small></span>
+              <button class="toggle on" onclick="flipToggle(this)" style="opacity:0;pointer-events:none;"></button>
+            </div>
+            <div class="setting-row">
+              <span class="s-label">DNS 劫持<small>dns-hijack</small></span>
+              <button class="toggle on" onclick="flipToggle(this)"></button>
+            </div>
+          </div></div>
+        </div>
+
+        <div class="accordion-item">
+          <div class="acc-head" onclick="toggleAcc(this)">
+            🌐 DNS 设置
+            <span class="chev">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </span>
+          </div>
+          <div class="acc-body"><div class="acc-inner">
+            <div class="setting-row">
+              <span class="s-label">内置 DNS<small>enable</small></span>
+              <button class="toggle on" onclick="flipToggle(this)"></button>
+            </div>
+            <div class="setting-row">
+              <span class="s-label">fake-ip 模式<small>enhanced-mode</small></span>
+              <button class="toggle on" onclick="flipToggle(this)" style="opacity:0;pointer-events:none;"></button>
+            </div>
+            <div class="setting-row">
+              <span class="s-label">respect-rules<small>DNS 遵守分流</small></span>
+              <button class="toggle on" onclick="flipToggle(this)"></button>
+            </div>
+          </div></div>
+        </div>
+
+        <div class="accordion-item">
+          <div class="acc-head" onclick="toggleAcc(this)">
+            ⚡ Meta 核心特性
+            <span class="chev">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </span>
+          </div>
+          <div class="acc-body"><div class="acc-inner">
+            <div class="setting-row">
+              <span class="s-label">TCP 并发<small>tcp-concurrent</small></span>
+              <button class="toggle on" onclick="flipToggle(this)"></button>
+            </div>
+            <div class="setting-row">
+              <span class="s-label">统一延迟<small>unified-delay</small></span>
+              <button class="toggle on" onclick="flipToggle(this)"></button>
+            </div>
+            <div class="setting-row">
+              <span class="s-label">流量嗅探<small>sniffer</small></span>
+              <button class="toggle on" onclick="flipToggle(this)"></button>
+            </div>
+            <div class="setting-row">
+              <span class="s-label">GeoData 模式<small>geodata-mode</small></span>
+              <button class="toggle" onclick="flipToggle(this)"></button>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- 底部状态栏 -->
+<footer class="statusbar">
+  <div class="sb-item sb-live"><span class="dot" style="width:6px;height:6px;"></span> FastAPI 订阅服务正常</div>
+  <div class="sb-item">mihomo v1.19.x</div>
+  <div class="sb-item">fake-ip · respect-rules</div>
+  <div class="sb-spacer"></div>
+  <div class="sb-item">节点 <b style="color:var(--text-dim)">6</b></div>
+  <div class="sb-item">规则 <b style="color:var(--text-dim)">61</b></div>
+  <div class="sb-item latency-live"><span class="blink">◈</span> <span id="liveLatency">42</span> ms</div>
+</footer>
+
+<!-- Toast 容器 -->
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+/* ============ 主题切换（浅色默认） ============ */
+(function () {
+  const root = document.documentElement;
+  let theme = 'light';
+  try { theme = localStorage.getItem('v2-theme') || 'light'; } catch (e) {}
+  root.classList.toggle('dark', theme === 'dark');
+  document.getElementById('themeToggle').addEventListener('click', () => {
+    theme = theme === 'dark' ? 'light' : 'dark';
+    root.classList.add('theme-anim');
+    root.classList.toggle('dark', theme === 'dark');
+    try { localStorage.setItem('v2-theme', theme); } catch (e) {}
+    setTimeout(() => root.classList.remove('theme-anim'), 480);
+    toast(theme === 'dark' ? '已切换到暗色主题' : '已切换到浅色主题', 'info');
+  });
+})();
+
+/* ============ 数字滚动 ============ */
+function countUp() {
+  document.querySelectorAll('[data-count]').forEach(el => {
+    const target = +el.dataset.count;
+    const dur = 1300, t0 = performance.now();
+    (function tick(now) {
+      const p = Math.min((now - t0) / dur, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(target * eased);
+      if (p < 1) requestAnimationFrame(tick);
+    })(t0);
+  });
+}
+setTimeout(countUp, 350);
+
+/* ============ 步骤导航 ============ */
+document.querySelectorAll('#workspaceNav .wnav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('#workspaceNav .wnav-item').forEach(i => i.classList.remove('active'));
+    item.classList.add('active');
+    const step = item.dataset.step;
+    document.querySelectorAll('.step-section').forEach(s => s.classList.remove('active'));
+    const sec = document.getElementById('step' + step);
+    sec.classList.add('active');
+    // 重新触发 stagger 动画
+    sec.querySelectorAll('.stagger > *, .node-card').forEach(el => {
+      el.style.animation = 'none'; el.offsetHeight; el.style.animation = '';
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+});
+
+/* ============ 导入方式卡片 ============ */
+document.querySelectorAll('.method-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.method-card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+  });
+});
+
+/* ============ 协议 pills ============ */
+document.querySelectorAll('#protocolPills .pill').forEach(p => {
+  p.addEventListener('click', () => {
+    document.querySelectorAll('#protocolPills .pill').forEach(x => x.classList.remove('active'));
+    p.classList.add('active');
+  });
+});
+
+/* ============ 卡片聚光跟随 ============ */
+document.querySelectorAll('.node-card, .stat-card').forEach(card => {
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+    card.style.setProperty('--my', (e.clientY - r.top) + 'px');
+  });
+});
+
+/* ============ 折叠面板 ============ */
+function toggleAcc(head) {
+  head.parentElement.classList.toggle('open');
+}
+
+/* ============ Toggle ============ */
+function flipToggle(t) { t.classList.toggle('on'); }
+
+/* ============ 生成模式 ============ */
+function setMode(router) {
+  const sw = document.getElementById('modeSwitch');
+  sw.classList.toggle('router', router);
+  document.getElementById('modeDesc').textContent = router
+    ? '订阅仅输出节点、策略组与规则；DNS / TUN 由 OpenClash 插件统一接管，避免配置冲突。'
+    : '由 YAML 接管 DNS 与 TUN，含完整防泄露配置，适合 Clash Verge / mihomo 桌面客户端。';
+}
+
+/* ============ 基础规则源 ============ */
+function setRuleSource(src) {
+  document.querySelectorAll('.source-card').forEach(c =>
+    c.classList.toggle('active', c.dataset.src === src));
+  document.getElementById('dustinwinPreset').style.display = src === 'dustinwin' ? '' : 'none';
+  document.getElementById('lhie1Preset').style.display = src === 'lhie1' ? '' : 'none';
+  document.getElementById('nonePreset').style.display = src === 'none' ? '' : 'none';
+  const msgs = {
+    dustinwin: '基础规则源：DustinWin mihomo-ruleset（每周自动更新）',
+    lhie1: '基础规则源：lhie1 规则集',
+    none: '已停用基础分流，仅使用自定义规则'
+  };
+  toast(msgs[src], 'info');
+}
+
+const PRESET_TARGETS = ['Proxy', 'DIRECT', 'AI Suite', 'Domestic', 'Netflix', 'Telegram'];
+function cycleTarget(cell) {
+  const t = cell.querySelector('.t');
+  const cur = t.textContent;
+  const next = PRESET_TARGETS[(PRESET_TARGETS.indexOf(cur) + 1) % PRESET_TARGETS.length] || 'Proxy';
+  t.textContent = next;
+  cell.style.animation = 'none'; cell.offsetHeight; cell.style.animation = 'popIn .35s var(--ease-out)';
+  toast(`规则集「${cell.textContent.replace(next, '').trim()}」目标 → ${next}`, 'info');
+}
+
+/* ============ 涟漪 ============ */
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-ripple]');
+  if (!btn) return;
+  const r = btn.getBoundingClientRect();
+  const span = document.createElement('span');
+  const size = Math.max(r.width, r.height);
+  span.className = 'ripple';
+  span.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX - r.left - size/2}px;top:${e.clientY - r.top - size/2}px;`;
+  btn.appendChild(span);
+  setTimeout(() => span.remove(), 650);
+});
+
+/* ============ Toast ============ */
+function toast(msg, type = 'ok') {
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = 'toast' + (type === 'info' ? ' info' : '');
+  el.innerHTML = `<span class="t-ico">${type === 'info'
+    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 16v-4M12 8h.01"/><circle cx="12" cy="12" r="10"/></svg>'
+    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'
+  }</span>${msg}`;
+  wrap.appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 420); }, 2600);
+}
+
+/* ============ 导入 demo ============ */
+function importNodes(btn) {
+  toast('已识别 2 个新节点，进入统一校验管线');
+}
+
+/* ============ 规则 ============ */
+function addRule() {
+  const type = document.getElementById('ruleType').value;
+  const value = document.getElementById('ruleValue').value.trim() || 'example.com';
+  const target = document.getElementById('ruleTarget').value;
+  const list = document.getElementById('ruleList');
+  const idx = String(list.children.length + 1).padStart(2, '0');
+  const item = document.createElement('div');
+  item.className = 'rule-item';
+  item.innerHTML = `<span class="rule-idx">${idx}</span>
+    <span class="rule-type">${type}</span>
+    <span class="rule-value">${value.replace(/</g, '&lt;')}</span>
+    <span class="rule-target"><span class="arrow">→</span> ${target}</span>
+    <button class="rule-del" onclick="delRule(this)">✕</button>`;
+  list.appendChild(item);
+  document.getElementById('ruleValue').value = '';
+  document.getElementById('ruleCount').textContent = list.children.length;
+  toast(`规则已添加：${type},${value},${target}`);
+}
+function delRule(btn) {
+  const item = btn.parentElement;
+  item.style.transition = 'all .3s';
+  item.style.opacity = '0';
+  item.style.transform = 'translateX(24px)';
+  setTimeout(() => {
+    item.remove();
+    document.querySelectorAll('#ruleList .rule-idx').forEach((el, i) => el.textContent = String(i + 1).padStart(2, '0'));
+    document.getElementById('ruleCount').textContent = document.getElementById('ruleList').children.length;
+  }, 300);
+}
+
+/* ============ YAML 高亮 ============ */
+const YAML_DEMO = `# Generator: Clash-Config-Gen V2
+# 生成时间: 2026-08-19 12:00:00
+mixed-port: 7893
+allow-lan: false
+mode: rule
+log-level: info
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+
+dns:
+  enable: true
+  listen: 0.0.0.0:7874
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  respect-rules: true
+  proxy-server-nameserver:
+    - 223.5.5.5
+  nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+
+tun:
+  enable: true
+  stack: mixed
+  auto-route: true
+  auto-detect-interface: true
+  dns-hijack:
+    - 127.0.0.1:53
+
+proxies:
+  - name: HK-IPLC-01
+    type: hysteria2
+    server: hk1.example.com
+    port: 29950
+    password: "your_password"
+    sni: www.bing.com
+    skip-cert-verify: true
+    hop-interval: 5-25
+    ports: 29950-30000
+
+  - name: JP-Reality-01
+    type: vless
+    server: jp1.example.com
+    port: 443
+    uuid: 00000000-0000-4000-8000-000000000000
+    flow: xtls-rprx-vision
+    tls: true
+    servername: v1-dy.ixigua.com
+
+rule-providers:
+  DustinWin-ai:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://clash.910501.xyz/ruleset/dustinwin/ai.mrs
+    path: ./ruleset/dustinwin/ai.mrs
+    interval: 604800
+  DustinWin-proxy:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://clash.910501.xyz/ruleset/dustinwin/proxy.mrs
+    path: ./ruleset/dustinwin/proxy.mrs
+    interval: 604800
+  DustinWin-cn:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://clash.910501.xyz/ruleset/dustinwin/cn.mrs
+    path: ./ruleset/dustinwin/cn.mrs
+    interval: 604800
+
+rules:
+  - RULE-SET,DustinWin-applications,DIRECT
+  - RULE-SET,DustinWin-ai,AI Suite
+  - RULE-SET,DustinWin-proxy,Proxy
+  - RULE-SET,DustinWin-cn,Domestic
+  - RULE-SET,DustinWin-gfw,Proxy
+  - RULE-SET,DustinWin-telegramip,Telegram
+  - RULE-SET,DustinWin-netflix,Netflix
+  - DOMAIN-SUFFIX,openai.com,AI Suite
+  - DOMAIN-SUFFIX,github.com,Proxy
+  - DOMAIN-KEYWORD,bilibili,DIRECT
+  - GEOIP,CN,Domestic,no-resolve
+  - MATCH,Proxy`;
+
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+function highlightYamlLine(line) {
+  if (/^\s*#/.test(line)) return `<span class="y-comment">${esc(line)}</span>`;
+  let out = esc(line);
+  // 键值对
+  out = out.replace(/^(\s*)([\w.-]+)(:)(\s|$)/, `$1<span class="y-key">$2</span>$3$4`);
+  // 布尔值
+  out = out.replace(/:\s(true|false)\s*$/, ': <span class="y-bool">$1</span>');
+  // 数字
+  out = out.replace(/:\s(\d+)\s*$/, ': <span class="y-num">$1</span>');
+  // 字符串
+  out = out.replace(/:\s"([^"]*)"\s*$/, ': <span class="y-str">"$1"</span>');
+  // 列表项
+  out = out.replace(/^(\s*)(-)(\s)/, `$1<span class="y-dash">$2</span>$3`);
+  return out;
+}
+
+function renderYaml() {
+  const code = document.getElementById('yamlCode');
+  const lines = YAML_DEMO.split('\n');
+  code.innerHTML = lines.map((l, i) =>
+    `<div class="yaml-line"><span class="ln">${i + 1}</span><span>${highlightYamlLine(l) || ' '}</span></div>`
+  ).join('');
+  document.getElementById('yamlMeta').textContent = `${lines.length} 行 · ${(YAML_DEMO.length / 1024).toFixed(1)} KB`;
+}
+
+/* ============ 生成 demo ============ */
+function generate(btn) {
+  const text = document.getElementById('genBtnText');
+  btn.classList.add('loading');
+  const steps = ['正在校验节点…', '正在检查策略组…', '正在合并规则…', '正在序列化 YAML…'];
+  let i = 0;
+  text.textContent = steps[0];
+  const timer = setInterval(() => {
+    i++;
+    if (i < steps.length) { text.textContent = steps[i]; }
+    else {
+      clearInterval(timer);
+      btn.classList.remove('loading');
+      text.textContent = '生成并检查';
+      document.getElementById('checkResults').classList.add('show');
+      document.getElementById('yamlWrap').classList.add('show');
+      renderYaml();
+      toast('配置检查通过，订阅已保存并立即生效');
+      document.getElementById('yamlWrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, 620);
+}
+
+/* ============ 复制订阅 ============ */
+function copySub() {
+  const url = 'https://clash.910501.xyz/sub/8f3a-c21e';
+  const btn = document.getElementById('subCopyBtn');
+  (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+    .catch(() => {})
+    .finally(() => {
+      btn.classList.add('copied');
+      setTimeout(() => btn.classList.remove('copied'), 1600);
+      toast('订阅链接已复制到剪贴板');
+    });
+}
+
+/* ============ 侧栏折叠 ============ */
+document.getElementById('sidebarToggle').addEventListener('click', () => {
+  document.getElementById('layout').classList.toggle('side-hidden');
+});
+
+/* ============ 底栏延迟模拟 ============ */
+setInterval(() => {
+  const el = document.getElementById('liveLatency');
+  if (el) el.textContent = 38 + Math.round(Math.random() * 14);
+}, 2200);
+</script>
+</body>
+</html>

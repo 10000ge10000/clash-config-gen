@@ -128,9 +128,9 @@ https://clash.910501.xyz/sub/用户自己的随机Token/diagnostics
 
 本服务包含两个独立的 Web 服务：
 - **Streamlit Web UI**：端口 8501，用于管理界面
-- **FastAPI 订阅 API**：端口 8000，用于 `/sub/`、`/ruleset/` 和 `/health` 接口
+- **FastAPI 订阅 API**：端口 8000，用于 `/sub/`、`/ruleset/`、`/v2` 和 `/health` 接口
 
-Nginx 必须将 `/sub/`、`/ruleset/` 和 `/health` 路径转发到 FastAPI 端口（8000），其他路径转发到 Streamlit 端口（8501）。
+Nginx 必须将 `/sub/`、`/ruleset/`、`/v2` 和 `/health` 路径转发到 FastAPI 端口（8000），其他路径转发到 Streamlit 端口（8501）。
 
 ### Nginx 配置示例
 
@@ -172,6 +172,11 @@ server {
     # FastAPI 健康检查
     location /health {
         proxy_pass http://127.0.0.1:8000/health;
+    }
+
+    # V2 界面预览页（静态原型）
+    location /v2 {
+        proxy_pass http://127.0.0.1:8000/v2;
     }
 }
 ```
@@ -305,6 +310,7 @@ src/
   clash_meta_gen.py   # 策略组生成逻辑
 
 docker-compose.yml           # 本仓库开发/自建部署模板
+design/                      # V2 界面静态原型（/v2 路径在线预览）
 .github/workflows/           # GitHub Actions 构建发布流程
 ```
 

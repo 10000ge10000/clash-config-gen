@@ -48,6 +48,18 @@ app = FastAPI(title="Clash-Config-Gen Subscription API", lifespan=lifespan)
 AUTH_COOKIE_NAME = "clash_config_gen_session"
 AUTH_COOKIE_DAYS = 30
 AUTH_ASSET_PATH = Path(__file__).with_name("assets") / "auth-future-city.png"
+V2_PREVIEW_CANDIDATES = [
+    Path(__file__).with_name("design") / "v2-preview.html",
+    Path(__file__).resolve().parent.parent / "design" / "v2-preview.html",
+]
+
+
+@app.get("/v2")
+def v2_preview_page():
+    for candidate in V2_PREVIEW_CANDIDATES:
+        if candidate.is_file():
+            return FileResponse(candidate, media_type="text/html; charset=utf-8")
+    raise HTTPException(status_code=404, detail="V2 预览页不存在")
 
 
 @app.get("/health")

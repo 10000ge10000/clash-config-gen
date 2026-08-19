@@ -38,6 +38,7 @@ RUN set -eux; \
 
 # 复制源码到容器
 COPY src/ .
+COPY design/ design/
 
 # 修复启动脚本换行符并赋予执行权限
 RUN dos2unix start.sh && chmod +x start.sh
