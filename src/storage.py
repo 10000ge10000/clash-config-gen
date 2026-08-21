@@ -2,6 +2,7 @@ import json
 import os
 import secrets
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -36,15 +37,37 @@ def utc_now() -> str:
 def _connect() -> sqlite3.Connection:
     db_path = Path(get_db_path())
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    # timeout/busy_timeout：Streamlit 与 FastAPI 双进程并发写时等待而非立即报 locked。
+    conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
+
+
+@contextmanager
+def _db() -> sqlite3.Connection:
+    """带提交/回滚与显式关闭的连接；语义与 with sqlite3.connect() 一致，且 3.12+ 不会漏关。"""
+    conn = _connect()
+    try:
+        yield conn
+    except BaseException:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# 兼容旧测试对 _connect 的直接调用（只读审计查询常用），裸连接由调用方负责 close。
+_connect_for_tests = _connect
 
 
 def init_db() -> None:
     """初始化数据库表结构；所有服务启动时都可重复调用。"""
-    with _connect() as conn:
+    conn = _connect()
+    try:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -117,6 +140,9 @@ def init_db() -> None:
         _ensure_subscription_config_columns(conn)
         _migrate_default_rule_type(conn)
         _migrate_mihomo_proxy_fields(conn)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def ensure_admin_from_env() -> None:
@@ -130,7 +156,7 @@ def ensure_admin_from_env() -> None:
 
     existing = get_user_by_username(username)
     if existing:
-        with _connect() as conn:
+        with _db() as conn:
             conn.execute(
                 "UPDATE users SET is_admin = 1, is_enabled = 1, updated_at = ? WHERE id = ?",
                 (utc_now(), existing["id"]),
@@ -141,7 +167,7 @@ def ensure_admin_from_env() -> None:
 
 
 def get_user_by_username(username: str) -> sqlite3.Row | None:
-    with _connect() as conn:
+    with _db() as conn:
         return conn.execute(
             "SELECT * FROM users WHERE username = ? COLLATE NOCASE",
             (username.strip(),),
@@ -149,7 +175,7 @@ def get_user_by_username(username: str) -> sqlite3.Row | None:
 
 
 def get_user_by_id(user_id: int) -> sqlite3.Row | None:
-    with _connect() as conn:
+    with _db() as conn:
         return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
@@ -173,7 +199,7 @@ def create_user(username: str, password: str, is_admin: bool = False) -> sqlite3
         raise ValueError("密码至少需要 8 位")
 
     now = utc_now()
-    with _connect() as conn:
+    with _db() as conn:
         cursor = conn.execute(
             """
             INSERT INTO users (username, password_hash, is_admin, is_enabled, created_at, updated_at)
@@ -214,7 +240,7 @@ def record_auth_audit_event(
     """记录不含密码、Cookie 或 Token 的认证审计事件，并限制日志保留期。"""
     now = datetime.now(timezone.utc)
     retention_boundary = now - timedelta(days=90)
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute(
             "DELETE FROM auth_audit_log WHERE created_at < ?",
             (retention_boundary.isoformat(timespec="seconds"),),
@@ -245,7 +271,7 @@ def recent_login_failure_counts(
     boundary = datetime.now(timezone.utc) - timedelta(seconds=max(60, window_seconds))
     boundary_text = boundary.isoformat(timespec="seconds")
     normalized_username = username.strip().lower()[:64]
-    with _connect() as conn:
+    with _db() as conn:
         last_success = conn.execute(
             """
             SELECT MAX(created_at) AS created_at
@@ -282,7 +308,7 @@ def create_auth_session(user_id: int, days: int = 30) -> str:
     token_hash = _hash_auth_token(token)
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=max(1, min(days, 90)))
-    with _connect() as conn:
+    with _db() as conn:
         _delete_expired_auth_sessions(conn, now)
         conn.execute(
             """
@@ -307,7 +333,7 @@ def get_user_by_auth_session(token: str) -> sqlite3.Row | None:
 
     token_hash = _hash_auth_token(token)
     now = datetime.now(timezone.utc)
-    with _connect() as conn:
+    with _db() as conn:
         _delete_expired_auth_sessions(conn, now)
         row = conn.execute(
             """
@@ -332,7 +358,7 @@ def get_user_by_auth_session(token: str) -> sqlite3.Row | None:
 def revoke_auth_session(token: str) -> None:
     if not token:
         return
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute(
             """
             UPDATE auth_sessions
@@ -344,7 +370,7 @@ def revoke_auth_session(token: str) -> None:
 
 
 def revoke_user_auth_sessions(user_id: int) -> None:
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute(
             """
             UPDATE auth_sessions
@@ -356,7 +382,7 @@ def revoke_user_auth_sessions(user_id: int) -> None:
 
 
 def list_users() -> list[sqlite3.Row]:
-    with _connect() as conn:
+    with _db() as conn:
         return conn.execute(
             """
             SELECT u.id, u.username, u.is_admin, u.is_enabled, u.created_at, u.updated_at,
@@ -369,7 +395,7 @@ def list_users() -> list[sqlite3.Row]:
 
 
 def set_user_enabled(user_id: int, enabled: bool) -> None:
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute(
             "UPDATE users SET is_enabled = ?, updated_at = ? WHERE id = ?",
             (int(enabled), utc_now(), user_id),
@@ -387,7 +413,7 @@ def set_user_enabled(user_id: int, enabled: bool) -> None:
 
 def delete_regular_user(user_id: int) -> None:
     """删除普通用户及其订阅配置；管理员账号不允许通过页面误删。"""
-    with _connect() as conn:
+    with _db() as conn:
         user = conn.execute("SELECT id, is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
         if user is None:
             raise ValueError("用户不存在")
@@ -398,7 +424,7 @@ def delete_regular_user(user_id: int) -> None:
 
 def ensure_user_config(user_id: int) -> sqlite3.Row:
     now = utc_now()
-    with _connect() as conn:
+    with _db() as conn:
         row = conn.execute(
             "SELECT * FROM subscription_configs WHERE user_id = ?",
             (user_id,),
@@ -421,7 +447,7 @@ def get_user_config(user_id: int) -> dict[str, Any]:
 
 
 def get_config_by_token(token: str) -> dict[str, Any] | None:
-    with _connect() as conn:
+    with _db() as conn:
         row = conn.execute(
             """
             SELECT c.*, u.username, u.is_enabled
@@ -452,7 +478,7 @@ def save_user_config(
     now = utc_now()
     proxies = normalize_proxies_for_mihomo(proxies)
     final_yaml = _normalize_final_yaml_proxies(final_yaml)
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute(
             """
             UPDATE subscription_configs
@@ -494,6 +520,82 @@ def save_user_config(
         )
 
 
+def save_user_config_atomic(
+    user_id: int,
+    draft: dict[str, Any],
+    final_yaml: str,
+    validation_status: str = "unknown",
+    validation_message: str = "",
+) -> None:
+    """在一个 SQLite 事务中写入 canonical draft 与已发布 YAML。
+
+    V2 的 publish 已经完成规范化和构建，因此这里不重新读取旧草稿，
+    也不把最终 YAML 与另一份防抖保存状态拼接，避免发布竞态。该函数
+    复用既有 subscription_configs 表，不引入迁移或新表。
+    """
+    now = utc_now()
+    proxies = normalize_proxies_for_mihomo(list(draft.get("proxies") or []))
+    global_config = dict(draft.get("global_config") or {})
+    custom_rules = list(draft.get("custom_rules") or [])
+    custom_rule_providers = dict(draft.get("custom_rule_providers") or {})
+    import_sources = list(draft.get("import_sources") or [])
+    selected_rule_type = str(draft.get("selected_rule_type") or DEFAULT_RULE_TYPE)
+    with _db() as conn:
+        # 正常账号在 create_user 时已经有配置行；这里仍在同一事务内兜底
+        # 创建，保证 draft 与 final_yaml 不会落入两个独立事务。
+        existing = conn.execute(
+            "SELECT 1 FROM subscription_configs WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO subscription_configs (user_id, token, selected_rule_type, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, generate_token(), DEFAULT_RULE_TYPE, now, now),
+            )
+        conn.execute(
+            """
+            UPDATE subscription_configs
+            SET proxies_json = ?,
+                global_config_json = ?,
+                custom_rules_json = ?,
+                custom_rule_providers_json = ?,
+                import_sources_json = ?,
+                selected_rule_type = ?,
+                final_yaml = ?,
+                validation_status = ?,
+                validation_message = ?,
+                validated_at = ?,
+                draft_validation_status = ?,
+                draft_validation_message = ?,
+                draft_validated_at = ?,
+                published_at = ?,
+                updated_at = ?
+            WHERE user_id = ?
+            """,
+            (
+                json.dumps(proxies, ensure_ascii=False),
+                json.dumps(global_config, ensure_ascii=False),
+                json.dumps(custom_rules, ensure_ascii=False),
+                json.dumps(custom_rule_providers, ensure_ascii=False),
+                json.dumps(import_sources, ensure_ascii=False),
+                selected_rule_type,
+                final_yaml,
+                validation_status,
+                validation_message[:2000],
+                now if validation_status != "unknown" else "",
+                validation_status,
+                validation_message[:2000],
+                now if validation_status != "unknown" else "",
+                now,
+                now,
+                user_id,
+            ),
+        )
+
+
 def save_user_draft(
     user_id: int,
     proxies: list[dict[str, Any]],
@@ -509,7 +611,7 @@ def save_user_draft(
     ensure_user_config(user_id)
     now = utc_now()
     proxies = normalize_proxies_for_mihomo(proxies)
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute(
             """
             UPDATE subscription_configs
@@ -641,8 +743,9 @@ def _normalize_final_yaml_proxies(final_yaml: str) -> str:
 
 
 def reset_subscription_token(user_id: int) -> str:
+    ensure_user_config(user_id)
     token = generate_token()
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute(
             "UPDATE subscription_configs SET token = ?, updated_at = ? WHERE user_id = ?",
             (token, utc_now(), user_id),
@@ -651,7 +754,7 @@ def reset_subscription_token(user_id: int) -> str:
 
 
 def health_snapshot() -> dict[str, Any]:
-    with _connect() as conn:
+    with _db() as conn:
         user_count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
         config_count = conn.execute("SELECT COUNT(*) AS c FROM subscription_configs").fetchone()["c"]
     return {

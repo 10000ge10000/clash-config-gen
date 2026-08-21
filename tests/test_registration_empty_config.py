@@ -57,7 +57,7 @@ class EmptyConfigRegistrationTest(unittest.TestCase):
         self.assertEqual("", config["final_yaml"])
         self.assertEqual("unknown", config["validation_status"])
         self.assertEqual("", config["published_at"])
-        with storage._connect() as conn:
+        with storage._db() as conn:
             self.assertEqual(
                 1,
                 conn.execute("SELECT COUNT(*) FROM auth_sessions").fetchone()[0],
@@ -76,7 +76,7 @@ class EmptyConfigRegistrationTest(unittest.TestCase):
 
         self.assertEqual(303, response.status_code)
         self.assertNotIn(api.AUTH_COOKIE_NAME, response.cookies)
-        with storage._connect() as conn:
+        with storage._db() as conn:
             self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
             self.assertEqual(
                 0,
@@ -94,7 +94,7 @@ class EmptyConfigRegistrationTest(unittest.TestCase):
 
         self.assertEqual(303, response.status_code)
         self.assertNotIn(api.AUTH_COOKIE_NAME, response.cookies)
-        with storage._connect() as conn:
+        with storage._db() as conn:
             self.assertEqual(1, conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
             self.assertEqual(
                 1,

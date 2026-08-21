@@ -1,16 +1,129 @@
 import base64
+import ipaddress
 import json
 import re
+import socket
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
+import requests
 import yaml
+from requests.adapters import HTTPAdapter
+from urllib3 import connection as urllib3_connection
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
-from normalizer import normalize_proxy
+from normalizer import normalize_proxy, parse_strict_port
 
 
 REQUIRED_PROXY_FIELDS = {"name", "type", "server", "port"}
 SUPPORTED_SHARE_SCHEMES = ("ss://", "trojan://", "vmess://", "vless://", "hysteria2://", "hy2://", "tuic://", "anytls://")
+MAX_REMOTE_SUBSCRIPTION_BYTES = 5 * 1024 * 1024
+SAFE_RULESET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+MAX_EXTERNAL_REDIRECTS = 5
+
+
+class _PinnedHTTPConnection(HTTPConnection):
+    """HTTP connection which never resolves the origin hostname again.
+
+    The request URL and Host header still contain the original hostname; only
+    the TCP destination is replaced with the IP address selected by the SSRF
+    validator.  This closes the DNS-rebinding window between validation and
+    connect().
+    """
+
+    def __init__(self, *args, pinned_ip: str, **kwargs):
+        self._pinned_ip = pinned_ip
+        super().__init__(*args, **kwargs)
+
+    def _new_conn(self):
+        return urllib3_connection.connection.create_connection(
+            (self._pinned_ip, self.port),
+            self.timeout,
+            source_address=self.source_address,
+            socket_options=self.socket_options,
+        )
+
+
+class _PinnedHTTPSConnection(HTTPSConnection):
+    """HTTPS equivalent retaining original hostname for SNI/cert checks."""
+
+    def __init__(self, *args, pinned_ip: str, **kwargs):
+        self._pinned_ip = pinned_ip
+        super().__init__(*args, **kwargs)
+
+    def _new_conn(self):
+        return urllib3_connection.connection.create_connection(
+            (self._pinned_ip, self.port),
+            self.timeout,
+            source_address=self.source_address,
+            socket_options=self.socket_options,
+        )
+
+
+class _PinnedHTTPConnectionPool(HTTPConnectionPool):
+    ConnectionCls = _PinnedHTTPConnection
+
+
+class _PinnedHTTPSConnectionPool(HTTPSConnectionPool):
+    ConnectionCls = _PinnedHTTPSConnection
+
+
+class _PinnedIPHTTPAdapter(HTTPAdapter):
+    """Requests adapter for a single, already-validated destination IP."""
+
+    def __init__(self, hostname: str, pinned_ip: str, **kwargs):
+        self.hostname = hostname
+        self.pinned_ip = pinned_ip
+        super().__init__(**kwargs)
+
+    def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+        # External fetches are intentionally direct.  A proxy can otherwise
+        # make the actual destination differ from the address we validated.
+        if proxies and any(value for key, value in proxies.items() if key in {"http", "https", "all"}):
+            raise ValueError("外部 URL 请求不允许使用代理")
+        parsed = urlparse(request.url)
+        scheme = parsed.scheme.lower()
+        if parsed.hostname != self.hostname or scheme not in {"http", "https"}:
+            raise ValueError("固定地址请求主机不匹配")
+        pool_type = _PinnedHTTPSConnectionPool if scheme == "https" else _PinnedHTTPConnectionPool
+        connection_kwargs = {"pinned_ip": self.pinned_ip}
+        if scheme == "https":
+            # Keep SNI and certificate hostname verification bound to the URL
+            # host while the socket connects to the pinned public IP.
+            connection_kwargs.update(
+                {
+                    "assert_hostname": self.hostname,
+                    "server_hostname": self.hostname,
+                }
+            )
+        return pool_type(
+            host=self.hostname,
+            port=parsed.port or (443 if scheme == "https" else 80),
+            maxsize=1,
+            block=True,
+            **connection_kwargs,
+        )
+
+
+def validate_ruleset_alias(name: str) -> str:
+    alias = (name or "").strip()
+    if alias in {".", ".."} or not SAFE_RULESET_NAME_PATTERN.fullmatch(alias):
+        raise ValueError("规则集别名只能使用 1-64 位字母、数字、点、下划线或短横线")
+    return alias
+
+
+def safe_ruleset_file_path(alias: str, rule_format: str, ruleset_dir: str = "ruleset") -> Path:
+    safe_alias = validate_ruleset_alias(alias)
+    safe_format = validate_ruleset_alias(rule_format)
+    base_dir = Path(ruleset_dir).resolve()
+    target_path = (base_dir / f"{safe_alias}.{safe_format}").resolve()
+    if base_dir != target_path.parent:
+        raise ValueError("规则集文件路径越界")
+    return target_path
 
 
 def parse_proxy_yaml(raw_text: str) -> tuple[list[dict[str, Any]], list[str]]:
@@ -108,14 +221,9 @@ def validate_proxies(proxies: list[Any]) -> tuple[list[dict[str, Any]], list[str
             continue
 
         try:
-            port = int(proxy["port"])
-        except Exception:
-            warnings.append(f"节点 {proxy['name']} 的端口不是数字，已跳过")
-            continue
-
-        if not 1 <= port <= 65535:
-            warnings.append(f"节点 {proxy['name']} 的端口超出 1-65535，已跳过")
-            continue
+            port = parse_strict_port(proxy["port"])
+        except ValueError as exc:
+            raise ValueError(f"节点 {proxy.get('name', index)}：{exc}") from exc
 
         normalized_result = normalize_proxy(proxy)
         normalized = normalized_result.proxy
@@ -356,7 +464,7 @@ def _parse_ss(parsed, original: str) -> dict[str, Any]:
         "name": f"ss-{server}",
         "type": "ss",
         "server": server,
-        "port": int(port),
+        "port": parse_strict_port(port),
         "cipher": method,
         "password": password,
         "udp": True,
@@ -387,7 +495,7 @@ def _parse_vmess(share_link: str) -> dict[str, Any]:
         "name": info.get("ps") or f"vmess-{info.get('add', 'server')}",
         "type": "vmess",
         "server": info.get("add"),
-        "port": int(info.get("port", 443)),
+        "port": parse_strict_port(info.get("port", 443)),
         "uuid": info.get("id"),
         "alterId": int(info.get("aid", 0)),
         "cipher": info.get("scy") or info.get("security") or "auto",
@@ -535,9 +643,162 @@ def _split_host_port(hostport: str, default_port: int) -> tuple[str, int]:
     if ":" not in hostport:
         return hostport, default_port
     host, port = hostport.rsplit(":", 1)
-    return host, int(port)
+    return host, parse_strict_port(port)
 
 
 def _pad_base64(value: str) -> bytes:
     cleaned = value.encode("utf-8")
     return cleaned + b"=" * (-len(cleaned) % 4)
+
+
+def _resolve_public_external_url(url: str) -> tuple[str, tuple[str, ...]]:
+    """Validate an external URL and return the exact public IPs to try.
+
+    The returned addresses are part of the request contract: callers must use
+    the pinned transport below instead of resolving the hostname a second time.
+    """
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("只支持 http/https URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("URL 不允许包含用户认证信息")
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("URL 端口无效") from exc
+
+    host = parsed.hostname
+    try:
+        addresses = {
+            info[4][0]
+            for info in socket.getaddrinfo(
+                host,
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+        }
+    except OSError as exc:
+        raise ValueError(f"无法解析 URL 主机: {host}") from exc
+
+    public_addresses: list[str] = []
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if (
+            not ip.is_global
+            or
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError("URL 解析到内网、本机或保留地址，已拒绝服务端访问")
+        public_addresses.append(str(ip))
+    if not public_addresses:
+        raise ValueError("URL 没有可连接的公开地址")
+    return parsed.geturl(), tuple(sorted(set(public_addresses)))
+
+
+def validate_external_url(url: str) -> str:
+    """限制服务端主动访问目标，避免公开注册场景下被用来探测内网。"""
+    safe_url, _addresses = _resolve_public_external_url(url)
+    return safe_url
+
+
+def _external_host_header(parsed) -> str:
+    host = str(parsed.hostname or "")
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = parsed.port
+    default_port = 443 if parsed.scheme.lower() == "https" else 80
+    if port and port != default_port:
+        host = f"{host}:{port}"
+    return host
+
+
+def fetch_text_from_external_url(url: str, timeout: int = 15) -> tuple[str, str]:
+    current_url = (url or "").strip()
+    session = requests.Session()
+    # Do not inherit HTTP(S)_PROXY/ALL_PROXY from the host.  The adapter also
+    # rejects explicit proxies so the validated IP is the actual destination.
+    session.trust_env = False
+    session.proxies = {}
+    try:
+        for redirect_index in range(MAX_EXTERNAL_REDIRECTS + 1):
+            safe_url, addresses = _resolve_public_external_url(current_url)
+            parsed = urlparse(safe_url)
+            response = None
+            last_error: Exception | None = None
+            for address in addresses:
+                adapter = _PinnedIPHTTPAdapter(parsed.hostname or "", address)
+                session.mount(f"{parsed.scheme.lower()}://", adapter)
+                try:
+                    response = session.get(
+                        safe_url,
+                        headers={"Host": _external_host_header(parsed)},
+                        timeout=timeout,
+                        stream=True,
+                        allow_redirects=False,
+                    )
+                    break
+                except requests.RequestException as exc:
+                    last_error = exc
+                    response = None
+            if response is None:
+                raise ValueError("远程 URL 连接失败") from last_error
+
+            if 300 <= response.status_code < 400:
+                try:
+                    location = response.headers.get("location")
+                finally:
+                    response.close()
+                if not location:
+                    raise ValueError("远程 URL 重定向缺少目标地址")
+                if redirect_index >= MAX_EXTERNAL_REDIRECTS:
+                    raise ValueError("远程 URL 重定向次数过多")
+                # The next loop validates and pins the redirect destination;
+                # no redirect is followed implicitly by requests.
+                current_url = urljoin(safe_url, location)
+                continue
+
+            try:
+                response.raise_for_status()
+                content_type = response.headers.get("content-type", "")
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in response.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > MAX_REMOTE_SUBSCRIPTION_BYTES:
+                        raise ValueError("远程订阅内容超过 5MB，已停止下载")
+                    chunks.append(chunk)
+                return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace"), content_type
+            finally:
+                response.close()
+        raise ValueError("远程 URL 重定向次数过多")
+    finally:
+        session.close()
+
+
+def tag_import_source(source_name: str, source_type: str, proxies: list[dict]) -> tuple[list[dict], dict]:
+    """给导入节点打来源标签，并返回对应的 import_sources 条目。"""
+    source_id = uuid.uuid4().hex
+    imported_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    clean_name = (source_name or "").strip() or source_type
+    tagged_proxies = []
+    for proxy in proxies:
+        tagged = dict(proxy)
+        tagged["_source_id"] = source_id
+        tagged["_source_name"] = clean_name
+        tagged["_origin_name"] = str(proxy.get("name", ""))
+        tagged_proxies.append(tagged)
+    source_dict = {
+        "id": source_id,
+        "name": clean_name,
+        "type": source_type,
+        "node_count": len(tagged_proxies),
+        "imported_at": imported_at,
+    }
+    return tagged_proxies, source_dict

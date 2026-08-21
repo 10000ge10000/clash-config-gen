@@ -19,7 +19,8 @@ class StorageMigrationTest(unittest.TestCase):
             os.environ["APP_DB_PATH"] = db_path
             try:
                 storage.init_db()
-                with sqlite3.connect(db_path) as conn:
+                conn = sqlite3.connect(db_path)
+                try:
                     conn.execute(
                         """
                         INSERT INTO users
@@ -34,6 +35,9 @@ class StorageMigrationTest(unittest.TestCase):
                         VALUES (1, 'token', 'published: true', 'now', 'now')
                         """
                     )
+                finally:
+                    conn.commit()
+                    conn.close()
 
                 proxies = [
                     {
@@ -86,7 +90,8 @@ class StorageMigrationTest(unittest.TestCase):
             os.environ["APP_DB_PATH"] = db_path
             try:
                 storage.init_db()
-                with sqlite3.connect(db_path) as conn:
+                conn = sqlite3.connect(db_path)
+                try:
                     conn.execute(
                         """
                         INSERT INTO users (id, username, password_hash, is_admin, is_enabled, created_at, updated_at)
@@ -100,6 +105,9 @@ class StorageMigrationTest(unittest.TestCase):
                         VALUES (1, 'token', '自定义规则', '', '[]', '{}', 'now', 'now')
                         """
                     )
+                finally:
+                    conn.commit()
+                    conn.close()
 
                 storage.init_db()
 
@@ -138,7 +146,8 @@ class StorageMigrationTest(unittest.TestCase):
                     }
                 )
 
-                with sqlite3.connect(db_path) as conn:
+                conn = sqlite3.connect(db_path)
+                try:
                     conn.execute(
                         """
                         INSERT INTO users (id, username, password_hash, is_admin, is_enabled, created_at, updated_at)
@@ -152,13 +161,19 @@ class StorageMigrationTest(unittest.TestCase):
                         """,
                         (json.dumps(dirty_proxies, ensure_ascii=False), dirty_yaml),
                     )
+                finally:
+                    conn.commit()
+                    conn.close()
 
                 storage.init_db()
 
-                with sqlite3.connect(db_path) as conn:
+                conn = sqlite3.connect(db_path)
+                try:
                     row = conn.execute(
                         "SELECT proxies_json, final_yaml FROM subscription_configs WHERE user_id = 1"
                     ).fetchone()
+                finally:
+                    conn.close()
 
                 migrated_proxies = json.loads(row[0])
                 migrated_yaml = yaml.safe_load(row[1])

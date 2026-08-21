@@ -32,7 +32,7 @@ class AuthSessionTest(unittest.TestCase):
         user = storage.create_user("hashed-user", "password123")
         token = storage.create_auth_session(int(user["id"]))
 
-        with storage._connect() as conn:
+        with storage._db() as conn:
             row = conn.execute(
                 "SELECT token_hash FROM auth_sessions WHERE user_id = ?",
                 (int(user["id"]),),

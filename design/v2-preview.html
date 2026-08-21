@@ -692,6 +692,9 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
   color: var(--text); font-size: 13px; font-family: var(--font);
   outline: none; transition: border-color .25s, box-shadow .25s;
 }
+/* 复选框不能继承整行宽与大内边距：checkbox 的可勾选区域只有自身小方框，
+   拉宽后点击文字附近区域不会切换状态。 */
+.field input[type="checkbox"] { width: 16px; height: 16px; padding: 0; flex: none; cursor: pointer; accent-color: #22d3ee; }
 .field select { cursor: pointer; appearance: none; -webkit-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238b98ad' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 13px center;
@@ -746,15 +749,6 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 .generate-hero { text-align: center; padding: 34px 20px 26px; }
 .generate-hero h3 { font-size: 20px; font-weight: 750; margin-bottom: 8px; }
 .generate-hero p { color: var(--text-dim); font-size: 13.5px; margin-bottom: 24px; }
-
-#generateBtn .btn-scan {
-  position: absolute; inset: 0;
-  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.5) 50%, transparent 70%);
-  transform: translateX(-110%);
-}
-#generateBtn.loading .btn-scan { animation: btnScan 1.1s ease-in-out infinite; }
-@keyframes btnScan { to { transform: translateX(110%); } }
-#generateBtn.loading { pointer-events: none; opacity: .85; }
 
 .check-results { display: none; margin-top: 20px; }
 .check-results.show { display: block; }
@@ -897,14 +891,6 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
   box-shadow: 0 0 10px rgba(34,211,238,.8);
 }
 
-.mini-input {
-  width: 90px; padding: 6px 10px; border-radius: 8px;
-  background: var(--input-bg); border: 1px solid var(--border);
-  color: var(--text); font-family: var(--mono); font-size: 12px; outline: none;
-  transition: border-color .25s; text-align: right;
-}
-.mini-input:focus { border-color: rgba(34,211,238,.5); }
-
 .sub-link-card {
   display: flex; align-items: center; gap: 9px;
   padding: 11px 13px; border-radius: 11px;
@@ -976,1126 +962,2967 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
   .sub-status .st-text { display: none; }
   .stats { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ============ V2 core controls ============ */
+.wnav-item { appearance: none; font-family: var(--font); }
+.wnav-item:focus-visible, .btn:focus-visible, .chip-btn:focus-visible, .pill:focus-visible,
+.method-card:focus-visible, .login-tab:focus-visible, .preset-btn:focus-visible,
+.copy-btn:focus-visible, .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.empty-state, .loading-state, .error-state {
+  width: 100%; padding: 24px 14px; text-align: center; color: var(--text-faint);
+  border: 1px dashed var(--border); border-radius: 12px; font-size: 12.5px; line-height: 1.7;
+}
+.error-state { color: var(--danger); border-color: rgba(248,113,113,.35); background: rgba(248,113,113,.05); }
+.node-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-left:auto; }
+.node-search { min-width:160px; max-width:240px; padding:8px 10px; border-radius:9px; background:var(--input-bg); border:1px solid var(--border); color:var(--text); font:12px var(--font); outline:none; }
+.node-search:focus { border-color:rgba(34,211,238,.55); box-shadow:0 0 0 3px rgba(34,211,238,.1); }
+.node-card[data-hidden="true"] { display:none; }
+.node-actions { opacity:1; transform:none; flex-wrap:wrap; }
+.node-card .node-meta { font-size:10.5px; color:var(--text-faint); margin-top:7px; min-height:16px; }
+.schema-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 14px; }
+.schema-grid .field { min-width:0; }
+.schema-grid textarea, .schema-grid input, .schema-grid select { max-width:100%; }
+.schema-field-hidden { display:none !important; }
+.check-empty { display:block; color:var(--text-faint); text-align:center; padding:18px; font-size:12px; }
+.validation-meta { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-top:16px; }
+.validation-meta .meta-cell { padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:rgba(148,163,184,.05); }
+.validation-meta .meta-label { display:block; font-size:10px; color:var(--text-faint); margin-bottom:4px; }
+.validation-meta .meta-value { font:700 14px var(--mono); color:var(--text); }
+.node-form-panel { margin:0 0 18px; }
+.node-form-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; }
+.node-form-head h3 { font-size:14px; }
+.node-form-actions { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; margin-top:12px; }
+.raw-editor { width:100%; min-height:280px; resize:vertical; padding:14px; border-radius:11px; background:var(--input-bg); border:1px solid var(--border); color:var(--textarea-text); font:12px/1.65 var(--mono); outline:none; }
+.raw-editor:focus { border-color:rgba(34,211,238,.55); box-shadow:0 0 0 3px rgba(34,211,238,.1); }
+.raw-help { font-size:11px; color:var(--text-faint); margin-top:7px; line-height:1.6; }
+.phase2-empty { color:var(--text-faint); font-size:12px; line-height:1.7; padding:10px 0; }
+.schema-note { color:var(--text-faint); font-size:11px; line-height:1.6; margin-top:8px; }
+.publish-block { margin-top:18px; padding-top:16px; border-top:1px dashed var(--border); }
+.publish-diff { display:none; margin-top:12px; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; padding:12px; border-radius:10px; background:var(--code-bg); border:1px solid var(--border); color:var(--text-dim); font:11px/1.6 var(--mono); }
+.publish-diff.show { display:block; }
+.status-note { font-size:11.5px; color:var(--text-faint); line-height:1.6; }
+.phase2-section { margin-top:16px; padding-top:14px; border-top:1px dashed var(--border); }
+.phase2-section:first-child { margin-top:0; padding-top:0; border-top:0; }
+.phase2-section-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+.phase2-section-title { font-size:13px; font-weight:700; color:var(--text); }
+.phase2-section-hint { font-size:10.5px; color:var(--text-faint); }
+.target-editor, .ruleset-list, .admin-list { display:flex; flex-direction:column; gap:8px; }
+.target-row, .ruleset-row, .admin-row { display:flex; align-items:center; gap:8px; min-width:0; padding:9px 10px; border:1px solid var(--border); border-radius:10px; background:rgba(148,163,184,.035); }
+.target-row > span:first-child, .ruleset-row-main, .admin-row-main { min-width:0; flex:1; }
+.target-name, .ruleset-name, .admin-name { color:var(--text); font-size:12px; font-weight:600; overflow-wrap:anywhere; }
+.target-default, .ruleset-meta, .admin-meta { color:var(--text-faint); font-size:10.5px; line-height:1.5; overflow-wrap:anywhere; }
+.target-row select { width:clamp(130px, 42%, 240px); min-width:0; }
+.ruleset-row { align-items:flex-start; }
+.ruleset-row-actions, .admin-row-actions { display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end; }
+.ruleset-form, .admin-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; }
+.ruleset-form .field, .admin-form .field { min-width:0; }
+.ruleset-form .field-wide, .admin-form .field-wide { grid-column:1 / -1; }
+.ruleset-mode { display:flex; gap:7px; margin-bottom:10px; flex-wrap:wrap; }
+.ruleset-mode button.active { color:var(--on-accent); background:var(--grad-main); border-color:transparent; }
+.ruleset-actions, .admin-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+.ruleset-message, .admin-message { margin-top:9px; }
+.admin-confirm { margin-top:8px; padding:10px; border:1px solid rgba(248,113,113,.35); border-radius:10px; background:rgba(248,113,113,.06); color:var(--text-dim); font-size:11px; }
+.admin-result { margin-top:8px; padding:9px 10px; border-radius:9px; border:1px solid var(--border); background:var(--code-bg); color:var(--text-dim); font:11px/1.55 var(--mono); white-space:pre-wrap; word-break:break-word; }
+.schema-group { margin:0 0 12px; padding:0; border:1px solid var(--border); border-radius:11px; overflow:hidden; }
+.schema-group summary { cursor:pointer; list-style:none; padding:11px 13px; color:var(--text); font-size:12px; font-weight:700; background:rgba(148,163,184,.035); }
+.schema-group summary::-webkit-details-marker { display:none; }
+.schema-group summary::after { content:"⌄"; float:right; color:var(--text-faint); }
+.schema-group[open] summary::after { content:"⌃"; }
+.schema-group-grid { padding:0 13px 8px; }
+.schema-group-grid .field { min-width:0; }
+.ruleset-file { max-width:100%; color:var(--text-dim); font-size:11px; }
+.chip-btn[disabled], .btn[disabled], .preset-btn[disabled], .mode-switch button[disabled] { cursor:not-allowed; opacity:.5; }
+@media (max-width: 720px) {
+  .schema-grid { grid-template-columns:1fr; }
+  .ruleset-form, .admin-form { grid-template-columns:1fr; }
+  .ruleset-form .field-wide, .admin-form .field-wide { grid-column:auto; }
+  .node-toolbar { width:100%; margin-left:0; }
+  .node-search { flex:1; max-width:none; min-width:0; }
+  .node-actions { opacity:1; }
+  .statusbar { gap:10px; padding:0 10px; overflow-x:auto; }
+  .statusbar .sb-item:nth-child(n+2):nth-child(-n+4) { display:none; }
+  .toast-wrap { left:10px; right:10px; top:72px; }
+  .toast { max-width:none; }
+}
+@media (max-width: 390px) {
+  .topbar { padding:0 10px; gap:8px; }
+  .logo-text { display:none; }
+  .workspace-nav { margin-left:0; gap:2px; }
+  .wnav-item { padding:7px 8px; }
+  .topbar-right { gap:6px; }
+  .btn-icon, .avatar { width:30px; height:30px; }
+  .layout { padding-left:10px; padding-right:10px; gap:10px; }
+  .hero { padding-left:0; padding-right:0; }
+  .hero h1 { font-size:25px; }
+  .panel { padding:16px; border-radius:14px; }
+  .stats { gap:8px; }
+  .stat-card { padding:12px; }
+  .stat-value { font-size:21px; }
+  .step-banner { padding:20px 16px; }
+  .method-card { padding:13px; }
+  .paste-zone textarea { min-height:190px; padding:12px; }
+  .btn-lg { padding:12px 16px; }
+  .target-row, .ruleset-row, .admin-row { align-items:flex-start; flex-wrap:wrap; }
+  .target-row select { width:100%; }
+  .ruleset-row-actions, .admin-row-actions { width:100%; justify-content:flex-start; }
+  .schema-group-grid { padding-left:10px; padding-right:10px; }
+}
+
+/* ============ 用户下拉菜单 ============ */
+.user-wrap { position: relative; }
+.user-dropdown {
+  position: absolute; top: 40px; right: 0; min-width: 160px;
+  background: var(--toast-bg); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--toast-shadow);
+  padding: 6px; display: none; z-index: 300;
+  flex-direction: column; gap: 2px;
+}
+.user-dropdown.open { display: flex; }
+.user-dropdown .ud-name { font-size: 12px; color: var(--text-dim); padding: 6px 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.user-dropdown button {
+  display: block; width: 100%; text-align: left; padding: 7px 8px; font-size: 13px;
+  background: none; border: none; border-radius: 6px; color: var(--text); cursor: pointer;
+}
+.user-dropdown button:hover { background: rgba(8,145,178,.1); }
+.user-dropdown button.danger { color: var(--danger); }
+.user-dropdown button.danger:hover { background: rgba(220,38,38,.1); }
+
+/* ============ 登录 / 注册 Overlay ============ */
+body.login-overlay { overflow: hidden; }
+body.login-overlay .layout, body.login-overlay header, body.login-overlay footer { filter: blur(3px); pointer-events: none; }
+.login-overlay-wrap {
+  position: fixed; inset: 0; z-index: 500; display: none;
+  align-items: center; justify-content: center; padding: 20px;
+  background: rgba(7, 11, 20, 0.55); backdrop-filter: blur(6px);
+}
+.login-overlay-wrap.active { display: flex; }
+.login-card {
+  width: 380px; max-width: 100%;
+  background: var(--toast-bg); border: 1px solid var(--border);
+  border-radius: 16px; box-shadow: var(--toast-shadow);
+  padding: 28px 30px;
+}
+.login-brand { text-align: center; margin-bottom: 18px; }
+.login-brand h2 { font-size: 20px; margin: 0 0 6px; }
+.login-brand p { font-size: 12px; color: var(--text-faint); margin: 0; }
+.login-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.login-tab {
+  flex: 1; padding: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+  background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim);
+}
+.login-tab.active { background: var(--grad-main); color: var(--on-accent); border-color: transparent; }
+.login-pane { display: none; }
+.login-pane.active { display: block; }
+.f-label { display: block; font-size: 12px; color: var(--text-dim); margin: 10px 0 4px; }
+.f-input {
+  width: 100%; padding: 9px 11px; font-size: 14px;
+  background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+  outline: none; box-sizing: border-box;
+}
+.f-input:focus { border-color: var(--border-glow); }
+.f-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin: 12px 0; cursor: pointer; }
+.f-btn {
+  width: 100%; padding: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+  background: var(--grad-main); color: var(--on-accent); border: none; border-radius: 8px;
+}
+.f-btn:hover { opacity: .92; }
 </style>
 </head>
+
 <body>
-
-<!-- 背景层 -->
-<div class="bg-layer">
-  <div class="bg-grid"></div>
-  <div class="glow-orb orb-1"></div>
-  <div class="glow-orb orb-2"></div>
-  <div class="glow-orb orb-3"></div>
-  <div class="scanline"></div>
-  <div class="noise"></div>
-</div>
-
-<!-- 顶栏 -->
-<header class="topbar">
-  <div class="logo">
-    <div class="logo-mark">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-        <path d="M12 2L21 7v10l-9 5-9-5V7l9-5z" stroke="#051018" stroke-width="2" stroke-linejoin="round"/>
-        <path d="M12 22V12M12 12L3 7M12 12l9-5" stroke="#051018" stroke-width="1.6" stroke-linejoin="round"/>
-      </svg>
-    </div>
-    <div class="logo-text">OpenClash Config Gen<em>V2</em></div>
+  <div class="bg-layer">
+    <div class="bg-grid"></div>
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
+    <div class="scanline"></div>
+    <div class="noise"></div>
   </div>
 
-  <nav class="workspace-nav" id="workspaceNav">
-    <div class="wnav-item active" data-step="1">
-      <span class="wnum">01</span><span class="wlabel">导入节点</span>
-    </div>
-    <div class="wnav-item" data-step="2">
-      <span class="wnum">02</span><span class="wlabel">节点管理</span>
-    </div>
-    <div class="wnav-item" data-step="3">
-      <span class="wnum">03</span><span class="wlabel">分流规则</span>
-    </div>
-    <div class="wnav-item" data-step="4">
-      <span class="wnum">04</span><span class="wlabel">生成与检查</span>
-    </div>
-  </nav>
-
-  <div class="topbar-right">
-    <div class="sub-status">
-      <span class="dot"></span>
-      <span class="st-text">订阅在线</span>
-    </div>
-    <div class="btn-icon" id="themeToggle" title="切换浅色 / 暗色主题">
-      <svg class="ico-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-        <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
-      </svg>
-      <svg class="ico-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
-      </svg>
-    </div>
-    <div class="btn-icon" id="sidebarToggle" title="折叠设置面板">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-        <path d="M4 6h16M4 12h10M4 18h16"/>
-      </svg>
-    </div>
-    <div class="avatar" title="admin">A</div>
-  </div>
-</header>
-
-<div class="layout" id="layout">
-  <div class="main-col">
-
-    <!-- Hero -->
-    <section class="hero">
-      <div class="hero-eyebrow">Subscription Workspace</div>
-      <h1>从节点导入到订阅生效，<span class="grad">一套流程直接闭环</span></h1>
-      <p>面向 Docker 自部署、OpenClash 软路由与 mihomo 客户端的订阅生成工具。导入节点、编辑规则、生成订阅、校验 YAML —— 全程用户隔离，Token 订阅即时生效。</p>
-
-      <div class="stats">
-        <div class="stat-card" style="--edge-c: rgba(34,211,238,.6)">
-          <div class="stat-label">节点</div>
-          <div class="stat-value"><span data-count="6">0</span></div>
-          <div class="stat-trend">▲ 2 个新增</div>
-        </div>
-        <div class="stat-card" style="--edge-c: rgba(99,102,241,.6)">
-          <div class="stat-label">自定义规则</div>
-          <div class="stat-value"><span data-count="8">0</span></div>
-          <div class="stat-trend">▲ 规则集 3 个</div>
-        </div>
-        <div class="stat-card" style="--edge-c: rgba(167,139,250,.6)">
-          <div class="stat-label">策略组</div>
-          <div class="stat-value"><span data-count="16">0</span></div>
-          <div class="stat-trend">DustinWin 预设</div>
-        </div>
-        <div class="stat-card" style="--edge-c: rgba(52,211,153,.6)">
-          <div class="stat-label">订阅状态</div>
-          <div class="stat-value" style="font-size:20px; padding-top:5px;">在线</div>
-          <div class="stat-trend"><span class="dot" style="margin-right:2px;"></span> 已同步 · 3 分钟前</div>
-        </div>
+  <header class="topbar">
+    <div class="logo">
+      <div class="logo-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L21 7v10l-9 5-9-5V7l9-5z" stroke="#051018" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M12 22V12M12 12L3 7M12 12l9-5" stroke="#051018" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
       </div>
-    </section>
-
-    <!-- ========== Step 1 导入 ========== -->
-    <section class="step-section active" id="step1">
-      <div class="step-banner" style="--bc: 34,211,238;">
-        <div class="sb-ico">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-          </svg>
-        </div>
-        <div class="sb-body">
-          <div class="sb-eyebrow">Step 01 · Import</div>
-          <h2 class="sb-title">导入节点</h2>
-          <p class="sb-desc">智能 YAML · 订阅链接 · 分享链接，统一解析管线，重复节点自动跳过</p>
-        </div>
-        <div class="sb-num">01</div>
+      <div class="logo-text">OpenClash Config Gen<em>V2</em></div>
+    </div>
+    <nav class="workspace-nav" id="workspaceNav" role="tablist" aria-label="配置工作流">
+      <button class="wnav-item active" id="step-tab-1" type="button" role="tab" data-step="1" aria-controls="step1" aria-selected="true" tabindex="0"><span class="wnum">01</span><span class="wlabel">导入节点</span></button>
+      <button class="wnav-item" id="step-tab-2" type="button" role="tab" data-step="2" aria-controls="step2" aria-selected="false" tabindex="-1"><span class="wnum">02</span><span class="wlabel">节点管理</span></button>
+      <button class="wnav-item" id="step-tab-3" type="button" role="tab" data-step="3" aria-controls="step3" aria-selected="false" tabindex="-1"><span class="wnum">03</span><span class="wlabel">规则与全局</span></button>
+      <button class="wnav-item" id="step-tab-4" type="button" role="tab" data-step="4" aria-controls="step4" aria-selected="false" tabindex="-1"><span class="wnum">04</span><span class="wlabel">校验与发布</span></button>
+    </nav>
+    <div class="topbar-right">
+      <div class="sub-status" aria-live="polite"><span class="dot"></span><span class="st-text" id="serviceStatus">正在加载</span></div>
+      <button class="btn-icon" id="themeToggle" type="button" title="切换浅色 / 暗色主题" aria-label="切换浅色 / 暗色主题">
+        <svg class="ico-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="ico-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      </button>
+      <button class="btn-icon" id="sidebarToggle" type="button" title="折叠设置面板" aria-label="折叠设置面板">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h16"/></svg>
+      </button>
+      <div class="user-wrap" id="userMenu">
+        <button class="avatar" id="userAvatar" type="button" title="未登录">U</button>
+        <div class="user-dropdown" id="userDropdown"></div>
       </div>
+    </div>
+  </header>
 
-      <div class="panel stagger">
-        <div class="panel-head">
-          <div class="panel-title">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-            </svg>
-            智能导入
-          </div>
-          <span class="panel-hint">YAML · 订阅链接 · 分享链接，统一解析管线</span>
+  <div class="layout" id="layout">
+    <main class="main-col">
+      <section class="hero">
+        <div class="hero-eyebrow">Subscription Workspace</div>
+        <h1>从节点导入到订阅生效，<span class="grad">一套流程直接闭环</span></h1>
+        <p>面向 Docker 自部署、OpenClash 软路由与 mihomo 客户端的订阅生成工具。导入节点、编辑规则、生成订阅、校验 YAML —— 全程用户隔离，Token 订阅即时生效。</p>
+        <div class="stats">
+          <div class="stat-card" style="--edge-c:rgba(34,211,238,.6)"><div class="stat-label">节点</div><div class="stat-value"><span id="nodeCount">—</span></div><div class="stat-trend" id="nodeTrend">后端草稿数据</div></div>
+          <div class="stat-card" style="--edge-c:rgba(99,102,241,.6)"><div class="stat-label">规则</div><div class="stat-value"><span id="ruleCountStat">—</span></div><div class="stat-trend" id="ruleTrend">等待后端统计</div></div>
+          <div class="stat-card" style="--edge-c:rgba(167,139,250,.6)"><div class="stat-label">策略组</div><div class="stat-value"><span id="groupCount">—</span></div><div class="stat-trend" id="groupTrend">等待后端统计</div></div>
+          <div class="stat-card" style="--edge-c:rgba(52,211,153,.6)"><div class="stat-label">订阅状态</div><div class="stat-value" style="font-size:20px;padding-top:5px" id="subscriptionStatus">—</div><div class="stat-trend" id="subscriptionMeta">等待后端状态</div></div>
         </div>
+      </section>
 
-        <div class="method-cards">
-          <div class="method-card active" data-method="yaml">
-            <div class="m-icon">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/>
-              </svg>
-            </div>
-            <h4>智能 YAML 导入</h4>
-            <p>完整 config.yaml、proxies 片段、onekey 输出，自动修复常见缩进错误</p>
-          </div>
-          <div class="method-card" data-method="url">
-            <div class="m-icon">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
-              </svg>
-            </div>
-            <h4>订阅链接</h4>
-            <p>远程拉取订阅内容，Base64 自动解码，进入统一校验流程</p>
-          </div>
-          <div class="method-card" data-method="share">
-            <div class="m-icon">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                <path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><path d="M16 6l-4-4-4 4M12 2v13"/>
-              </svg>
-            </div>
-            <h4>分享链接</h4>
-            <p>ss / vless / vmess / trojan / hy2 / tuic / anytls 单条 URI 批量粘贴</p>
-          </div>
-        </div>
-
-        <div class="paste-zone">
-          <textarea spellcheck="false" placeholder="- name: "HK-IPLC-01"
-  type: hysteria2
-  server: hk1.example.com
-  port: 29950
-  password: your-password
-  ...">- name: "HK-IPLC-01"
-  type: hysteria2
-  server: hk1.example.com
-  port: 29950
-  password: "your_password"
-  sni: www.bing.com
-  skip-cert-verify: true
-  up: 50 Mbps
-  down: 100 Mbps
-  hop-interval: 5-25
-  ports: 29950-30000
-
-- name: "JP-Reality-01"
-  type: vless
-  server: jp1.example.com
-  port: 443
-  uuid: 00000000-0000-4000-8000-000000000000
-  flow: xtls-rprx-vision
-  tls: true
-  servername: v1-dy.ixigua.com
-  reality-opts:
-    public-key: xxxxxxxx
-    short-id: "01"</textarea>
-        </div>
-
-        <div style="display:flex; gap:10px; margin-top:16px; align-items:center;">
-          <button class="btn btn-primary btn-lg" data-ripple onclick="importNodes(this)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-            导入节点
-          </button>
-          <button class="btn btn-ghost" onclick="toast('已清空粘贴区', 'info')">清空</button>
-          <span style="font-size:12px; color:var(--text-faint); margin-left:auto; font-family:var(--mono);">
-            已识别 <b style="color:var(--accent)">2</b> 个节点 · 重复自动跳过
-          </span>
-        </div>
-      </div>
-    </section>
-
-    <!-- ========== Step 2 节点管理 ========== -->
-    <section class="step-section" id="step2">
-      <div class="step-banner" style="--bc: 99,102,241;">
-        <div class="sb-ico">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/><path d="M6 6h.01M6 18h.01"/>
-          </svg>
-        </div>
-        <div class="sb-body">
-          <div class="sb-eyebrow">Step 02 · Nodes</div>
-          <h2 class="sb-title">节点管理</h2>
-          <p class="sb-desc">按协议筛选、排序与编辑节点，悬停卡片查看延迟与快捷操作</p>
-        </div>
-        <div class="sb-num">02</div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <div class="panel-title">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-              <rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/><path d="M6 6h.01M6 18h.01"/>
-            </svg>
-            节点管理
-          </div>
-          <span class="panel-hint">悬停卡片可排序 / 删除 / 编辑</span>
-        </div>
-
-        <div class="add-node-bar">
-          <div class="protocol-pills" id="protocolPills">
-            <span class="pill active">hysteria2</span>
-            <span class="pill">vless</span>
-            <span class="pill">vmess</span>
-            <span class="pill">ss</span>
-            <span class="pill">trojan</span>
-            <span class="pill">tuic</span>
-            <span class="pill">anytls</span>
-          </div>
-          <button class="btn btn-primary" data-ripple style="margin-left:auto;" onclick="toast('V2 原型：表单联动由表单区展开', 'info')">
-            + 手动添加节点
-          </button>
-        </div>
-
-        <div class="node-grid" id="nodeGrid">
-          <div class="node-card">
-            <div class="node-top"><span class="node-name">HK-IPLC-01</span><span class="badge b-hy2">HY2</span></div>
-            <div class="node-server">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-              hk1.example.com:29950
-            </div>
-            <div class="latency-row lat-good">
-              <div class="latency-bar"><div class="latency-fill" style="width:24%"></div></div>
-              <span class="latency-num">42 ms</span>
-            </div>
-            <div class="node-actions">
-              <button class="chip-btn">上移</button>
-              <button class="chip-btn">下移</button>
-              <button class="chip-btn">编辑</button>
-              <button class="chip-btn danger">删除</button>
-            </div>
-          </div>
-
-          <div class="node-card">
-            <div class="node-top"><span class="node-name">JP-Reality-01</span><span class="badge b-vless">VLESS</span></div>
-            <div class="node-server">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-              jp1.example.com:443
-            </div>
-            <div class="latency-row lat-good">
-              <div class="latency-bar"><div class="latency-fill" style="width:31%"></div></div>
-              <span class="latency-num">58 ms</span>
-            </div>
-            <div class="node-actions">
-              <button class="chip-btn">上移</button>
-              <button class="chip-btn">下移</button>
-              <button class="chip-btn">编辑</button>
-              <button class="chip-btn danger">删除</button>
-            </div>
-          </div>
-
-          <div class="node-card">
-            <div class="node-top"><span class="node-name">US-SS-2022</span><span class="badge b-ss">SS</span></div>
-            <div class="node-server">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-              us1.example.com:8888
-            </div>
-            <div class="latency-row lat-mid">
-              <div class="latency-bar"><div class="latency-fill" style="width:62%"></div></div>
-              <span class="latency-num">168 ms</span>
-            </div>
-            <div class="node-actions">
-              <button class="chip-btn">上移</button>
-              <button class="chip-btn">下移</button>
-              <button class="chip-btn">编辑</button>
-              <button class="chip-btn danger">删除</button>
-            </div>
-          </div>
-
-          <div class="node-card">
-            <div class="node-top"><span class="node-name">SG-TUIC-01</span><span class="badge b-tuic">TUIC</span></div>
-            <div class="node-server">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-              sg1.example.com:443
-            </div>
-            <div class="latency-row lat-good">
-              <div class="latency-bar"><div class="latency-fill" style="width:38%"></div></div>
-              <span class="latency-num">76 ms</span>
-            </div>
-            <div class="node-actions">
-              <button class="chip-btn">上移</button>
-              <button class="chip-btn">下移</button>
-              <button class="chip-btn">编辑</button>
-              <button class="chip-btn danger">删除</button>
-            </div>
-          </div>
-
-          <div class="node-card">
-            <div class="node-top"><span class="node-name">TW-VMess-WS</span><span class="badge b-vmess">VMESS</span></div>
-            <div class="node-server">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-              tw1.example.com:443
-            </div>
-            <div class="latency-row lat-mid">
-              <div class="latency-bar"><div class="latency-fill" style="width:48%"></div></div>
-              <span class="latency-num">124 ms</span>
-            </div>
-            <div class="node-actions">
-              <button class="chip-btn">上移</button>
-              <button class="chip-btn">下移</button>
-              <button class="chip-btn">编辑</button>
-              <button class="chip-btn danger">删除</button>
-            </div>
-          </div>
-
-          <div class="node-card">
-            <div class="node-top"><span class="node-name">KR-Trojan-01</span><span class="badge b-trojan">TROJAN</span></div>
-            <div class="node-server">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-              kr1.example.com:443
-            </div>
-            <div class="latency-row lat-good">
-              <div class="latency-bar"><div class="latency-fill" style="width:34%"></div></div>
-              <span class="latency-num">69 ms</span>
-            </div>
-            <div class="node-actions">
-              <button class="chip-btn">上移</button>
-              <button class="chip-btn">下移</button>
-              <button class="chip-btn">编辑</button>
-              <button class="chip-btn danger">删除</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ========== Step 3 分流规则 ========== -->
-    <section class="step-section" id="step3">
-      <div class="step-banner" style="--bc: 167,139,250;">
-        <div class="sb-ico">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 6h5l4 6 4 6h3M4 18h5l2.5-3.75M20 6h-3l-2.5 3.75M18 3l3 3-3 3M18 15l3 3-3 3"/>
-          </svg>
-        </div>
-        <div class="sb-body">
-          <div class="sb-eyebrow">Step 03 · Rules</div>
-          <h2 class="sb-title">分流规则</h2>
-          <p class="sb-desc">基础规则源 + 可视化规则编辑，DustinWin mihomo-ruleset 每周自动更新</p>
-        </div>
-        <div class="sb-num">03</div>
-      </div>
-
-      <!-- 基础规则源 -->
-      <div class="panel" style="margin-bottom:18px;">
-        <div class="panel-head">
-          <div class="panel-title">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M3 12c3.5-6 14.5-6 18 0-3.5 6-14.5 6-18 0z"/><circle cx="12" cy="12" r="2.6"/>
-            </svg>
-            基础规则源
-          </div>
-          <span class="panel-hint">规则集由 OpenClash / mihomo 每周自动更新（interval 604800s）</span>
-        </div>
-
-        <div class="source-cards">
-          <div class="source-card active" data-src="dustinwin" onclick="setRuleSource('dustinwin')">
-            <div class="sc-radio"></div>
-            <div class="sc-body">
-              <h4>DustinWin mihomo-ruleset <span class="sc-badge">默认 · 推荐</span></h4>
-              <p>30 个规则集（mrs 格式）：AI / 代理 / 国内 / GFW / 流媒体 / 电报细分，经本站代理 GitHub Releases，按周自动更新</p>
-            </div>
-          </div>
-          <div class="source-card" data-src="lhie1" onclick="setRuleSource('lhie1')">
-            <div class="sc-radio"></div>
-            <div class="sc-body">
-              <h4>lhie1 规则集 <span class="sc-badge weekly">经典</span></h4>
-              <p>dler-io 社区经典规则集，覆盖流媒体、AI、国内媒体与广告拦截等 30+ 细分类目</p>
-            </div>
-          </div>
-          <div class="source-card" data-src="none" onclick="setRuleSource('none')">
-            <div class="sc-radio"></div>
-            <div class="sc-body">
-              <h4>不使用基础分流</h4>
-              <p>仅使用下方自定义规则与自定义规则集，适合完全手工控制分流的高级用户</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="preset-block" id="dustinwinPreset">
-          <div class="preset-head">DustinWin 预设规则目标 <small>30 个规则集 · mrs 格式 · 每周自动更新，点击切换目标策略组</small></div>
-          <div class="lhie1-grid">
-            <div class="lhie1-cell" onclick="cycleTarget(this)">ai<span class="t">AI Suite</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">proxy<span class="t">Proxy</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">cn<span class="t">Domestic</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">gfw<span class="t">Proxy</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">applications<span class="t">DIRECT</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">private<span class="t">DIRECT</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">ads<span class="t">AdBlock</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">apple-cn<span class="t">Apple</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">google<span class="t">Google</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">microsoft-cn<span class="t">Microsoft</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">games<span class="t">Steam</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">netflix<span class="t">Netflix</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">disney<span class="t">Disney Plus</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">youtube<span class="t">Youtube</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">tiktok<span class="t">TikTok</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">bilibili<span class="t">Bilibili</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">spotify<span class="t">Spotify</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">telegramip<span class="t">Telegram</span></div>
-          </div>
-        </div>
-
-        <div class="preset-block" id="lhie1Preset" style="display:none;">
-          <div class="preset-head">lhie1 预设规则目标 <small>点击切换目标策略组</small></div>
-          <div class="lhie1-grid">
-            <div class="lhie1-cell" onclick="cycleTarget(this)">Netflix<span class="t">Netflix</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">YouTube<span class="t">Youtube</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">Telegram<span class="t">Telegram</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">AI Suite<span class="t">AI Suite</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">Disney+<span class="t">Disney Plus</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">Steam<span class="t">Steam</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">Bilibili<span class="t">Bilibili</span></div>
-            <div class="lhie1-cell" onclick="cycleTarget(this)">Microsoft<span class="t">Microsoft</span></div>
-          </div>
-        </div>
-
-        <div class="preset-block" id="nonePreset" style="display:none;">
-          <div class="preset-head">基础分流已停用 <small>仅使用自定义规则</small></div>
-          <div style="font-size:12.5px; color:var(--text-faint); line-height:1.8; padding:6px 2px;">
-            生成配置将不包含基础规则集，请在下方「单条规则」与「自定义规则集」中维护全部分流规则，并确保 MATCH 兜底规则存在。
-          </div>
-        </div>
-      </div>
-
-      <div class="rules-layout">
+      <section class="step-section active" id="step1" role="tabpanel" aria-labelledby="step-tab-1" tabindex="0">
+        <div class="step-banner" style="--bc:34,211,238"><div class="sb-ico">↓</div><div class="sb-body"><div class="sb-eyebrow">Step 01 · Import</div><h2 class="sb-title">导入节点</h2><p class="sb-desc">YAML、订阅链接和多行分享链接统一进入后端解析管线。</p></div><div class="sb-num">01</div></div>
         <div class="panel stagger">
-          <div class="panel-head">
-            <div class="panel-title">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5"/>
-              </svg>
-              单条规则
-            </div>
+          <div class="panel-head"><div class="panel-title">智能导入</div><span class="panel-hint">内容只在提交时发送</span></div>
+          <div class="method-cards" role="tablist" aria-label="导入方式">
+            <button class="method-card active" type="button" data-method="yaml" role="tab" aria-selected="true"><div class="m-icon">YAML</div><h4>智能 YAML 导入</h4><p>完整配置、proxies 片段或节点列表。</p></button>
+            <button class="method-card" type="button" data-method="url" role="tab" aria-selected="false"><div class="m-icon">URL</div><h4>订阅链接</h4><p>由服务端拉取并解码远程订阅。</p></button>
+            <button class="method-card" type="button" data-method="share" role="tab" aria-selected="false"><div class="m-icon">URI</div><h4>分享链接</h4><p>每行一条协议 URI，支持批量解析。</p></button>
           </div>
-          <div class="field">
-            <label>规则类型</label>
-            <select id="ruleType">
-              <option>DOMAIN-SUFFIX</option>
-              <option>DOMAIN</option>
-              <option>DOMAIN-KEYWORD</option>
-              <option>IP-CIDR</option>
-              <option>GEOIP</option>
-              <option>MATCH</option>
-            </select>
+          <div class="paste-zone"><textarea id="importInput" spellcheck="false" autocomplete="off" placeholder="粘贴完整 config.yaml、proxies 片段或节点列表" aria-label="导入内容"></textarea></div>
+          <div style="display:flex;gap:10px;margin-top:16px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary btn-lg" id="importBtn" type="button"><span>↓</span> 导入节点</button>
+            <button class="btn btn-ghost" id="clearImportBtn" type="button">清空</button>
+            <span class="status-note" id="importSummary">尚未导入节点</span>
           </div>
-          <div class="field">
-            <label>值（域名 / IP / 国家代码）</label>
-            <input id="ruleValue" type="text" placeholder="例如: google.com">
-          </div>
-          <div class="field">
-            <label>目标策略</label>
-            <select id="ruleTarget">
-              <option>Proxy</option>
-              <option>DIRECT</option>
-              <option>REJECT</option>
-              <option>AI Suite</option>
-              <option>Netflix</option>
-              <option>Telegram</option>
-              <option>Domestic</option>
-            </select>
-          </div>
-          <button class="btn btn-primary btn-block" data-ripple onclick="addRule()">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-            添加规则
-          </button>
-          <div style="margin-top:14px; font-size:11.5px; color:var(--text-faint); line-height:1.7;">
-            💡 目标策略可填策略组（Proxy / AI / Netflix…）、节点名或 DIRECT / REJECT。预设规则目标请在上方「基础规则源」中调整。
-          </div>
+          <div id="importMessages" class="phase2-empty" hidden></div>
         </div>
+      </section>
 
+      <section class="step-section" id="step2" role="tabpanel" aria-labelledby="step-tab-2" tabindex="0">
+        <div class="step-banner" style="--bc:99,102,241"><div class="sb-ico">⌘</div><div class="sb-body"><div class="sb-eyebrow">Step 02 · Nodes</div><h2 class="sb-title">节点管理</h2><p class="sb-desc">列表、筛选、排序、字段表单和原始 YAML 编辑都作用于当前 canonical 草稿。</p></div><div class="sb-num">02</div></div>
         <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
-              </svg>
-              已添加的规则 <span style="color:var(--accent); font-family:var(--mono);" id="ruleCount">4</span>
-            </div>
-            <span class="panel-hint">优先级从上到下</span>
+          <div class="panel-head"><div class="panel-title">节点管理</div><span class="panel-hint" id="nodeSummary">正在加载</span></div>
+          <div class="add-node-bar"><div class="protocol-pills" id="protocolPills"></div><div class="node-toolbar"><input id="nodeSearch" class="node-search" type="search" placeholder="筛选节点 / 协议 / 服务器" aria-label="筛选节点"><button class="btn btn-primary" id="addNodeBtn" type="button">+ 手动添加节点</button></div></div>
+          <div class="panel node-form-panel" id="nodeFormPanel" hidden>
+            <div class="node-form-head"><h3 id="nodeFormTitle">节点编辑</h3><button class="btn btn-ghost" id="toggleRawNodeBtn" type="button">编辑原始 YAML</button></div>
+            <div id="nodeSchemaMode"><div class="schema-grid" id="nodeSchemaFields"></div></div>
+            <div id="nodeRawMode" hidden><textarea id="nodeRawEditor" class="raw-editor" spellcheck="false" aria-label="节点原始 YAML"></textarea><div class="raw-help">服务端负责 YAML 解析；保存时会把解析映射合并到原节点，保留原节点中未触碰的未知字段。</div></div>
+            <div class="node-form-actions"><button class="btn btn-primary" id="saveNodeBtn" type="button">保存节点草稿</button><button class="btn btn-ghost" id="cancelNodeBtn" type="button">取消</button></div>
           </div>
-          <div id="ruleList">
-            <div class="rule-item">
-              <span class="rule-idx">01</span>
-              <span class="rule-type">DOMAIN-SUFFIX</span>
-              <span class="rule-value">openai.com</span>
-              <span class="rule-target"><span class="arrow">→</span> AI Suite</span>
-              <button class="rule-del" onclick="delRule(this)">✕</button>
+          <div class="node-grid" id="nodeGrid"><div class="loading-state">正在加载节点…</div></div>
+        </div>
+      </section>
+
+      <section class="step-section" id="step3" role="tabpanel" aria-labelledby="step-tab-3" tabindex="0">
+        <div class="step-banner" style="--bc:167,139,250"><div class="sb-ico">≋</div><div class="sb-body"><div class="sb-eyebrow">Step 03 · Rules & Global</div><h2 class="sb-title">规则与全局设置</h2><p class="sb-desc">当前阶段提供 canonical 自定义规则与后端 schema 驱动的全局字段；未提供的高级 UI 保持真实空态。</p></div><div class="sb-num">03</div></div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">基础规则源</div><span class="panel-hint" id="ruleSourceStatus">等待后端配置</span></div>
+          <div class="field"><label for="ruleSource">规则源</label><select id="ruleSource" aria-label="规则源"></select></div>
+          <div class="rules-layout">
+            <div class="panel stagger">
+              <div class="panel-head"><div class="panel-title">单条规则</div></div>
+              <div class="field"><label for="ruleType">规则类型</label><select id="ruleType"><option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX</option><option value="DOMAIN">DOMAIN</option><option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD</option><option value="IP-CIDR">IP-CIDR</option><option value="GEOIP">GEOIP</option><option value="PROCESS-NAME">PROCESS-NAME</option><option value="MATCH">MATCH</option></select></div>
+              <div class="field"><label for="ruleValue">规则值</label><input id="ruleValue" type="text" placeholder="输入域名、IP 或进程名"></div>
+              <div class="field"><label for="ruleTarget">目标策略</label><input id="ruleTarget" type="text" list="ruleTargetOptions" placeholder="选择或输入策略组名称" autocomplete="off"><datalist id="ruleTargetOptions"></datalist></div>
+              <button class="btn btn-primary btn-block" id="addRuleBtn" type="button">添加规则</button>
             </div>
-            <div class="rule-item">
-              <span class="rule-idx">02</span>
-              <span class="rule-type">DOMAIN-SUFFIX</span>
-              <span class="rule-value">github.com</span>
-              <span class="rule-target"><span class="arrow">→</span> Proxy</span>
-              <button class="rule-del" onclick="delRule(this)">✕</button>
-            </div>
-            <div class="rule-item">
-              <span class="rule-idx">03</span>
-              <span class="rule-type">DOMAIN-KEYWORD</span>
-              <span class="rule-value">bilibili</span>
-              <span class="rule-target"><span class="arrow">→</span> DIRECT</span>
-              <button class="rule-del" onclick="delRule(this)">✕</button>
-            </div>
-            <div class="rule-item">
-              <span class="rule-idx">04</span>
-              <span class="rule-type">PROCESS-NAME</span>
-              <span class="rule-value">qbittorrent</span>
-              <span class="rule-target"><span class="arrow">→</span> DIRECT</span>
-              <button class="rule-del" onclick="delRule(this)">✕</button>
+            <div class="panel">
+              <div class="panel-head"><div class="panel-title">已添加规则 <span style="color:var(--accent);font-family:var(--mono)" id="ruleCount">—</span></div><span class="panel-hint">按 canonical 顺序</span></div>
+              <div id="ruleList"><div class="check-empty">正在加载规则</div></div>
             </div>
           </div>
         </div>
+        <div class="panel" id="providerTargetsPanel" hidden></div>
+        <div class="panel" id="rulesetPanel"></div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">全局设置 schema</div><span class="panel-hint">后端字段定义</span></div>
+          <div id="globalSchemaPanel"><div class="phase2-empty">正在加载全局设置 schema…</div></div>
+        </div>
+      </section>
+
+      <section class="step-section" id="step4" role="tabpanel" aria-labelledby="step-tab-4" tabindex="0">
+        <div class="step-banner" style="--bc:52,211,153"><div class="sb-ico">✓</div><div class="sb-body"><div class="sb-eyebrow">Step 04 · Validate & Publish</div><h2 class="sb-title">校验与发布</h2><p class="sb-desc">校验和发布是两个明确动作；发布按钮只在当前未修改草稿拥有服务端 draft_signature 时启用。</p></div><div class="sb-num">04</div></div>
+        <div class="panel">
+          <div class="generate-hero"><h3>校验当前草稿</h3><p>服务端返回 checks、warnings、stats、mihomo、完整 YAML 与发布差异。</p><button class="btn btn-primary btn-lg" id="validateBtn" type="button"><span class="btn-scan"></span>校验草稿</button><div class="status-note" id="validationStatus">尚未校验</div></div>
+          <div class="check-results show" id="checkResults"><div class="check-empty">尚未校验，点击“校验草稿”开始</div></div>
+          <div class="validation-meta" id="validationStats"></div>
+          <div id="validationWarnings" class="phase2-empty" hidden></div>
+          <div class="yaml-wrap" id="yamlWrap">
+            <div class="yaml-head"><div class="yaml-dots"><i></i><i></i><i></i></div><span>config.yaml — 已校验预览</span><span style="margin-left:auto;color:var(--text-faint)" id="yamlMeta"></span></div>
+            <div class="yaml-code" id="yamlCode"></div>
+            <div class="gen-actions"><button class="btn btn-primary" id="downloadYamlBtn" type="button">下载 config.yaml</button><button class="btn" id="copySubBtn" type="button">复制订阅链接</button><button class="btn btn-ghost" id="saveDraftBtn" type="button">保存草稿</button></div>
+            <div class="publish-block"><div class="status-note" id="publishGuard">发布需要先校验当前未修改草稿。</div><button class="btn btn-primary" id="publishBtn" type="button" disabled>发布当前草稿</button><pre id="publishDiff" class="publish-diff"></pre></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="settings-panel">
+      <div class="sp-card">
+        <div class="sp-title">订阅链接<span id="subscriptionCardStatus" style="font-size:10px;letter-spacing:.5px;color:var(--text-faint)">● 未发布</span></div>
+        <div class="sub-link-card"><code id="subUrl">尚未发布订阅</code><button class="copy-btn" id="subCopyBtn" type="button" title="复制订阅链接" aria-label="复制订阅链接">⧉</button></div>
+        <button class="btn btn-ghost btn-block" id="resetTokenBtn" type="button" style="font-size:12px;padding:8px">重置订阅 Token</button>
       </div>
-    </section>
-
-    <!-- ========== Step 4 生成 ========== -->
-    <section class="step-section" id="step4">
-      <div class="step-banner" style="--bc: 52,211,153;">
-        <div class="sb-ico">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M13 2L3 14h7l-1 8 11-13h-7l1-7z"/>
-          </svg>
-        </div>
-        <div class="sb-body">
-          <div class="sb-eyebrow">Step 04 · Generate</div>
-          <h2 class="sb-title">生成与检查</h2>
-          <p class="sb-desc">校验节点、策略组与规则依赖，序列化 YAML，订阅保存后即时生效</p>
-        </div>
-        <div class="sb-num">04</div>
+      <div class="sp-card">
+        <div class="sp-title">生成模式</div>
+        <div class="mode-switch" id="modeSwitch"><div class="indicator"></div><button id="modeDesktopBtn" type="button">全平台客户端</button><button id="modeRouterBtn" type="button">OpenClash / 软路由</button></div>
+        <div class="status-note" id="modeDesc">等待后端全局配置</div>
       </div>
-
-      <div class="panel">
-        <div class="generate-hero">
-          <h3>生成并检查配置文件</h3>
-          <p>校验通过后订阅立即生效 · 客户端拉取即为最新配置</p>
-          <button class="btn btn-primary btn-lg" id="generateBtn" data-ripple onclick="generate(this)">
-            <span class="btn-scan"></span>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-            </svg>
-            <span id="genBtnText">生成并检查</span>
-          </button>
-        </div>
-
-        <div class="check-results" id="checkResults">
-          <div class="check-item ok">
-            <span class="icon-circle">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-            </span>
-            <span>节点完整性校验通过</span>
-            <span class="detail">6 proxies</span>
-          </div>
-          <div class="check-item ok">
-            <span class="icon-circle">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-            </span>
-            <span>策略组引用检查通过</span>
-            <span class="detail">16 groups</span>
-          </div>
-          <div class="check-item ok">
-            <span class="icon-circle">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-            </span>
-            <span>规则顺序与兜底检查通过</span>
-            <span class="detail">61 rules</span>
-          </div>
-          <div class="check-item warn">
-            <span class="icon-circle">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.7 3.86a2 2 0 00-3.4 0z"/></svg>
-            </span>
-            <span>检测到 respect-rules 依赖 proxy-server-nameserver</span>
-            <span class="detail">已自动补全</span>
-          </div>
-        </div>
-
-        <div class="yaml-wrap" id="yamlWrap">
-          <div class="yaml-head">
-            <div class="yaml-dots"><i></i><i></i><i></i></div>
-            <span>config.yaml — 预览</span>
-            <span style="margin-left:auto; color:var(--text-faint);" id="yamlMeta"></span>
-          </div>
-          <div class="yaml-code" id="yamlCode"></div>
-          <div class="gen-actions">
-            <button class="btn btn-primary" data-ripple onclick="toast('config.yaml 已开始下载')">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-              下载 config.yaml
-            </button>
-            <button class="btn" data-ripple onclick="copySub()">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-              复制订阅链接
-            </button>
-            <button class="btn btn-ghost" onclick="toast('已重新保存，订阅即时生效', 'info')">保存并同步</button>
-          </div>
-        </div>
+      <div class="sp-card">
+        <div class="sp-title">DNS 预设</div>
+        <button class="preset-btn" id="presetDesktopBtn" type="button"><span class="p-ico">◈</span><span>完整客户端预设<small>由后端 presets 提供</small></span></button>
+        <button class="preset-btn" id="presetRouterBtn" type="button"><span class="p-ico">□</span><span>OpenClash 预设<small>由后端 presets 提供</small></span></button>
       </div>
-    </section>
-
-  </div><!-- /main-col -->
-
-  <!-- ========== 左侧设置面板 ========== -->
-  <aside class="settings-panel">
-    <div class="sp-card">
-      <div class="sp-title">订阅链接<span style="color:var(--success); font-size:10px; letter-spacing:.5px;">● 已生效</span></div>
-      <div class="sub-link-card">
-        <code id="subUrl">https://clash.910501.xyz/sub/8f3a…c21e</code>
-        <button class="copy-btn" id="subCopyBtn" onclick="copySub()" title="复制订阅链接">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-        </button>
+      <div class="sp-card">
+        <div class="sp-title">全局设置状态</div>
+        <div class="phase2-empty">字段编辑位于“规则与全局”步骤，内容由 global_config_schema 驱动。</div>
       </div>
-      <button class="btn btn-ghost btn-block" style="font-size:12px; padding:8px;" onclick="toast('订阅 Token 已重置，旧链接立即失效', 'info')">重置订阅 Token</button>
+      <div id="adminPanelHost"></div>
+    </aside>
+  </div>
+
+  <footer class="statusbar">
+    <div class="sb-item sb-live"><span class="dot" style="width:6px;height:6px"></span><span id="footerServiceStatus">等待后端</span></div>
+    <div class="sb-item" id="runtimeMihomo">mihomo 状态：未暴露</div>
+    <div class="sb-item">当前页面不推断运行时延迟</div>
+    <div class="sb-spacer"></div>
+    <div class="sb-item">节点 <b id="footerNodeCount" style="color:var(--text-dim)">—</b></div>
+    <div class="sb-item">规则 <b id="footerRuleCount" style="color:var(--text-dim)">—</b></div>
+    <div class="sb-item latency-live" id="draftStatus">正在加载</div>
+  </footer>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+  <div class="login-overlay-wrap" id="loginOverlay">
+    <div class="login-card" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+      <div class="login-brand"><h2 id="loginTitle">Clash Config Gen<span class="grad"> · V2</span></h2><p>登录后管理你的节点、规则与订阅</p></div>
+      <div class="login-tabs" role="tablist"><button class="login-tab active" id="loginTabBtn" type="button" role="tab" aria-selected="true">登录</button><button class="login-tab" id="registerTabBtn" type="button" role="tab" aria-selected="false">注册</button></div>
+      <div class="login-pane active" id="loginPane"><form id="loginForm"><label class="f-label">用户名</label><input class="f-input" name="username" type="text" autocomplete="username" required><label class="f-label">密码</label><input class="f-input" name="password" type="password" autocomplete="current-password" required><label class="f-check"><input type="checkbox" name="remember"> 保持登录 30 天</label><button class="f-btn" type="submit">登录</button></form></div>
+      <div class="login-pane" id="registerPane"><form id="registerForm"><label class="f-label">用户名</label><input class="f-input" name="username" type="text" autocomplete="username" required><label class="f-label">密码</label><input class="f-input" name="password" type="password" autocomplete="new-password" required><label class="f-label">确认密码</label><input class="f-input" name="passwordConfirm" type="password" autocomplete="new-password" required><button class="f-btn" type="submit">注册</button></form></div>
     </div>
-
-    <div class="sp-card">
-      <div class="sp-title">生成模式</div>
-      <div class="mode-switch" id="modeSwitch">
-        <div class="indicator"></div>
-        <button onclick="setMode(false)">全平台客户端</button>
-        <button onclick="setMode(true)">OpenClash / 软路由</button>
-      </div>
-      <div style="font-size:11.5px; color:var(--text-faint); margin-top:10px; line-height:1.7;" id="modeDesc">
-        由 YAML 接管 DNS 与 TUN，含完整防泄露配置，适合 Clash Verge / mihomo 桌面客户端。
-      </div>
-    </div>
-
-    <div class="sp-card">
-      <div class="sp-title">DNS 防泄露预设</div>
-      <button class="preset-btn" onclick="toast('已应用「完整客户端防泄露」预设')">
-        <span class="p-ico">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        </span>
-        <span>完整客户端防泄露<small>TUN + fake-ip + respect-rules</small></span>
-      </button>
-      <button class="preset-btn" onclick="toast('已应用「软路由安全」预设')">
-        <span class="p-ico">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M17 17h.01M6 13V7a2 2 0 012-2h8a2 2 0 012 2v6"/></svg>
-        </span>
-        <span>OpenClash 软路由安全<small>仅节点与规则，DNS 由插件接管</small></span>
-      </button>
-    </div>
-
-    <div class="sp-card">
-      <div class="sp-title">全局设置</div>
-      <div class="accordion">
-        <div class="accordion-item open">
-          <div class="acc-head" onclick="toggleAcc(this)">
-            📡 端口与基础
-            <span class="chev">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-            </span>
-          </div>
-          <div class="acc-body"><div class="acc-inner">
-            <div class="setting-row">
-              <span class="s-label">混合端口<small>mixed-port</small></span>
-              <input class="mini-input" value="7893">
-            </div>
-            <div class="setting-row">
-              <span class="s-label">允许局域网<small>allow-lan</small></span>
-              <button class="toggle" onclick="flipToggle(this)"></button>
-            </div>
-            <div class="setting-row">
-              <span class="s-label">IPv6 支持<small>ipv6</small></span>
-              <button class="toggle" onclick="flipToggle(this)"></button>
-            </div>
-          </div></div>
-        </div>
-
-        <div class="accordion-item">
-          <div class="acc-head" onclick="toggleAcc(this)">
-            🛡️ TUN 模式
-            <span class="chev">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-            </span>
-          </div>
-          <div class="acc-body"><div class="acc-inner">
-            <div class="setting-row">
-              <span class="s-label">启用 TUN<small>接管系统流量</small></span>
-              <button class="toggle on" onclick="flipToggle(this)"></button>
-            </div>
-            <div class="setting-row">
-              <span class="s-label">协议栈 mixed<small>system + gvisor</small></span>
-              <button class="toggle on" onclick="flipToggle(this)" style="opacity:0;pointer-events:none;"></button>
-            </div>
-            <div class="setting-row">
-              <span class="s-label">DNS 劫持<small>dns-hijack</small></span>
-              <button class="toggle on" onclick="flipToggle(this)"></button>
-            </div>
-          </div></div>
-        </div>
-
-        <div class="accordion-item">
-          <div class="acc-head" onclick="toggleAcc(this)">
-            🌐 DNS 设置
-            <span class="chev">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-            </span>
-          </div>
-          <div class="acc-body"><div class="acc-inner">
-            <div class="setting-row">
-              <span class="s-label">内置 DNS<small>enable</small></span>
-              <button class="toggle on" onclick="flipToggle(this)"></button>
-            </div>
-            <div class="setting-row">
-              <span class="s-label">fake-ip 模式<small>enhanced-mode</small></span>
-              <button class="toggle on" onclick="flipToggle(this)" style="opacity:0;pointer-events:none;"></button>
-            </div>
-            <div class="setting-row">
-              <span class="s-label">respect-rules<small>DNS 遵守分流</small></span>
-              <button class="toggle on" onclick="flipToggle(this)"></button>
-            </div>
-          </div></div>
-        </div>
-
-        <div class="accordion-item">
-          <div class="acc-head" onclick="toggleAcc(this)">
-            ⚡ Meta 核心特性
-            <span class="chev">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-            </span>
-          </div>
-          <div class="acc-body"><div class="acc-inner">
-            <div class="setting-row">
-              <span class="s-label">TCP 并发<small>tcp-concurrent</small></span>
-              <button class="toggle on" onclick="flipToggle(this)"></button>
-            </div>
-            <div class="setting-row">
-              <span class="s-label">统一延迟<small>unified-delay</small></span>
-              <button class="toggle on" onclick="flipToggle(this)"></button>
-            </div>
-            <div class="setting-row">
-              <span class="s-label">流量嗅探<small>sniffer</small></span>
-              <button class="toggle on" onclick="flipToggle(this)"></button>
-            </div>
-            <div class="setting-row">
-              <span class="s-label">GeoData 模式<small>geodata-mode</small></span>
-              <button class="toggle" onclick="flipToggle(this)"></button>
-            </div>
-          </div></div>
-        </div>
-      </div>
-    </div>
-  </aside>
-</div>
-
-<!-- 底部状态栏 -->
-<footer class="statusbar">
-  <div class="sb-item sb-live"><span class="dot" style="width:6px;height:6px;"></span> FastAPI 订阅服务正常</div>
-  <div class="sb-item">mihomo v1.19.x</div>
-  <div class="sb-item">fake-ip · respect-rules</div>
-  <div class="sb-spacer"></div>
-  <div class="sb-item">节点 <b style="color:var(--text-dim)">6</b></div>
-  <div class="sb-item">规则 <b style="color:var(--text-dim)">61</b></div>
-  <div class="sb-item latency-live"><span class="blink">◈</span> <span id="liveLatency">42</span> ms</div>
-</footer>
-
-<!-- Toast 容器 -->
-<div class="toast-wrap" id="toastWrap"></div>
+  </div>
 
 <script>
-/* ============ 主题切换（浅色默认） ============ */
 (function () {
-  const root = document.documentElement;
-  let theme = 'light';
-  try { theme = localStorage.getItem('v2-theme') || 'light'; } catch (e) {}
-  root.classList.toggle('dark', theme === 'dark');
-  document.getElementById('themeToggle').addEventListener('click', () => {
-    theme = theme === 'dark' ? 'light' : 'dark';
-    root.classList.add('theme-anim');
-    root.classList.toggle('dark', theme === 'dark');
-    try { localStorage.setItem('v2-theme', theme); } catch (e) {}
-    setTimeout(() => root.classList.remove('theme-anim'), 480);
-    toast(theme === 'dark' ? '已切换到暗色主题' : '已切换到浅色主题', 'info');
-  });
-})();
+  "use strict";
 
-/* ============ 数字滚动 ============ */
-function countUp() {
-  document.querySelectorAll('[data-count]').forEach(el => {
-    const target = +el.dataset.count;
-    const dur = 1300, t0 = performance.now();
-    (function tick(now) {
-      const p = Math.min((now - t0) / dur, 1);
-      const eased = 1 - Math.pow(1 - p, 3);
-      el.textContent = Math.round(target * eased);
-      if (p < 1) requestAnimationFrame(tick);
-    })(t0);
-  });
-}
-setTimeout(countUp, 350);
+  var DRAFT_KEYS = [
+    "proxies",
+    "global_config",
+    "custom_rules",
+    "custom_rule_providers",
+    "selected_rule_type",
+    "import_sources"
+  ];
 
-/* ============ 步骤导航 ============ */
-document.querySelectorAll('#workspaceNav .wnav-item').forEach(item => {
-  item.addEventListener('click', () => {
-    document.querySelectorAll('#workspaceNav .wnav-item').forEach(i => i.classList.remove('active'));
-    item.classList.add('active');
-    const step = item.dataset.step;
-    document.querySelectorAll('.step-section').forEach(s => s.classList.remove('active'));
-    const sec = document.getElementById('step' + step);
-    sec.classList.add('active');
-    // 重新触发 stagger 动画
-    sec.querySelectorAll('.stagger > *, .node-card').forEach(el => {
-      el.style.animation = 'none'; el.offsetHeight; el.style.animation = '';
-    });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
-});
-
-/* ============ 导入方式卡片 ============ */
-document.querySelectorAll('.method-card').forEach(card => {
-  card.addEventListener('click', () => {
-    document.querySelectorAll('.method-card').forEach(c => c.classList.remove('active'));
-    card.classList.add('active');
-  });
-});
-
-/* ============ 协议 pills ============ */
-document.querySelectorAll('#protocolPills .pill').forEach(p => {
-  p.addEventListener('click', () => {
-    document.querySelectorAll('#protocolPills .pill').forEach(x => x.classList.remove('active'));
-    p.classList.add('active');
-  });
-});
-
-/* ============ 卡片聚光跟随 ============ */
-document.querySelectorAll('.node-card, .stat-card').forEach(card => {
-  card.addEventListener('mousemove', e => {
-    const r = card.getBoundingClientRect();
-    card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
-    card.style.setProperty('--my', (e.clientY - r.top) + 'px');
-  });
-});
-
-/* ============ 折叠面板 ============ */
-function toggleAcc(head) {
-  head.parentElement.classList.toggle('open');
-}
-
-/* ============ Toggle ============ */
-function flipToggle(t) { t.classList.toggle('on'); }
-
-/* ============ 生成模式 ============ */
-function setMode(router) {
-  const sw = document.getElementById('modeSwitch');
-  sw.classList.toggle('router', router);
-  document.getElementById('modeDesc').textContent = router
-    ? '订阅仅输出节点、策略组与规则；DNS / TUN 由 OpenClash 插件统一接管，避免配置冲突。'
-    : '由 YAML 接管 DNS 与 TUN，含完整防泄露配置，适合 Clash Verge / mihomo 桌面客户端。';
-}
-
-/* ============ 基础规则源 ============ */
-function setRuleSource(src) {
-  document.querySelectorAll('.source-card').forEach(c =>
-    c.classList.toggle('active', c.dataset.src === src));
-  document.getElementById('dustinwinPreset').style.display = src === 'dustinwin' ? '' : 'none';
-  document.getElementById('lhie1Preset').style.display = src === 'lhie1' ? '' : 'none';
-  document.getElementById('nonePreset').style.display = src === 'none' ? '' : 'none';
-  const msgs = {
-    dustinwin: '基础规则源：DustinWin mihomo-ruleset（每周自动更新）',
-    lhie1: '基础规则源：lhie1 规则集',
-    none: '已停用基础分流，仅使用自定义规则'
+  var state = {
+    user: null,
+    csrfToken: "",
+    authCsrf: "",
+    authenticated: false,
+    loading: true,
+    config: emptyDraft(),
+    subscription: {},
+    nodeFormSchema: {},
+    globalConfigSchema: {},
+    presets: {},
+    dnsPresets: {},
+    providerDefaults: {},
+    allTargets: [],
+    counts: {},
+    warnings: [],
+    importMethod: "yaml",
+    nodeProtocol: "",
+    nodeQuery: "",
+    nodeForm: { open: false, index: null, protocol: "", raw: false },
+    dirtyGeneration: 0,
+    savedGeneration: 0,
+    saveTimer: null,
+    saveSequence: Promise.resolve(),
+    savePending: 0,
+    saveInFlight: false,
+    saveError: null,
+    validation: null,
+    validatedGeneration: -1,
+    validatedSignature: "",
+    validateInFlight: false,
+    publishInFlight: false,
+    globalSaving: false,
+    rulesetMode: "http",
+    rulesetUrlTest: { url: "", ok: false },
+    rulesetMessage: "",
+    adminUsers: [],
+    adminLoading: false,
+    adminLoaded: false,
+    adminConfirmDelete: null,
+    adminResult: ""
   };
-  toast(msgs[src], 'info');
-}
 
-const PRESET_TARGETS = ['Proxy', 'DIRECT', 'AI Suite', 'Domestic', 'Netflix', 'Telegram'];
-function cycleTarget(cell) {
-  const t = cell.querySelector('.t');
-  const cur = t.textContent;
-  const next = PRESET_TARGETS[(PRESET_TARGETS.indexOf(cur) + 1) % PRESET_TARGETS.length] || 'Proxy';
-  t.textContent = next;
-  cell.style.animation = 'none'; cell.offsetHeight; cell.style.animation = 'popIn .35s var(--ease-out)';
-  toast(`规则集「${cell.textContent.replace(next, '').trim()}」目标 → ${next}`, 'info');
-}
+  window.state = state;
+  window.v2State = state;
 
-/* ============ 涟漪 ============ */
-document.addEventListener('click', e => {
-  const btn = e.target.closest('[data-ripple]');
-  if (!btn) return;
-  const r = btn.getBoundingClientRect();
-  const span = document.createElement('span');
-  const size = Math.max(r.width, r.height);
-  span.className = 'ripple';
-  span.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX - r.left - size/2}px;top:${e.clientY - r.top - size/2}px;`;
-  btn.appendChild(span);
-  setTimeout(() => span.remove(), 650);
-});
+  function $(id) {
+    return document.getElementById(id);
+  }
 
-/* ============ Toast ============ */
-function toast(msg, type = 'ok') {
-  const wrap = document.getElementById('toastWrap');
-  const el = document.createElement('div');
-  el.className = 'toast' + (type === 'info' ? ' info' : '');
-  el.innerHTML = `<span class="t-ico">${type === 'info'
-    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 16v-4M12 8h.01"/><circle cx="12" cy="12" r="10"/></svg>'
-    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'
-  }</span>${msg}`;
-  wrap.appendChild(el);
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 420); }, 2600);
-}
+  function emptyDraft() {
+    return {
+      proxies: [],
+      global_config: {},
+      custom_rules: [],
+      custom_rule_providers: {},
+      selected_rule_type: "",
+      import_sources: []
+    };
+  }
 
-/* ============ 导入 demo ============ */
-function importNodes(btn) {
-  toast('已识别 2 个新节点，进入统一校验管线');
-}
+  function isObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
 
-/* ============ 规则 ============ */
-function addRule() {
-  const type = document.getElementById('ruleType').value;
-  const value = document.getElementById('ruleValue').value.trim() || 'example.com';
-  const target = document.getElementById('ruleTarget').value;
-  const list = document.getElementById('ruleList');
-  const idx = String(list.children.length + 1).padStart(2, '0');
-  const item = document.createElement('div');
-  item.className = 'rule-item';
-  item.innerHTML = `<span class="rule-idx">${idx}</span>
-    <span class="rule-type">${type}</span>
-    <span class="rule-value">${value.replace(/</g, '&lt;')}</span>
-    <span class="rule-target"><span class="arrow">→</span> ${target}</span>
-    <button class="rule-del" onclick="delRule(this)">✕</button>`;
-  list.appendChild(item);
-  document.getElementById('ruleValue').value = '';
-  document.getElementById('ruleCount').textContent = list.children.length;
-  toast(`规则已添加：${type},${value},${target}`);
-}
-function delRule(btn) {
-  const item = btn.parentElement;
-  item.style.transition = 'all .3s';
-  item.style.opacity = '0';
-  item.style.transform = 'translateX(24px)';
-  setTimeout(() => {
-    item.remove();
-    document.querySelectorAll('#ruleList .rule-idx').forEach((el, i) => el.textContent = String(i + 1).padStart(2, '0'));
-    document.getElementById('ruleCount').textContent = document.getElementById('ruleList').children.length;
-  }, 300);
-}
+  function clone(value) {
+    if (value === undefined) return value;
+    try {
+      if (typeof structuredClone === "function") return structuredClone(value);
+    } catch (_) {}
+    try { return JSON.parse(JSON.stringify(value)); } catch (_) { return value; }
+  }
 
-/* ============ YAML 高亮 ============ */
-const YAML_DEMO = `# Generator: Clash-Config-Gen V2
-# 生成时间: 2026-08-19 12:00:00
-mixed-port: 7893
-allow-lan: false
-mode: rule
-log-level: info
-ipv6: false
-unified-delay: true
-tcp-concurrent: true
+  function canonicalDraft(payload) {
+    var source = payload && isObject(payload.config) ? payload.config : (payload || {});
+    return {
+      proxies: Array.isArray(source.proxies) ? clone(source.proxies) : [],
+      global_config: isObject(source.global_config) ? clone(source.global_config) : {},
+      custom_rules: Array.isArray(source.custom_rules) ? clone(source.custom_rules) : [],
+      custom_rule_providers: isObject(source.custom_rule_providers) ? clone(source.custom_rule_providers) : {},
+      selected_rule_type: typeof source.selected_rule_type === "string" ? source.selected_rule_type : "",
+      import_sources: Array.isArray(source.import_sources) ? clone(source.import_sources) : []
+    };
+  }
 
-dns:
-  enable: true
-  listen: 0.0.0.0:7874
-  enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.1/16
-  respect-rules: true
-  proxy-server-nameserver:
-    - 223.5.5.5
-  nameserver:
-    - https://dns.alidns.com/dns-query
-    - https://doh.pub/dns-query
-
-tun:
-  enable: true
-  stack: mixed
-  auto-route: true
-  auto-detect-interface: true
-  dns-hijack:
-    - 127.0.0.1:53
-
-proxies:
-  - name: HK-IPLC-01
-    type: hysteria2
-    server: hk1.example.com
-    port: 29950
-    password: "your_password"
-    sni: www.bing.com
-    skip-cert-verify: true
-    hop-interval: 5-25
-    ports: 29950-30000
-
-  - name: JP-Reality-01
-    type: vless
-    server: jp1.example.com
-    port: 443
-    uuid: 00000000-0000-4000-8000-000000000000
-    flow: xtls-rprx-vision
-    tls: true
-    servername: v1-dy.ixigua.com
-
-rule-providers:
-  DustinWin-ai:
-    type: http
-    behavior: domain
-    format: mrs
-    url: https://clash.910501.xyz/ruleset/dustinwin/ai.mrs
-    path: ./ruleset/dustinwin/ai.mrs
-    interval: 604800
-  DustinWin-proxy:
-    type: http
-    behavior: domain
-    format: mrs
-    url: https://clash.910501.xyz/ruleset/dustinwin/proxy.mrs
-    path: ./ruleset/dustinwin/proxy.mrs
-    interval: 604800
-  DustinWin-cn:
-    type: http
-    behavior: domain
-    format: mrs
-    url: https://clash.910501.xyz/ruleset/dustinwin/cn.mrs
-    path: ./ruleset/dustinwin/cn.mrs
-    interval: 604800
-
-rules:
-  - RULE-SET,DustinWin-applications,DIRECT
-  - RULE-SET,DustinWin-ai,AI Suite
-  - RULE-SET,DustinWin-proxy,Proxy
-  - RULE-SET,DustinWin-cn,Domestic
-  - RULE-SET,DustinWin-gfw,Proxy
-  - RULE-SET,DustinWin-telegramip,Telegram
-  - RULE-SET,DustinWin-netflix,Netflix
-  - DOMAIN-SUFFIX,openai.com,AI Suite
-  - DOMAIN-SUFFIX,github.com,Proxy
-  - DOMAIN-KEYWORD,bilibili,DIRECT
-  - GEOIP,CN,Domestic,no-resolve
-  - MATCH,Proxy`;
-
-function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
-
-function highlightYamlLine(line) {
-  if (/^\s*#/.test(line)) return `<span class="y-comment">${esc(line)}</span>`;
-  let out = esc(line);
-  // 键值对
-  out = out.replace(/^(\s*)([\w.-]+)(:)(\s|$)/, `$1<span class="y-key">$2</span>$3$4`);
-  // 布尔值
-  out = out.replace(/:\s(true|false)\s*$/, ': <span class="y-bool">$1</span>');
-  // 数字
-  out = out.replace(/:\s(\d+)\s*$/, ': <span class="y-num">$1</span>');
-  // 字符串
-  out = out.replace(/:\s"([^"]*)"\s*$/, ': <span class="y-str">"$1"</span>');
-  // 列表项
-  out = out.replace(/^(\s*)(-)(\s)/, `$1<span class="y-dash">$2</span>$3`);
-  return out;
-}
-
-function renderYaml() {
-  const code = document.getElementById('yamlCode');
-  const lines = YAML_DEMO.split('\n');
-  code.innerHTML = lines.map((l, i) =>
-    `<div class="yaml-line"><span class="ln">${i + 1}</span><span>${highlightYamlLine(l) || ' '}</span></div>`
-  ).join('');
-  document.getElementById('yamlMeta').textContent = `${lines.length} 行 · ${(YAML_DEMO.length / 1024).toFixed(1)} KB`;
-}
-
-/* ============ 生成 demo ============ */
-function generate(btn) {
-  const text = document.getElementById('genBtnText');
-  btn.classList.add('loading');
-  const steps = ['正在校验节点…', '正在检查策略组…', '正在合并规则…', '正在序列化 YAML…'];
-  let i = 0;
-  text.textContent = steps[0];
-  const timer = setInterval(() => {
-    i++;
-    if (i < steps.length) { text.textContent = steps[i]; }
-    else {
-      clearInterval(timer);
-      btn.classList.remove('loading');
-      text.textContent = '生成并检查';
-      document.getElementById('checkResults').classList.add('show');
-      document.getElementById('yamlWrap').classList.add('show');
-      renderYaml();
-      toast('配置检查通过，订阅已保存并立即生效');
-      document.getElementById('yamlWrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  function setText(idOrElement, value, fallback) {
+    var element = typeof idOrElement === "string" ? $(idOrElement) : idOrElement;
+    if (!element) return;
+    if (value === undefined || value === null || value === "") {
+      element.textContent = fallback === undefined ? "—" : String(fallback);
+    } else {
+      element.textContent = String(value);
     }
-  }, 620);
-}
+  }
 
-/* ============ 复制订阅 ============ */
-function copySub() {
-  const url = 'https://clash.910501.xyz/sub/8f3a-c21e';
-  const btn = document.getElementById('subCopyBtn');
-  (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
-    .catch(() => {})
-    .finally(() => {
-      btn.classList.add('copied');
-      setTimeout(() => btn.classList.remove('copied'), 1600);
-      toast('订阅链接已复制到剪贴板');
+  function clearElement(element) {
+    if (!element) return;
+    while (element.firstChild) element.removeChild(element.firstChild);
+  }
+
+  function appendText(parent, value, className) {
+    var node = document.createElement("span");
+    if (className) node.className = className;
+    node.textContent = value === undefined || value === null ? "" : String(value);
+    parent.appendChild(node);
+    return node;
+  }
+
+  function makeButton(label, className, handler) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = className || "btn";
+    button.textContent = label;
+    if (handler) button.addEventListener("click", handler);
+    return button;
+  }
+
+  function showToast(message, type) {
+    var wrap = $("toastWrap");
+    if (!wrap) return;
+    var item = document.createElement("div");
+    item.className = "toast" + (type === "info" ? " info" : "");
+    var icon = document.createElement("span");
+    icon.className = "t-ico";
+    icon.textContent = type === "error" ? "!" : (type === "info" ? "i" : "✓");
+    var text = document.createElement("span");
+    text.textContent = message === undefined || message === null ? "请求失败" : String(message);
+    item.appendChild(icon);
+    item.appendChild(text);
+    wrap.appendChild(item);
+    window.setTimeout(function () {
+      item.classList.add("out");
+      window.setTimeout(function () { if (item.parentNode) item.parentNode.removeChild(item); }, 420);
+    }, 3200);
+  }
+
+  window.toast = showToast;
+
+  function statusLabel(label, tone) {
+    var text = $("serviceStatus");
+    if (text) text.textContent = label || "—";
+    setText("footerServiceStatus", label, "—");
+    var top = document.querySelector(".sub-status");
+    if (top) {
+      top.classList.toggle("status-error", tone === "error");
+      top.classList.toggle("status-warn", tone === "warn");
+    }
+  }
+
+  function updateDraftStatus() {
+    if (state.loading) {
+      statusLabel("正在加载", "warn");
+      setText("draftStatus", "正在加载后端草稿…");
+      return;
+    }
+    if (state.saveError) {
+      statusLabel("保存失败", "error");
+      setText("draftStatus", "草稿保存失败：" + state.saveError);
+      return;
+    }
+    if (state.dirtyGeneration !== state.savedGeneration) {
+      statusLabel("草稿未保存", "warn");
+      setText("draftStatus", "草稿有未保存修改，正在等待保存");
+      return;
+    }
+    statusLabel(state.authenticated ? "后端已连接" : "未登录", state.authenticated ? "ok" : "warn");
+    setText("draftStatus", state.authenticated ? "草稿已保存" : "请登录后继续");
+  }
+
+  function legacyError(data) {
+    if (!data) return "请求失败";
+    if (typeof data.error === "string" && data.error) return data.error;
+    if (typeof data.message === "string" && data.message) return data.message;
+    if (typeof data.detail === "string" && data.detail) return data.detail;
+    if (isObject(data.detail)) {
+      if (typeof data.detail.error === "string") return data.detail.error;
+      if (typeof data.detail.message === "string") return data.detail.message;
+    }
+    return "请求失败";
+  }
+
+  function errorDetails(data) {
+    if (!data) return null;
+    if (data.details !== undefined) return data.details;
+    if (data.detail && isObject(data.detail)) return data.detail;
+    return null;
+  }
+
+  function parseResponse(response) {
+    return response.text().then(function (raw) {
+      if (!raw) return {};
+      try { return JSON.parse(raw); } catch (_) { return { ok: false, error: raw }; }
     });
-}
+  }
 
-/* ============ 侧栏折叠 ============ */
-document.getElementById('sidebarToggle').addEventListener('click', () => {
-  document.getElementById('layout').classList.toggle('side-hidden');
-});
+  function ApiError(message, status, details, payload) {
+    this.name = "ApiError";
+    this.message = message || "请求失败";
+    this.status = status || 0;
+    this.details = details || null;
+    this.payload = payload || null;
+  }
+  ApiError.prototype = Object.create(Error.prototype);
+  ApiError.prototype.constructor = ApiError;
 
-/* ============ 底栏延迟模拟 ============ */
-setInterval(() => {
-  const el = document.getElementById('liveLatency');
-  if (el) el.textContent = 38 + Math.round(Math.random() * 14);
-}, 2200);
+  async function refreshSession() {
+    var response = await fetch("/api/session", {
+      credentials: "include",
+      headers: { Accept: "application/json" }
+    });
+    var data = await parseResponse(response);
+    if (data && data.csrf_token) {
+      state.authCsrf = data.csrf_token;
+      if (data.authenticated) state.csrfToken = data.csrf_token;
+    }
+    if (data && data.authenticated) {
+      state.authenticated = true;
+      state.user = data.user || state.user;
+      renderUserPanel(state.user);
+    } else {
+      state.authenticated = false;
+      state.user = null;
+    }
+    return data;
+  }
+
+  async function apiRequest(path, options) {
+    var opts = options || {};
+    var method = String(opts.method || "GET").toUpperCase();
+    var attempt = 0;
+    while (true) {
+      var headers = {};
+      var suppliedHeaders = opts.headers || {};
+      Object.keys(suppliedHeaders).forEach(function (key) { headers[key] = suppliedHeaders[key]; });
+      headers.Accept = headers.Accept || "application/json";
+      var body = opts.body;
+      if (body !== undefined && body !== null && !(body instanceof FormData)) {
+        if (isObject(body) && opts.csrfField) {
+          body = clone(body);
+          body[opts.csrfField] = state.authCsrf || state.csrfToken || "";
+        }
+        if (isObject(body) || Array.isArray(body)) {
+          headers["Content-Type"] = headers["Content-Type"] || "application/json";
+          body = JSON.stringify(body);
+        }
+      }
+      if (method !== "GET" && method !== "HEAD") {
+        headers["X-CSRF-Token"] = opts.csrfOverride || state.csrfToken || state.authCsrf || "";
+      }
+      var response;
+      try {
+        response = await fetch(path, {
+          method: method,
+          credentials: "include",
+          headers: headers,
+          body: body
+        });
+      } catch (networkError) {
+        throw new ApiError("网络请求失败，请检查服务是否可用", 0, null, null);
+      }
+      var data = await parseResponse(response);
+      if (
+        (response.status === 401 || response.status === 403) &&
+        attempt === 0 &&
+        !opts.skipSessionRefresh &&
+        path !== "/api/session"
+      ) {
+        attempt += 1;
+        var session = await refreshSession();
+        if (session && session.authenticated) continue;
+      }
+      if (!response.ok || (data && data.ok === false && !opts.allowNotOk)) {
+        throw new ApiError(legacyError(data), response.status, errorDetails(data), data);
+      }
+      return data || {};
+    }
+  }
+
+  function displayApiError(error, fallback) {
+    var message = error && error.message ? error.message : (fallback || "请求失败");
+    showToast(message, "error");
+    return message;
+  }
+
+  function draftPayload() {
+    var payload = {};
+    DRAFT_KEYS.forEach(function (key) { payload[key] = clone(state.config[key]); });
+    return payload;
+  }
+
+  function updateServerFields(payload) {
+    if (!payload || !isObject(payload)) return;
+    if (payload.subscription) state.subscription = clone(payload.subscription);
+    if (payload.counts || payload.statistics) state.counts = clone(payload.counts || payload.statistics);
+    if (Array.isArray(payload.all_targets)) state.allTargets = clone(payload.all_targets);
+    if (Array.isArray(payload.warnings)) state.warnings = clone(payload.warnings);
+    if (Array.isArray(payload.warnings) && payload.warnings.some(function (warning) {
+      return String(warning).indexOf("历史草稿字段损坏") >= 0;
+    })) {
+      state.draftCorrupted = true;
+    } else if (payload.config || payload.proxies) {
+      state.draftCorrupted = false;
+      state.draftCorruptionAcknowledged = false;
+    }
+    if (isObject(payload.provider_defaults)) state.providerDefaults = clone(payload.provider_defaults);
+    if (isObject(payload.presets)) state.presets = clone(payload.presets);
+    if (isObject(payload.dns_presets)) state.dnsPresets = clone(payload.dns_presets);
+    if (payload.user) {
+      state.user = clone(payload.user);
+      state.authenticated = true;
+      renderUserPanel(state.user);
+    }
+  }
+
+  function applyBootstrap(payload, resetGeneration) {
+    if (!payload) return;
+    state.config = canonicalDraft(payload);
+    updateServerFields(payload);
+    state.nodeFormSchema = isObject(payload.node_form_schema) ? clone(payload.node_form_schema) : {};
+    state.globalConfigSchema = isObject(payload.global_config_schema) ? clone(payload.global_config_schema) : {};
+    state.presets = isObject(payload.presets) ? clone(payload.presets) : {};
+    state.dnsPresets = isObject(payload.dns_presets) ? clone(payload.dns_presets) : state.presets;
+    state.providerDefaults = isObject(payload.provider_defaults) ? clone(payload.provider_defaults) : {};
+    state.loading = false;
+    state.saveError = null;
+    if (resetGeneration) {
+      state.dirtyGeneration = 0;
+      state.savedGeneration = 0;
+      state.validation = null;
+      state.validatedGeneration = -1;
+      state.validatedSignature = "";
+    }
+    renderAll();
+    updateDraftStatus();
+  }
+
+  function applyServerResponse(payload, generation) {
+    if (!payload || generation !== state.dirtyGeneration) return false;
+    state.config = canonicalDraft(payload);
+    updateServerFields(payload);
+    if (payload.node_form_schema) state.nodeFormSchema = clone(payload.node_form_schema);
+    if (payload.global_config_schema) state.globalConfigSchema = clone(payload.global_config_schema);
+    if (payload.presets) state.presets = clone(payload.presets);
+    if (payload.dns_presets) state.dnsPresets = clone(payload.dns_presets);
+    if (payload.provider_defaults) state.providerDefaults = clone(payload.provider_defaults);
+    state.savedGeneration = generation;
+    state.saveError = null;
+    renderAll();
+    updateDraftStatus();
+    return true;
+  }
+
+  function scheduleDraftSave() {
+    if (state.saveTimer) window.clearTimeout(state.saveTimer);
+    state.saveTimer = window.setTimeout(function () {
+      state.saveTimer = null;
+      if (state.dirtyGeneration > state.savedGeneration) saveChain(state.dirtyGeneration);
+    }, 650);
+  }
+
+  function queueDraftSave(generation) {
+    if (!state.authenticated || generation !== state.dirtyGeneration) return state.saveSequence;
+    var snapshot = draftPayload();
+    state.savePending += 1;
+    state.saveInFlight = true;
+    state.saveSequence = state.saveSequence
+      .catch(function () {})
+      .then(function () {
+        return apiRequest("/api/config", {
+          method: "PUT",
+          body: snapshot
+        }).then(function (payload) {
+          if (generation === state.dirtyGeneration) {
+            applyServerResponse(payload, generation);
+          }
+          return payload;
+        });
+      })
+      .catch(function (error) {
+        if (generation === state.dirtyGeneration) {
+          state.saveError = error && error.message ? error.message : "保存失败";
+          updateDraftStatus();
+          showToast(state.saveError, "error");
+        }
+        throw error;
+      })
+      .then(function (payload) {
+        state.savePending = Math.max(0, state.savePending - 1);
+        state.saveInFlight = state.savePending > 0;
+        // renderAll() runs before this flag is cleared; refresh the controls again
+        // so a completed save cannot leave global actions disabled.
+        updateGlobalActionButtons();
+        return payload;
+      }, function (error) {
+        state.savePending = Math.max(0, state.savePending - 1);
+        state.saveInFlight = state.savePending > 0;
+        // A failed save must release the same global mode/DNS controls.
+        updateGlobalActionButtons();
+        throw error;
+      });
+    return state.saveSequence;
+  }
+
+  function markDirty() {
+    // 历史草稿解析失败时后端返回空草稿；第一次改动保存前必须让用户明确知晓
+    // 保存会覆盖原始数据，避免静默清空。
+    if (state.draftCorrupted && !state.draftCorruptionAcknowledged) {
+      var proceed = window.confirm("检测到服务器上的历史草稿字段损坏，当前显示的是空草稿。\n\n继续保存将用当前内容覆盖原始草稿（包括全部节点与规则）。确定继续吗？");
+      if (!proceed) throw new Error("已取消保存，原草稿未被覆盖");
+      state.draftCorruptionAcknowledged = true;
+    }
+    state.dirtyGeneration += 1;
+    state.validation = null;
+    state.validatedGeneration = -1;
+    state.validatedSignature = "";
+    state.saveError = null;
+    renderValidation(null);
+    updateDraftStatus();
+    scheduleDraftSave();
+  }
+
+  async function flushDraftSave() {
+    if (state.saveTimer) {
+      window.clearTimeout(state.saveTimer);
+      state.saveTimer = null;
+    }
+    if (!state.authenticated) return;
+    while (state.dirtyGeneration > state.savedGeneration) {
+      var generation = state.dirtyGeneration;
+      try {
+        await queueDraftSave(generation);
+      } catch (error) {
+        throw error;
+      }
+      if (generation === state.dirtyGeneration) break;
+    }
+    await state.saveSequence;
+    updateDraftStatus();
+  }
+
+  function saveChain(generation) {
+    return queueDraftSave(generation === undefined ? state.dirtyGeneration : generation);
+  }
+  saveChain.markDirty = markDirty;
+  saveChain.flushDraftSave = flushDraftSave;
+  saveChain.queueDraftSave = queueDraftSave;
+  window.saveChain = saveChain;
+
+  function showAuthOverlay(session) {
+    state.loading = false;
+    state.authenticated = false;
+    state.authCsrf = (session && session.csrf_token) || state.authCsrf || "";
+    document.body.classList.add("login-overlay");
+    var overlay = $("loginOverlay");
+    if (overlay) overlay.classList.add("active");
+    var registerAllowed = !session || session.allow_registration !== false;
+    var registerTab = $("registerTabBtn");
+    if (registerTab) registerTab.hidden = !registerAllowed;
+    if (!registerAllowed) showAuthPane("login");
+    setText("serviceStatus", "未登录");
+    setText("draftStatus", "登录后加载你的独立草稿");
+  }
+
+  function hideAuthOverlay() {
+    document.body.classList.remove("login-overlay");
+    var overlay = $("loginOverlay");
+    if (overlay) overlay.classList.remove("active");
+  }
+
+  function showAuthPane(name) {
+    var login = name === "login";
+    if ($("loginTabBtn")) $("loginTabBtn").classList.toggle("active", login);
+    if ($("registerTabBtn")) $("registerTabBtn").classList.toggle("active", !login);
+    if ($("loginPane")) $("loginPane").classList.toggle("active", login);
+    if ($("registerPane")) $("registerPane").classList.toggle("active", !login);
+  }
+
+  function renderUserPanel(user) {
+    var avatar = $("userAvatar");
+    var dropdown = $("userDropdown");
+    if (!avatar || !dropdown) return;
+    clearElement(dropdown);
+    if (!user || !user.username) {
+      avatar.textContent = "U";
+      avatar.title = "未登录";
+      return;
+    }
+    avatar.textContent = String(user.username).slice(0, 1).toUpperCase();
+    avatar.title = String(user.username);
+    var name = document.createElement("div");
+    name.className = "ud-name";
+    name.textContent = "欢迎，" + String(user.username);
+    dropdown.appendChild(name);
+    dropdown.appendChild(makeButton("退出登录", "danger", logout));
+  }
+
+  function toggleUserDropdown() {
+    var dropdown = $("userDropdown");
+    if (dropdown) dropdown.classList.toggle("open");
+  }
+
+  async function logout() {
+    try {
+      await apiRequest("/api/auth/logout", {
+        method: "POST",
+        skipSessionRefresh: true
+      });
+      state.user = null;
+      state.authenticated = false;
+      state.config = emptyDraft();
+      renderUserPanel(null);
+      showAuthOverlay({ csrf_token: "" });
+      showToast("已退出登录", "info");
+    } catch (error) {
+      displayApiError(error, "退出登录失败");
+    }
+  }
+
+  async function login(event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    var button = form.querySelector("button[type=submit]");
+    if (button) button.disabled = true;
+    try {
+      var payload = await apiRequest("/api/auth/login", {
+        method: "POST",
+        body: {
+          username: form.elements.username.value,
+          password: form.elements.password.value,
+          remember: Boolean(form.elements.remember && form.elements.remember.checked)
+        },
+        csrfField: "csrf_token"
+      });
+      state.authenticated = true;
+      state.user = payload.user || null;
+      state.csrfToken = payload.csrf_token || state.csrfToken;
+      hideAuthOverlay();
+      await loadBootstrap();
+    } catch (error) {
+      displayApiError(error, "登录失败");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function register(event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    if (form.elements.password.value !== form.elements.passwordConfirm.value) {
+      showToast("两次输入的密码不一致", "error");
+      return;
+    }
+    var button = form.querySelector("button[type=submit]");
+    if (button) button.disabled = true;
+    try {
+      var payload = await apiRequest("/api/auth/register", {
+        method: "POST",
+        body: {
+          username: form.elements.username.value,
+          password: form.elements.password.value,
+          password_confirm: form.elements.passwordConfirm.value
+        },
+        csrfField: "csrf_token"
+      });
+      state.authenticated = true;
+      state.user = payload.user || null;
+      state.csrfToken = payload.csrf_token || state.csrfToken;
+      form.reset();
+      renderUserPanel(state.user);
+      hideAuthOverlay();
+      await loadBootstrap();
+      showToast("注册成功，已加载你的草稿", "info");
+    } catch (error) {
+      displayApiError(error, "注册失败");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function loadBootstrap() {
+    state.loading = true;
+    updateDraftStatus();
+    try {
+      var payload = await apiRequest("/api/config");
+      state.authenticated = true;
+      applyBootstrap(payload, true);
+      hideAuthOverlay();
+      if (state.user && state.user.is_admin === true) await loadAdminUsers();
+    } catch (error) {
+      if (error && (error.status === 401 || error.status === 403)) {
+        showAuthOverlay(await refreshSession());
+      } else {
+        state.loading = false;
+        state.saveError = error && error.message ? error.message : "配置加载失败";
+        updateDraftStatus();
+        displayApiError(error, "获取配置失败");
+      }
+    }
+  }
+
+  function showStep(step) {
+    var value = Math.max(1, Math.min(4, Number(step) || 1));
+    document.querySelectorAll("#workspaceNav .wnav-item").forEach(function (button) {
+      var active = Number(button.dataset.step) === value;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+      if (active) button.setAttribute("tabindex", "0");
+      else button.setAttribute("tabindex", "-1");
+    });
+    document.querySelectorAll(".step-section").forEach(function (panel) {
+      var active = panel.id === "step" + value;
+      panel.classList.toggle("active", active);
+      panel.setAttribute("aria-hidden", active ? "false" : "true");
+    });
+  }
+
+  function initNavigation() {
+    var nav = $("workspaceNav");
+    if (!nav) return;
+    nav.addEventListener("click", function (event) {
+      var button = event.target.closest(".wnav-item");
+      if (button) showStep(button.dataset.step);
+    });
+    nav.addEventListener("keydown", function (event) {
+      var buttons = Array.prototype.slice.call(nav.querySelectorAll(".wnav-item"));
+      var current = buttons.indexOf(document.activeElement);
+      if (current < 0) return;
+      var next = current;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (current + 1) % buttons.length;
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (current - 1 + buttons.length) % buttons.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = buttons.length - 1;
+      if (next !== current) {
+        event.preventDefault();
+        buttons[next].focus();
+        showStep(buttons[next].dataset.step);
+      }
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        showStep(document.activeElement.dataset.step);
+      }
+    });
+    showStep(1);
+  }
+
+  function renderStats() {
+    var counts = state.counts || {};
+    var ready = !state.loading && state.authenticated;
+    var nodeCount = ready && Array.isArray(state.config.proxies) ? state.config.proxies.length : undefined;
+    setText("nodeCount", nodeCount, "—");
+    setText("ruleCountStat", ready ? counts.rules : undefined, "—");
+    setText("groupCount", ready ? counts.groups : undefined, "—");
+    var subscription = state.subscription || {};
+    setText("subscriptionStatus", subscription.status === "published" ? "已发布" : (subscription.status === "draft" ? "草稿" : "—"));
+    setText("subscriptionMeta", subscription.published_at || (subscription.status === "draft" ? "尚未发布" : "—"));
+    setText("nodeSummary", ready ? String(nodeCount) + " 个节点" : "正在加载");
+    setText("ruleCount", ready ? state.config.custom_rules.length : undefined, "—");
+    setText("footerNodeCount", nodeCount, "—");
+    setText("footerRuleCount", ready ? counts.rules : undefined, "—");
+    if (counts.mihomo) setText("runtimeMihomo", counts.mihomo);
+  }
+
+  function renderSubscription() {
+    var subscription = state.subscription || {};
+    var url = typeof subscription.url === "string" ? subscription.url : "";
+    setText("subUrl", url, "尚未发布订阅");
+    var title = $("subscriptionCardStatus");
+    if (title) {
+      title.textContent = subscription.status === "published" ? "● 已发布" : (subscription.status === "draft" ? "● 草稿" : "● 未发布");
+      title.style.color = subscription.status === "published" ? "var(--success)" : "var(--warn)";
+    }
+    var copy = $("subCopyBtn");
+    if (copy) copy.disabled = !url;
+  }
+
+  function renderImport() {
+    var input = $("importInput");
+    if (!input) return;
+    var placeholders = {
+      yaml: "粘贴完整 config.yaml、proxies 片段或节点列表",
+      url: "输入订阅 URL",
+      share: "每行一条 ss://、vless://、vmess://、trojan://、hysteria2://、tuic:// 或 anytls://"
+    };
+    input.placeholder = placeholders[state.importMethod] || placeholders.yaml;
+    input.setAttribute("aria-label", state.importMethod === "url" ? "订阅 URL" : "导入内容");
+    document.querySelectorAll(".method-card").forEach(function (card) {
+      var active = card.dataset.method === state.importMethod;
+      card.classList.toggle("active", active);
+      card.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    setText("importSummary", state.loading ? "正在加载后端草稿…" : (state.config.proxies.length ? "当前草稿已有 " + state.config.proxies.length + " 个节点" : "尚未导入节点"));
+  }
+
+  function renderRuleSource() {
+    var select = $("ruleSource");
+    if (!select) return;
+    var options = [
+      ["dustinwin规则", "DustinWin 规则源"],
+      ["lhie1规则", "lhie1 规则源"],
+      ["none", "无基础规则（仅使用自定义规则）"]
+    ];
+    clearElement(select);
+    options.forEach(function (item) {
+      var option = document.createElement("option");
+      option.value = item[0];
+      option.textContent = item[1];
+      select.appendChild(option);
+    });
+    if (state.config.selected_rule_type) {
+      select.value = state.config.selected_rule_type === "自定义规则" ? "none" : state.config.selected_rule_type;
+    }
+    if (!select.value) select.value = options[0][0];
+    setText("ruleSourceStatus", "当前规则源：" + select.options[select.selectedIndex].textContent);
+    renderProviderTargets();
+  }
+
+  function selectedProviderSource() {
+    if (state.config.selected_rule_type === "dustinwin规则") return "dustinwin";
+    if (state.config.selected_rule_type === "lhie1规则") return "lhie1";
+    return "";
+  }
+
+  function renderProviderTargets() {
+    var panel = $("providerTargetsPanel");
+    if (!panel) return;
+    clearElement(panel);
+    var sourceKey = selectedProviderSource();
+    panel.hidden = !sourceKey;
+    if (!sourceKey) return;
+    var defaults = isObject(state.providerDefaults[sourceKey]) ? state.providerDefaults[sourceKey] : {};
+    var overrideKey = sourceKey + "_provider_targets";
+    var overrides = isObject(state.config.global_config[overrideKey]) ? state.config.global_config[overrideKey] : {};
+    var head = document.createElement("div");
+    head.className = "panel-head";
+    var title = document.createElement("div");
+    title.className = "panel-title";
+    title.textContent = sourceKey === "dustinwin" ? "DustinWin 规则目标" : "lhie1 规则目标";
+    head.appendChild(title);
+    var restore = makeButton("恢复当前源默认", "btn btn-ghost", function () {
+      state.config.global_config[overrideKey] = {};
+      markDirty();
+      renderProviderTargets();
+      showToast("已恢复当前规则源默认目标，正在排队保存", "info");
+    });
+    restore.setAttribute("aria-label", "恢复当前规则源默认目标");
+    head.appendChild(restore);
+    panel.appendChild(head);
+    var hint = document.createElement("div");
+    hint.className = "status-note";
+    hint.textContent = "仅修改当前规则源；切换到另一源不会覆盖其独立覆盖表。";
+    panel.appendChild(hint);
+    var editor = document.createElement("div");
+    editor.className = "target-editor";
+    var providerNames = Object.keys(defaults);
+    if (!providerNames.length) {
+      var empty = document.createElement("div");
+      empty.className = "phase2-empty";
+      empty.textContent = "后端尚未提供该规则源的 provider_defaults。";
+      editor.appendChild(empty);
+    }
+    providerNames.forEach(function (providerName, index) {
+      var defaultTarget = String(defaults[providerName] === undefined ? "" : defaults[providerName]);
+      var selected = String(Object.prototype.hasOwnProperty.call(overrides, providerName) ? overrides[providerName] : defaultTarget);
+      if (selected === "no-resolve") selected = "Proxy";
+      var row = document.createElement("div");
+      row.className = "target-row";
+      var text = document.createElement("span");
+      var name = document.createElement("span");
+      name.className = "target-name";
+      name.textContent = providerName;
+      var note = document.createElement("span");
+      note.className = "target-default";
+      note.textContent = "默认：" + defaultTarget;
+      text.appendChild(name);
+      text.appendChild(note);
+      row.appendChild(text);
+      var select = document.createElement("select");
+      select.id = "provider-target-" + sourceKey + "-" + index;
+      select.setAttribute("aria-label", providerName + " 目标策略");
+      var options = Array.isArray(state.allTargets) ? state.allTargets.map(String).filter(function (value) { return value !== "no-resolve"; }) : [];
+      if (options.indexOf(selected) < 0) options.unshift(selected);
+      if (!options.length) options = [selected];
+      options.filter(function (value, optionIndex, list) { return value && list.indexOf(value) === optionIndex; }).forEach(function (value) {
+        var option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      });
+      select.value = selected;
+      select.addEventListener("change", function () {
+        var next = isObject(state.config.global_config[overrideKey]) ? clone(state.config.global_config[overrideKey]) : {};
+        if (select.value === defaultTarget) delete next[providerName];
+        else next[providerName] = select.value;
+        state.config.global_config[overrideKey] = next;
+        markDirty();
+      });
+      row.appendChild(select);
+      editor.appendChild(row);
+    });
+    panel.appendChild(editor);
+  }
+
+  function renderRules() {
+    var target = $("ruleTarget");
+    var targets = Array.isArray(state.allTargets) ? state.allTargets : [];
+    if (target) {
+      // 目标策略支持从列表选择与手动输入（对齐 V1 双模式），datalist 提供候选。
+      var datalist = $("ruleTargetOptions");
+      var fillTarget = function (element) {
+        if (!element) return;
+        clearElement(element);
+        targets.filter(function (value) { return String(value) !== "no-resolve"; }).forEach(function (value) {
+          var option = document.createElement("option");
+          option.value = String(value);
+          element.appendChild(option);
+        });
+      };
+      fillTarget(datalist);
+      if (!target.value) {
+        var preferred = targets.find(function (value) { return String(value) === "Proxy"; }) || targets[0];
+        if (preferred !== undefined) target.value = String(preferred);
+      }
+      target.placeholder = targets.length ? "选择或输入策略组名称" : "输入策略组名称";
+    }
+    var list = $("ruleList");
+    if (!list) return;
+    clearElement(list);
+    var rules = Array.isArray(state.config.custom_rules) ? state.config.custom_rules : [];
+    if (!rules.length) {
+      var empty = document.createElement("div");
+      empty.className = "check-empty";
+      empty.textContent = "暂无自定义规则";
+      list.appendChild(empty);
+      return;
+    }
+    rules.forEach(function (raw, index) {
+      var parts = String(raw).split(",");
+      var item = document.createElement("div");
+      item.className = "rule-item";
+      appendText(item, String(index + 1).padStart(2, "0"), "rule-idx");
+      appendText(item, parts[0] || "", "rule-type");
+      appendText(item, parts[1] || "", "rule-value");
+      var route = document.createElement("span");
+      route.className = "rule-target";
+      route.textContent = "→ " + (parts.slice(2).join(",") || "");
+      item.appendChild(route);
+      var moveUp = makeButton("上移", "chip-btn", function () { moveRule(index, -1); });
+      moveUp.disabled = index === 0;
+      var moveDown = makeButton("下移", "chip-btn", function () { moveRule(index, 1); });
+      moveDown.disabled = index === rules.length - 1;
+      item.appendChild(moveUp);
+      item.appendChild(moveDown);
+      var remove = makeButton("删除", "rule-del", function () {
+        state.config.custom_rules.splice(index, 1);
+        markDirty();
+        renderRules();
+        renderStats();
+      });
+      item.appendChild(remove);
+      list.appendChild(item);
+    });
+  }
+
+  function moveRule(index, direction) {
+    var rules = state.config.custom_rules;
+    var next = index + direction;
+    if (!Array.isArray(rules) || next < 0 || next >= rules.length) return;
+    var current = rules[index];
+    rules[index] = rules[next];
+    rules[next] = current;
+    markDirty();
+    renderRules();
+    renderStats();
+  }
+
+  function rulesetField(parent, id, labelText, type, value, options) {
+    var field = document.createElement("div");
+    field.className = "field";
+    var label = document.createElement("label");
+    label.htmlFor = id;
+    label.textContent = labelText;
+    field.appendChild(label);
+    var control = document.createElement(type === "select" ? "select" : "input");
+    control.id = id;
+    control.name = id;
+    if (type !== "select") control.type = type;
+    if (type === "select") {
+      (options || []).forEach(function (optionValue) {
+        var option = document.createElement("option");
+        option.value = String(optionValue);
+        option.textContent = String(optionValue);
+        control.appendChild(option);
+      });
+    }
+    if (type === "file") control.className = "ruleset-file";
+    if (type !== "file") control.value = value === undefined || value === null ? "" : String(value);
+    field.appendChild(control);
+    parent.appendChild(field);
+    return control;
+  }
+
+  function rulesetTargetOptions(current) {
+    var options = Array.isArray(state.allTargets) ? state.allTargets.map(String).filter(function (value) { return value !== "no-resolve"; }) : [];
+    var selected = String(current || "Proxy");
+    if (selected === "no-resolve") selected = "Proxy";
+    if (options.indexOf(selected) < 0) options.unshift(selected);
+    if (!options.length) options = [selected];
+    return options.filter(function (value, index, list) { return value && list.indexOf(value) === index; });
+  }
+
+  function renderRulesets() {
+    var panel = $("rulesetPanel");
+    if (!panel) return;
+    clearElement(panel);
+    var providers = isObject(state.config.custom_rule_providers) ? state.config.custom_rule_providers : {};
+    var head = document.createElement("div");
+    head.className = "panel-head";
+    var title = document.createElement("div");
+    title.className = "panel-title";
+    title.textContent = "自定义规则集";
+    head.appendChild(title);
+    var hint = document.createElement("span");
+    hint.className = "panel-hint";
+    hint.textContent = Object.keys(providers).length + " 个规则集";
+    head.appendChild(hint);
+    panel.appendChild(head);
+    var listSection = document.createElement("div");
+    listSection.className = "phase2-section";
+    var listHead = document.createElement("div");
+    listHead.className = "phase2-section-head";
+    var listTitle = document.createElement("div");
+    listTitle.className = "phase2-section-title";
+    listTitle.textContent = "当前规则集";
+    listHead.appendChild(listTitle);
+    var listHint = document.createElement("div");
+    listHint.className = "phase2-section-hint";
+    listHint.textContent = "顺序按 provider.order 交给后端生成";
+    listHead.appendChild(listHint);
+    listSection.appendChild(listHead);
+    var list = document.createElement("div");
+    list.className = "ruleset-list";
+    var names = Object.keys(providers);
+    if (!names.length) {
+      var empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "暂无自定义规则集，可在下方添加 HTTP 或本地文件规则集。";
+      list.appendChild(empty);
+    }
+    names.forEach(function (name) {
+      var provider = isObject(providers[name]) ? providers[name] : {};
+      var row = document.createElement("div");
+      row.className = "ruleset-row";
+      var main = document.createElement("div");
+      main.className = "ruleset-row-main";
+      var nameNode = document.createElement("div");
+      nameNode.className = "ruleset-name";
+      nameNode.textContent = name;
+      main.appendChild(nameNode);
+      var meta = document.createElement("div");
+      meta.className = "ruleset-meta";
+      var source = provider.type === "http" ? (provider.url || "HTTP") : (provider.path || "本地文件");
+      meta.textContent = String(provider.type || "file") + " · " + String(provider.behavior || "classical") + " · " + String(provider.format || "") + " · " + String(provider.order || "追加") + " · 目标：" + String(provider.target || "Proxy") + " · " + String(source);
+      main.appendChild(meta);
+      row.appendChild(main);
+      var actions = document.createElement("div");
+      actions.className = "ruleset-row-actions";
+      var remove = makeButton("移除", "chip-btn danger", function () { removeRuleset(name); });
+      remove.setAttribute("aria-label", "移除规则集 " + name);
+      actions.appendChild(remove);
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+    listSection.appendChild(list);
+    panel.appendChild(listSection);
+
+    var formSection = document.createElement("div");
+    formSection.className = "phase2-section";
+    var formHead = document.createElement("div");
+    formHead.className = "phase2-section-head";
+    var formTitle = document.createElement("div");
+    formTitle.className = "phase2-section-title";
+    formTitle.textContent = "添加规则集";
+    formHead.appendChild(formTitle);
+    var formHint = document.createElement("div");
+    formHint.className = "phase2-section-hint";
+    formHint.textContent = "保存前会校验必填字段；URL 可单独测试";
+    formHead.appendChild(formHint);
+    formSection.appendChild(formHead);
+    var mode = document.createElement("div");
+    mode.className = "ruleset-mode";
+    var httpMode = makeButton("HTTP 规则集", "btn btn-ghost" + (state.rulesetMode === "http" ? " active" : ""), function () {
+      state.rulesetMode = "http";
+      renderRulesets();
+    });
+    httpMode.id = "rulesetHttpModeBtn";
+    httpMode.setAttribute("aria-pressed", state.rulesetMode === "http" ? "true" : "false");
+    var fileMode = makeButton("本地文件规则集", "btn btn-ghost" + (state.rulesetMode === "file" ? " active" : ""), function () {
+      state.rulesetMode = "file";
+      renderRulesets();
+    });
+    fileMode.id = "rulesetFileModeBtn";
+    fileMode.setAttribute("aria-pressed", state.rulesetMode === "file" ? "true" : "false");
+    mode.appendChild(httpMode);
+    mode.appendChild(fileMode);
+    formSection.appendChild(mode);
+    var form = document.createElement("div");
+    form.className = "ruleset-form";
+    rulesetField(form, "rulesetAlias", "规则集别名", "text", "");
+    if (state.rulesetMode === "http") {
+      rulesetField(form, "rulesetUrl", "规则集 URL", "url", "");
+    } else {
+      var fileField = rulesetField(form, "rulesetFile", "规则集文件", "file", "");
+      fileField.accept = ".yaml,.yml,.txt,.list,.mrs";
+    }
+    rulesetField(form, "rulesetBehavior", "behavior", "select", "domain", ["classical", "domain", "ipcidr"]);
+    rulesetField(form, "rulesetFormat", "format", "select", "yaml", ["text", "yaml", "mrs"]);
+    var interval = rulesetField(form, "rulesetInterval", "更新间隔（秒）", "number", "86400");
+    interval.min = "1";
+    interval.max = "31536000";
+    var order = rulesetField(form, "rulesetOrder", "匹配顺序", "select", "追加", ["优先 (覆盖)", "默认 (追加)", "追加"]);
+    order.setAttribute("aria-describedby", "rulesetOrderHelp");
+    var target = rulesetField(form, "rulesetTarget", "目标策略", "select", "Proxy", rulesetTargetOptions("Proxy"));
+    target.setAttribute("aria-label", "规则集目标策略");
+    formSection.appendChild(form);
+    var orderHelp = document.createElement("div");
+    orderHelp.id = "rulesetOrderHelp";
+    orderHelp.className = "schema-note";
+    orderHelp.textContent = "优先 (覆盖) 会把规则集放在基础规则之前；追加会放在基础规则之后。";
+    formSection.appendChild(orderHelp);
+    var actions = document.createElement("div");
+    actions.className = "ruleset-actions";
+    if (state.rulesetMode === "http") {
+      var test = makeButton("测试 URL", "btn btn-ghost", testRulesetUrl);
+      test.id = "rulesetTestUrlBtn";
+      actions.appendChild(test);
+    }
+    var save = makeButton(state.rulesetMode === "http" ? "保存 HTTP 规则集" : "上传并保存文件规则集", "btn btn-primary", state.rulesetMode === "http" ? saveHttpRuleset : uploadFileRuleset);
+    save.id = state.rulesetMode === "http" ? "rulesetSaveBtn" : "rulesetUploadBtn";
+    actions.appendChild(save);
+    formSection.appendChild(actions);
+    var message = document.createElement("div");
+    message.id = "rulesetMessage";
+    message.className = "ruleset-message status-note";
+    message.textContent = state.rulesetMessage || "";
+    formSection.appendChild(message);
+    panel.appendChild(formSection);
+  }
+
+  function rulesetFormValues() {
+    function value(id, fallback) {
+      var control = $(id);
+      return control ? String(control.value || "").trim() : fallback;
+    }
+    return {
+      alias: value("rulesetAlias", ""),
+      url: value("rulesetUrl", ""),
+      behavior: value("rulesetBehavior", "domain"),
+      format: value("rulesetFormat", "yaml"),
+      interval: value("rulesetInterval", "86400"),
+      order: value("rulesetOrder", "追加"),
+      target: value("rulesetTarget", "Proxy")
+    };
+  }
+
+  function validateRulesetValues(values, requireUrl) {
+    if (!values.alias || !/^[A-Za-z0-9._-]+$/.test(values.alias)) throw new ApiError("规则集别名只能使用字母、数字、点、下划线或短横线", 400);
+    var interval = Number(values.interval);
+    if (!Number.isInteger(interval) || interval < 1 || interval > 31536000) throw new ApiError("更新间隔必须是 1 到 31536000 秒之间的整数", 400);
+    if (!values.target) throw new ApiError("请选择规则集目标策略", 400);
+    if (values.target === "no-resolve") throw new ApiError("no-resolve 只能作为规则修饰符，不能作为目标策略", 400);
+    if (requireUrl) {
+      if (!values.url) throw new ApiError("请输入规则集 URL", 400);
+      try {
+        var parsed = new URL(values.url, window.location.origin);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("protocol");
+      } catch (_) {
+        throw new ApiError("规则集 URL 必须是 http 或 https 地址", 400);
+      }
+    }
+    return interval;
+  }
+
+  async function testRulesetUrl() {
+    var values = rulesetFormValues();
+    try {
+      validateRulesetValues(values, true);
+      var button = $("rulesetTestUrlBtn");
+      if (button) button.disabled = true;
+      var payload = await apiRequest("/api/ruleset/test-url", { method: "POST", body: { url: values.url } });
+      state.rulesetUrlTest = { url: values.url, ok: true };
+      state.rulesetMessage = "URL 检查通过：" + String(payload.content_type || "可访问") + "，" + String(payload.size || 0) + " bytes";
+      var message = $("rulesetMessage");
+      if (message) message.textContent = state.rulesetMessage;
+    } catch (error) {
+      state.rulesetUrlTest = { url: values.url, ok: false };
+      state.rulesetMessage = error && error.message ? error.message : "URL 检查失败";
+      var errorMessage = $("rulesetMessage");
+      if (errorMessage) errorMessage.textContent = state.rulesetMessage;
+      displayApiError(error, "规则集 URL 检查失败");
+    } finally {
+      var testButton = $("rulesetTestUrlBtn");
+      if (testButton) testButton.disabled = false;
+    }
+  }
+
+  async function saveHttpRuleset() {
+    var values = rulesetFormValues();
+    var button = $("rulesetSaveBtn");
+    if (button) button.disabled = true;
+    try {
+      var interval = validateRulesetValues(values, true);
+      var provider = {
+        type: "http",
+        behavior: values.behavior,
+        format: values.format,
+        url: values.url,
+        interval: interval,
+        order: values.order,
+        target: values.target
+      };
+      state.config.custom_rule_providers[values.alias] = provider;
+      markDirty();
+      await flushDraftSave();
+      state.rulesetMessage = "HTTP 规则集已保存到 canonical 草稿。";
+      renderAll();
+      showToast("HTTP 规则集已保存", "info");
+    } catch (error) {
+      displayApiError(error, "HTTP 规则集保存失败");
+    } finally {
+      var saveButton = $("rulesetSaveBtn");
+      if (saveButton) saveButton.disabled = false;
+    }
+  }
+
+  async function uploadFileRuleset() {
+    var values = rulesetFormValues();
+    var fileInput = $("rulesetFile");
+    var file = fileInput && fileInput.files && fileInput.files[0];
+    var button = $("rulesetUploadBtn");
+    if (button) button.disabled = true;
+    try {
+      var interval = validateRulesetValues(values, false);
+      if (!file) throw new ApiError("请选择规则集文件", 400);
+      var form = new FormData();
+      form.append("file", file);
+      form.append("alias", values.alias);
+      form.append("behavior", values.behavior);
+      form.append("format", values.format);
+      form.append("interval", String(interval));
+      form.append("order", values.order);
+      form.append("target", values.target);
+      var payload = await apiRequest("/api/ruleset/upload", { method: "POST", body: form });
+      var incoming = isObject(payload.custom_rule_providers) ? payload.custom_rule_providers : {};
+      if (!Object.keys(incoming).length && isObject(payload.custom_rule_provider)) incoming = payload.custom_rule_provider;
+      if (!Object.keys(incoming).length && isObject(payload.provider)) incoming[values.alias] = payload.provider;
+      if (!Object.keys(incoming).length) throw new ApiError("服务端未返回可保存的规则集 provider", 502);
+      state.config.custom_rule_providers = Object.assign({}, state.config.custom_rule_providers, clone(incoming));
+      markDirty();
+      await flushDraftSave();
+      var serverWarnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+      state.rulesetMessage = serverWarnings.length ? "文件已保存；服务端提示：" + serverWarnings.join("；") : "文件规则集已保存到 canonical 草稿。";
+      renderAll();
+      if (serverWarnings.length) showToast("文件规则集已保存，但有服务端提示", "info");
+      else showToast("文件规则集已保存", "info");
+    } catch (error) {
+      displayApiError(error, "文件规则集保存失败");
+    } finally {
+      var uploadButton = $("rulesetUploadBtn");
+      if (uploadButton) uploadButton.disabled = false;
+    }
+  }
+
+  async function restoreRemovedRuleset(name, provider, reason) {
+    state.config.custom_rule_providers[name] = provider;
+    markDirty();
+    renderAll();
+    try {
+      await flushDraftSave();
+      displayApiError(new ApiError(reason + "，草稿已恢复"), "规则集移除失败");
+    } catch (restoreError) {
+      displayApiError(new ApiError(reason + "，且草稿恢复失败，请刷新页面确认"), "规则集移除失败");
+    }
+  }
+
+  async function removeRuleset(name) {
+    var providers = isObject(state.config.custom_rule_providers) ? state.config.custom_rule_providers : {};
+    if (!Object.prototype.hasOwnProperty.call(providers, name)) return;
+    var previousProvider = clone(providers[name]);
+    var isPrivateVersion = /^\.\/ruleset\/users\/\d+\//.test(String(previousProvider && previousProvider.path || ""));
+    delete state.config.custom_rule_providers[name];
+    markDirty();
+    try {
+      // 只先保存草稿移除；当前 published YAML 可能仍引用旧版本，物理
+      // 文件必须等发布成功后的 draft ∪ published 引用清理再处理。
+      await flushDraftSave();
+      state.rulesetMessage = isPrivateVersion ? "规则集已从草稿移除；发布后清理旧版本。" : "规则集已从草稿移除。";
+      renderAll();
+      showToast(state.rulesetMessage, "info");
+    } catch (error) {
+      await restoreRemovedRuleset(name, previousProvider, "规则集移除保存失败");
+    }
+  }
+
+  function conditionMatches(condition, values) {
+    if (!condition || typeof condition !== "object") return true;
+    var actual = values[condition.key];
+    if (Object.prototype.hasOwnProperty.call(condition, "equals")) return actual === condition.equals;
+    if (Object.prototype.hasOwnProperty.call(condition, "not_equals")) return actual !== condition.not_equals;
+    return true;
+  }
+
+  function controlValues(root) {
+    var values = {};
+    if (!root) return values;
+    root.querySelectorAll("[data-field-key]").forEach(function (control) {
+      var key = control.dataset.fieldKey;
+      values[key] = control.type === "checkbox" ? control.checked : control.value;
+    });
+    return values;
+  }
+
+  function updateSchemaVisibility(root) {
+    if (!root) return;
+    var values = controlValues(root);
+    root.querySelectorAll("[data-condition]").forEach(function (field) {
+      var condition;
+      try { condition = JSON.parse(field.dataset.condition); } catch (_) { condition = null; }
+      field.classList.toggle("schema-field-hidden", !conditionMatches(condition, values));
+    });
+  }
+
+  function valueForField(field, values, fallback) {
+    var key = field.key;
+    if (Object.prototype.hasOwnProperty.call(values, key) && values[key] !== undefined && values[key] !== null) return values[key];
+    if (Object.prototype.hasOwnProperty.call(field, "default")) return field.default;
+    return fallback;
+  }
+
+  function addSchemaControl(parent, field, values, onChange) {
+    var wrapper = document.createElement("div");
+    wrapper.className = "field schema-field";
+    var condition = field.visible_condition || field.visible;
+    if (condition && typeof condition === "object") wrapper.dataset.condition = JSON.stringify(condition);
+    var label = document.createElement("label");
+    label.textContent = (field.label || field.key || "") + (field.required ? " *" : "");
+    wrapper.appendChild(label);
+    var type = field.type || "input";
+    var control;
+    var value = valueForField(field, values, type === "checkbox" ? false : "");
+    if (type === "select") {
+      control = document.createElement("select");
+      var optionValues = Array.isArray(field.options) ? field.options : [];
+      var selectValue = value === undefined || value === null ? "" : String(value);
+      // 编辑既有节点时，字段值可能不在后端枚举里（如订阅带来的旧 flow 值）。
+      // 保留原值为首个选项，避免 select 回填为空导致保存时被误判缺字段。
+      if (selectValue !== "" && !optionValues.some(function (optionValue) { return String(optionValue) === selectValue; })) {
+        var currentOption = document.createElement("option");
+        currentOption.value = selectValue;
+        currentOption.textContent = selectValue + "（当前值）";
+        control.appendChild(currentOption);
+      }
+      optionValues.forEach(function (optionValue) {
+        var option = document.createElement("option");
+        option.value = String(optionValue);
+        option.textContent = String(optionValue);
+        control.appendChild(option);
+      });
+      control.value = selectValue;
+    } else if (type === "textarea") {
+      control = document.createElement("textarea");
+      control.rows = 3;
+      control.value = isObject(value) ? JSON.stringify(value, null, 2) : (value === undefined || value === null ? "" : String(value));
+    } else {
+      control = document.createElement("input");
+      control.type = type === "checkbox" ? "checkbox" : (field.input_type || "text");
+      if (control.type === "checkbox") control.checked = Boolean(value);
+      else {
+        control.value = value === undefined || value === null ? "" : String(value);
+        if (field.min !== undefined) control.min = String(field.min);
+        if (field.max !== undefined) control.max = String(field.max);
+      }
+    }
+    control.dataset.fieldKey = field.key;
+    if (field.required && type !== "checkbox") control.required = true;
+    control.id = (field._idPrefix || "schema") + "-" + String(field.key || "field").replace(/[^a-zA-Z0-9_-]/g, "-");
+    label.htmlFor = control.id;
+    control.addEventListener("change", function () {
+      onChange(field, control);
+      updateSchemaVisibility(parent);
+    });
+    if (control.type !== "checkbox") {
+      control.addEventListener("input", function () { updateSchemaVisibility(parent); });
+    }
+    wrapper.appendChild(control);
+    if (field.help) {
+      var help = document.createElement("div");
+      help.className = "schema-note";
+      help.textContent = field.help;
+      wrapper.appendChild(help);
+    }
+    parent.appendChild(wrapper);
+  }
+
+  function serializeTextValue(control, field) {
+    if (control.type === "checkbox") return Boolean(control.checked);
+    if ((field.input_type || control.type) === "number") {
+      var number = Number(control.value);
+      return Number.isFinite(number) ? number : control.value;
+    }
+    if (field.type === "textarea" && (field.key === "lhie1_provider_targets" || field.key === "dustinwin_provider_targets")) {
+      var raw = control.value.trim();
+      if (!raw) return {};
+      try { return JSON.parse(raw); } catch (_) { return raw; }
+    }
+    return control.value;
+  }
+
+  function renderGlobalConfig() {
+    var container = $("globalSchemaPanel");
+    if (!container) return;
+    clearElement(container);
+    var schema = state.globalConfigSchema || {};
+    var values = state.config.global_config || {};
+    var keys = Object.keys(schema);
+    if (!keys.length) {
+      var empty = document.createElement("div");
+      empty.className = "phase2-empty";
+      empty.textContent = "后端尚未提供全局设置 schema，当前阶段保留空面板。";
+      container.appendChild(empty);
+      return;
+    }
+    var groups = [
+      { id: "basic", label: "基础与模式", keys: ["optional_globals_v2", "generation_profile", "is_desktop", "include_inbound_ports", "include_global_compat", "include_router_options", "enable_core_options", "port", "socks_port", "mixed_port", "allow_lan", "bind_address", "mode", "log_level", "ipv6_support", "openclash_preset"] },
+      { id: "controller", label: "控制器", keys: ["include_controller", "external_controller", "secret", "external_ui", "external_ui_name", "external_ui_url"] },
+      { id: "speed", label: "测速与性能", keys: ["find_process_mode", "url_test_url", "url_test_interval", "url_test_tolerance", "tcp_concurrent", "unified_delay", "geodata_mode", "geodata_loader", "keep_alive_interval", "keep_alive_idle"] },
+      { id: "tun", label: "TUN 与路由", keys: ["enable_tun", "tun_stack", "tun_device", "tun_auto_route", "tun_auto_detect_interface", "tun_dns_hijack", "tun_dns_hijack_value", "tun_endpoint_independent_nat", "tun_auto_redirect", "tun_strict_route", "redir_port", "tproxy_port", "interface_name"] },
+      { id: "dns", label: "DNS", keys: ["enable_dns", "dns_listen", "dns_ipv6", "enhanced_mode", "fake_ip_range", "fake_ip_range6", "fake_ip_filter_mode", "dns_respect_rules", "direct_nameserver", "proxy_server_nameserver", "default_nameserver", "nameserver", "fallback", "nameserver_policy"] },
+      { id: "sniffer", label: "嗅探", keys: ["enable_sniffer", "sniff_override_dest", "sniffer_parse_pure_ip", "sniffer_force_dns_mapping"] },
+      { id: "profile", label: "配置与其他", keys: ["profile_store_selected", "profile_store_fake_ip", "ntp_enable", "ntp_server", "ntp_port", "ntp_interval", "ntp_write_to_system", "authentication"] }
+    ];
+    var assigned = {};
+    groups.forEach(function (group) { group.keys.forEach(function (key) { assigned[key] = true; }); });
+    var remaining = keys.filter(function (key) { return !assigned[key] && key !== "lhie1_provider_targets" && key !== "dustinwin_provider_targets"; });
+    if (remaining.length) groups[groups.length - 1].keys = groups[groups.length - 1].keys.concat(remaining);
+    groups.forEach(function (group, groupIndex) {
+      var groupKeys = group.keys.filter(function (key) { return Object.prototype.hasOwnProperty.call(schema, key) && key !== "lhie1_provider_targets" && key !== "dustinwin_provider_targets"; });
+      if (!groupKeys.length) return;
+      var details = document.createElement("details");
+      details.className = "schema-group";
+      details.open = groupIndex === 0 || group.id === "dns";
+      var summary = document.createElement("summary");
+      summary.textContent = group.label;
+      details.appendChild(summary);
+      var grid = document.createElement("div");
+      grid.className = "schema-grid schema-group-grid";
+      groupKeys.forEach(function (key) {
+        var field = schema[key] || {};
+        addSchemaControl(grid, Object.assign({ key: key, label: key, _idPrefix: "global" }, field), values, function (field, control) {
+          state.config.global_config[field.key] = serializeTextValue(control, field);
+          markDirty();
+        });
+      });
+      details.appendChild(grid);
+      container.appendChild(details);
+    });
+    updateSchemaVisibility(container);
+  }
+
+  function renderProtocolPills() {
+    var container = $("protocolPills");
+    if (!container) return;
+    clearElement(container);
+    var protocols = Object.keys(state.nodeFormSchema || {});
+    if (!protocols.length) {
+      protocols = state.config.proxies.map(function (node) { return String(node.type || ""); }).filter(Boolean).filter(function (item, index, list) { return list.indexOf(item) === index; });
+    }
+    var all = makeButton("全部", "pill" + (!state.nodeProtocol ? " active" : ""), function () {
+      state.nodeProtocol = "";
+      renderProtocolPills();
+      renderNodes();
+    });
+    all.dataset.protocol = "";
+    container.appendChild(all);
+    protocols.forEach(function (protocol) {
+      var pill = makeButton(protocol, "pill" + (state.nodeProtocol === protocol ? " active" : ""), function () {
+        state.nodeProtocol = protocol;
+        renderProtocolPills();
+        renderNodes();
+      });
+      pill.dataset.protocol = protocol;
+      container.appendChild(pill);
+    });
+  }
+
+  function nodeToFields(node) {
+    // 新增节点（空对象）时不回填任何字段值，让 schema default 决定初始状态，
+    // 避免显式 false 覆盖后端声明的默认开关（如 anytls 跳过证书验证、端口跳跃）。
+    if (!node || !Object.keys(node).length) return {};
+    var value = node;
+    var ws = isObject(value["ws-opts"]) ? value["ws-opts"] : {};
+    var h2 = isObject(value["h2-opts"]) ? value["h2-opts"] : {};
+    var grpc = isObject(value["grpc-opts"]) ? value["grpc-opts"] : {};
+    var quic = isObject(value["quic-params"]) ? value["quic-params"] : {};
+    var fields = {
+      node_name: value.name || "",
+      node_server: value.server || "",
+      node_port: value.port || 443,
+      node_udp: value.udp !== false,
+      node_password: value.password || ""
+    };
+    var type = String(value.type || "").toLowerCase();
+    if (type === "ss") Object.assign(fields, {
+      ss_encryption: value.cipher || "aes-128-gcm",
+      ss_udp_over_tcp: Boolean(value["udp-over-tcp"]),
+      ss_tfo: Boolean(value.tfo),
+      ss_ip_version: value["ip-version"] || "默认",
+      ss_mux: Boolean(value.mux)
+    });
+    if (type === "ssr") Object.assign(fields, {
+      ssr_encryption: value.cipher || "",
+      ssr_protocol: value.protocol || "",
+      ssr_protocol_param: value["protocol-param"] || "",
+      ssr_obfs: value.obfs || "",
+      ssr_obfs_param: value["obfs-param"] || ""
+    });
+    if (type === "vless") Object.assign(fields, {
+      node_uuid: value.uuid || "",
+      vless_tls: Boolean(value.tls),
+      vless_flow: value.flow || "none",
+      vless_servername: value.servername || "",
+      vless_network: value.network || "tcp",
+      vless_packet_encoding: value["packet-encoding"] || "",
+      vless_tfo: Boolean(value.tfo),
+      vless_fp: value["client-fingerprint"] || "chrome",
+      vless_ip_version: value["ip-version"] || "默认",
+      vless_ws_path: ws.path || "/vless",
+      vless_ws_host: ws.headers && ws.headers.Host || "",
+      vless_h2_path: h2.path || "/",
+      vless_h2_host: Array.isArray(h2.host) ? h2.host[0] : (h2.host || ""),
+      vless_grpc_service_name: grpc["grpc-service-name"] || "",
+      vless_public_key: value["reality-opts"] && value["reality-opts"]["public-key"] || "",
+      vless_short_id: value["reality-opts"] && value["reality-opts"]["short-id"] || "",
+      vless_skip_cert_verify: Boolean(value["skip-cert-verify"])
+    });
+    if (type === "vmess") Object.assign(fields, {
+      node_uuid: value.uuid || "",
+      node_alterid: value.alterId || 0,
+      vmess_encryption: value.cipher || "auto",
+      node_tls: Boolean(value.tls),
+      node_skip_cert: Boolean(value["skip-cert-verify"]),
+      node_tfo: Boolean(value.tfo),
+      network_type: value.network || "tcp",
+      ip_version: value["ip-version"] || "默认",
+      ws_path: ws.path || "/",
+      ws_host: ws.headers && ws.headers.Host || "",
+      h2_path: h2.path || "/",
+      h2_host: Array.isArray(h2.host) ? h2.host[0] : (h2.host || ""),
+      grpc_service_name: value["grpc-service-name"] || grpc["grpc-service-name"] || ""
+    });
+    if (type === "trojan") Object.assign(fields, {
+      trojan_udp_over_tcp: Boolean(value["udp-over-tcp"]),
+      trojan_tfo: Boolean(value.tfo),
+      trojan_network: value.network || "tcp",
+      trojan_ip_version: value["ip-version"] || "默认",
+      ws_path: ws.path || "/",
+      ws_host: ws.headers && ws.headers.Host || "",
+      grpc_service_name: grpc["grpc-service-name"] || ""
+    });
+    if (type === "anytls") Object.assign(fields, {
+      anytls_password: value.password || "",
+      anytls_sni: value.sni || "",
+      anytls_fp: value["client-fingerprint"] || "chrome",
+      anytls_skip_cert_verify: Boolean(value["skip-cert-verify"]),
+      anytls_alpn: Array.isArray(value.alpn) ? value.alpn.join(",") : (value.alpn || "h2,http/1.1"),
+      anytls_ip_version: value["ip-version"] || "默认",
+      anytls_idle_session_check_interval: value["idle-session-check-interval"] || 30,
+      anytls_idle_session_timeout: value["idle-session-timeout"] || 180,
+      anytls_min_idle_session: value["min-idle-session"] || 2,
+      anytls_ech_enabled: Boolean(value["ech-opts"] && value["ech-opts"].enable),
+      anytls_ech_config: value["ech-opts"] && value["ech-opts"].config || "",
+      anytls_ech_query_server_name: value["ech-opts"] && value["ech-opts"]["query-server-name"] || ""
+    });
+    if (type === "tuic") Object.assign(fields, {
+      tuic_uuid: value.uuid || "",
+      tuic_password: value.password || "",
+      tuic_server_ip: value.ip || "",
+      tuic_congestion: value["congestion-controller"] || "bbr",
+      tuic_alpn: Array.isArray(value.alpn) ? value.alpn[0] : (value.alpn || "h3"),
+      tuic_udp_relay_mode: value["udp-relay-mode"] || "native",
+      tuic_heartbeat_interval: value["heartbeat-interval"] || 10000,
+      tuic_close_sni: Boolean(value["disable-sni"]),
+      tuic_reduce_rtt: value["reduce-rtt"] !== false,
+      tuic_skip_cert_verify: value["skip-cert-verify"] !== false,
+      tuic_fast_open: value["fast-open"] !== false,
+      tuic_ip_version: value["ip-version"] || "默认"
+    });
+    if (type === "hysteria2") Object.assign(fields, {
+      node_password: value.password || "",
+      hy2_sni: value.sni || "",
+      hy2_obfs_type: value.obfs || "none",
+      hy2_obfs_password: value["obfs-password"] || "",
+      hy2_up_mbps: Number(String(value.up || "").split(" ")[0]) || 50,
+      hy2_down_mbps: Number(String(value.down || "").split(" ")[0]) || 100,
+      hy2_skip_cert: value["skip-cert-verify"] !== false,
+      hy2_alpn: Array.isArray(value.alpn) ? value.alpn[0] : (value.alpn || "h3"),
+      enable_port_hopping: Boolean(value.ports),
+      port_hopping_range: value.ports || "",
+      hy2_hop_interval: value["hop-interval"] || "30",
+      hy2_fingerprint: value["client-fingerprint"] || "chrome",
+      hy2_ip_version: value["ip-version"] || "默认",
+      enable_quic_params: Boolean(value["quic-params"]),
+      initial_stream_receive_window: quic["initial-stream-receive-window"] || 8388608,
+      max_stream_receive_window: quic["max-stream-receive-window"] || 8388608,
+      initial_connection_receive_window: quic["initial-connection-receive-window"] || 20971520,
+      max_connection_receive_window: quic["max-connection-receive-window"] || 20971520
+    });
+    return fields;
+  }
+
+  function stripImportMetadata(node) {
+    var clean = clone(node) || {};
+    delete clean._source_id;
+    delete clean._source_name;
+    delete clean._origin_name;
+    return clean;
+  }
+
+  function yamlScalar(value) {
+    if (typeof value === "number" || typeof value === "boolean" || value === null) return String(value);
+    var text = String(value);
+    // 首字符为 YAML 特殊符号、含冒号+空格、井号注释、换行或首尾空白时用双引号包裹。
+    if (text === "" || /[:#{}\[\],&*!|>'"%@`\n]/.test(text) || /^[-?:]/.test(text) || text.trim() !== text) {
+      return JSON.stringify(text);
+    }
+    return text;
+  }
+
+  function yamlDumpValue(value, indent) {
+    if (Array.isArray(value)) {
+      if (!value.length) return "[]";
+      return value.map(function (item) {
+        return "\n" + " ".repeat(indent) + "- " + yamlDumpValue(item, indent + 2);
+      }).join("");
+    }
+    if (isObject(value)) {
+      var keys = Object.keys(value);
+      if (!keys.length) return "{}";
+      return keys.map(function (key) {
+        return "\n" + " ".repeat(indent) + key + ": " + yamlDumpValue(value[key], indent + 2);
+      }).join("");
+    }
+    return yamlScalar(value);
+  }
+
+  function rawYaml(value) {
+    return yamlDumpValue(stripImportMetadata(value || {}), 0).replace(/^\n/, "");
+  }
+
+  function wrapRawNodeYaml(rawValue) {
+    var trimmed = String(rawValue || "").trim();
+    if (trimmed.charAt(0) === "{" && trimmed.charAt(trimmed.length - 1) === "}") {
+      try {
+        var parsedJson = JSON.parse(trimmed);
+        if (isObject(parsedJson)) return "proxies:\n  - " + JSON.stringify(parsedJson);
+      } catch (_) {}
+    }
+    var rawLines = trimmed.split("\n");
+    return "proxies:\n  - " + rawLines[0] + (rawLines.length > 1 ? "\n" + rawLines.slice(1).map(function (line) { return "    " + line; }).join("\n") : "");
+  }
+
+  function renderNodeForm() {
+    var panel = $("nodeFormPanel");
+    if (!panel) return;
+    panel.hidden = !state.nodeForm.open;
+    if (!state.nodeForm.open) return;
+    var original = state.nodeForm.index === null ? {} : (state.config.proxies[state.nodeForm.index] || {});
+    var type = state.nodeForm.protocol || original.type || state.nodeProtocol;
+    setText("nodeFormTitle", state.nodeForm.index === null ? "添加节点 · " + type : "编辑节点 · " + type);
+    var schemaRoot = $("nodeSchemaFields");
+    if (schemaRoot) {
+      clearElement(schemaRoot);
+      var fields = (state.nodeFormSchema && state.nodeFormSchema[type]) || [];
+      var values = nodeToFields(original);
+      if (!fields.length) {
+        var empty = document.createElement("div");
+        empty.className = "phase2-empty";
+        empty.textContent = "后端尚未提供该协议的表单 schema，请使用原始 YAML 映射。";
+        schemaRoot.appendChild(empty);
+      } else {
+        fields.forEach(function (field) {
+          addSchemaControl(schemaRoot, field, values, function () {});
+        });
+        updateSchemaVisibility(schemaRoot);
+        attachDialerSuggestions(schemaRoot);
+      }
+    }
+    var raw = $("nodeRawEditor");
+    if (raw) raw.value = rawYaml(original);
+    var rawMode = $("nodeRawMode");
+    if (rawMode) rawMode.hidden = !state.nodeForm.raw;
+    var schemaMode = $("nodeSchemaMode");
+    if (schemaMode) schemaMode.hidden = state.nodeForm.raw;
+    var toggle = $("toggleRawNodeBtn");
+    if (toggle) toggle.textContent = state.nodeForm.raw ? "使用字段表单" : "编辑原始 YAML";
+  }
+
+  // 链式代理上游节点：输入框 + datalist 提供现有节点名候选（对齐 V1 智能下拉）。
+  function attachDialerSuggestions(schemaRoot) {
+    var input = schemaRoot.querySelector('[data-field-key="dialer_proxy_name"]');
+    if (!input || input.tagName !== "INPUT") return;
+    var datalist = document.getElementById("dialerNodeList");
+    if (!datalist) {
+      datalist = document.createElement("datalist");
+      datalist.id = "dialerNodeList";
+      document.body.appendChild(datalist);
+    }
+    clearElement(datalist);
+    (state.config.proxies || []).forEach(function (node) {
+      var name = String(node && node.name || "").trim();
+      if (!name) return;
+      var option = document.createElement("option");
+      option.value = name;
+      datalist.appendChild(option);
+    });
+    input.setAttribute("list", "dialerNodeList");
+  }
+
+  function openNodeForm(index, protocol) {    var original = index === null ? {} : (state.config.proxies[index] || {});
+    state.nodeForm = {
+      open: true,
+      index: index,
+      protocol: protocol || original.type || state.nodeProtocol || Object.keys(state.nodeFormSchema || {})[0] || "",
+      raw: false
+    };
+    renderNodeForm();
+    var panel = $("nodeFormPanel");
+    if (panel) panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function closeNodeForm() {
+    state.nodeForm.open = false;
+    state.nodeForm.raw = false;
+    renderNodeForm();
+  }
+
+  function deepMergeNodeFields(base, updates) {
+    var result = isObject(base) ? clone(base) : {};
+    Object.keys(updates || {}).forEach(function (key) {
+      var incoming = updates[key];
+      if (isObject(incoming) && isObject(result[key])) {
+        result[key] = deepMergeNodeFields(result[key], incoming);
+      } else {
+        result[key] = clone(incoming);
+      }
+    });
+    return result;
+  }
+
+  function mergeEditedNode(original, parsed, formFields) {
+    var source = original || {};
+    var next = parsed || {};
+    var merged = deepMergeNodeFields(source, next);
+    var changedType = String(source.type || "") !== String(next.type || "");
+    var changedNetwork = String(source.network || "") !== String(next.network || "");
+    if (changedType || changedNetwork) {
+      // These are known transport containers.  When the user explicitly
+      // switches transport, remove stale containers absent from the new
+      // builder output; unknown top-level keys remain intact.
+      ["ws-opts", "h2-opts", "grpc-opts", "grpc-service-name"].forEach(function (key) {
+        if (!Object.prototype.hasOwnProperty.call(next, key)) delete merged[key];
+      });
+    }
+    if (formFields && String(next.type || "") === "hysteria2" && !formFields.enable_quic_params) {
+      delete merged["quic-params"];
+    }
+    if (formFields && String(next.type || "") === "anytls" && !formFields.anytls_ech_enabled) {
+      delete merged["ech-opts"];
+    }
+    if (formFields && String(next.type || "") === "vless") {
+      // `flow: none` is not an instruction to discard Reality credentials.
+      // Some valid subscriptions carry reality-opts without a flow value, and
+      // the field form must round-trip them.  Only an explicit clear of both
+      // visible Reality values is treated as the user's request to remove the
+      // nested object.
+      var realityWasPresent = isObject(source["reality-opts"]);
+      var realityExplicitlyCleared = Object.prototype.hasOwnProperty.call(formFields, "vless_public_key") &&
+        Object.prototype.hasOwnProperty.call(formFields, "vless_short_id") &&
+        String(formFields.vless_public_key || "").trim() === "" &&
+        String(formFields.vless_short_id || "").trim() === "";
+      if (realityWasPresent && realityExplicitlyCleared) delete merged["reality-opts"];
+    }
+    return merged;
+  }
+
+  async function saveNodeForm() {
+    if (!state.nodeForm.open) return;
+    var index = state.nodeForm.index;
+    var original = index === null ? {} : (state.config.proxies[index] || {});
+    var type = state.nodeForm.protocol || original.type;
+    var others = state.config.proxies.filter(function (_, itemIndex) { return itemIndex !== index; });
+    var parsed;
+    var formFields = null;
+    try {
+      if (state.nodeForm.raw) {
+        var rawValue = ($("nodeRawEditor") && $("nodeRawEditor").value || "").trim();
+        if (!rawValue) throw new ApiError("原始 YAML 不能为空", 400);
+        var wrapped = wrapRawNodeYaml(rawValue);
+        var imported = await apiRequest("/api/import", {
+          method: "POST",
+          body: {
+            mode: "yaml",
+            content: wrapped,
+            name: "raw-edit",
+            existing_proxies: others
+          }
+        });
+        if (!Array.isArray(imported.proxies) || !imported.proxies.length) throw new ApiError("原始 YAML 未解析出节点", 400);
+        parsed = stripImportMetadata(imported.proxies[0]);
+        type = parsed.type || type;
+        // raw YAML 经 /api/import 权威解析后直接使用，不再走 node/build 严格表单校验：
+        // 订阅导入的合法节点（如 reality 无 short-id、旧 flow 值）不满足表单必填约束，
+        // 二次构建会把可编辑保存误判为失败。
+      } else {
+        var root = $("nodeSchemaFields");
+        var fields = {};
+        formFields = fields;
+        if (root) {
+          root.querySelectorAll("[data-field-key]").forEach(function (control) {
+            var field = (state.nodeFormSchema[type] || []).find(function (item) { return item.key === control.dataset.fieldKey; }) || {};
+            fields[control.dataset.fieldKey] = serializeTextValue(control, field);
+          });
+        }
+        var built = await apiRequest("/api/node/build", {
+          method: "POST",
+          body: { type: type, fields: fields, existing_proxies: others }
+        });
+        parsed = built.node;
+      }
+      var merged = mergeEditedNode(original, parsed, formFields);
+      var name = String(merged.name || "").trim();
+      if (!name) throw new ApiError("节点名称不能为空", 400);
+      var duplicate = others.some(function (node) { return String(node.name || "").trim() === name; });
+      if (duplicate) throw new ApiError("节点名称已存在，请使用不同名称", 409);
+      if (index === null) {
+        // 手动添加的节点与导入节点一样携带来源元数据，供来源列展示与统计。
+        if (!merged._source_id) {
+          merged._source_id = "manual-" + Date.now();
+          merged._source_name = "手动添加";
+          merged._origin_name = name;
+        }
+        state.config.proxies.push(merged);
+      }
+      else state.config.proxies[index] = merged;
+      markDirty();
+      renderNodes();
+      renderStats();
+      closeNodeForm();
+      showToast(index === null ? "节点已加入草稿" : "节点草稿已更新", "info");
+    } catch (error) {
+      displayApiError(error, "节点保存失败");
+    }
+  }
+
+  function renderNodes() {
+    var grid = $("nodeGrid");
+    if (!grid) return;
+    clearElement(grid);
+    var proxies = Array.isArray(state.config.proxies) ? state.config.proxies : [];
+    var query = String(state.nodeQuery || "").trim().toLowerCase();
+    var visible = 0;
+    if (!proxies.length) {
+      var empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = state.loading ? "正在加载节点…" : "暂无节点，请使用导入或手动添加";
+      grid.appendChild(empty);
+    }
+    proxies.forEach(function (proxy, index) {
+      var name = String(proxy.name || ("节点 " + (index + 1)));
+      var type = String(proxy.type || "");
+      var server = String(proxy.server || proxy.ip || "");
+      var port = proxy.port === undefined || proxy.port === null ? "" : String(proxy.port);
+      var source = String(proxy._source_name || "");
+      var haystack = (name + " " + type + " " + server + " " + port + " " + source).toLowerCase();
+      if (state.nodeProtocol && type !== state.nodeProtocol) return;
+      if (query && haystack.indexOf(query) < 0) return;
+      visible += 1;
+      var card = document.createElement("div");
+      card.className = "node-card";
+      card.dataset.index = String(index);
+      var top = document.createElement("div");
+      top.className = "node-top";
+      appendText(top, name, "node-name");
+      appendText(top, type || "未指定协议", "badge b-" + type.replace(/[^a-z0-9_-]/gi, ""));
+      card.appendChild(top);
+      var serverLine = document.createElement("div");
+      serverLine.className = "node-server";
+      serverLine.textContent = server + (port ? ":" + port : "");
+      card.appendChild(serverLine);
+      var meta = document.createElement("div");
+      meta.className = "node-meta";
+      meta.textContent = source ? "来源：" + source : "运行时延迟：后端未提供";
+      card.appendChild(meta);
+      var actions = document.createElement("div");
+      actions.className = "node-actions";
+      [
+        ["up", "上移", "chip-btn"],
+        ["down", "下移", "chip-btn"],
+        ["edit", "编辑", "chip-btn"],
+        ["delete", "删除", "chip-btn danger"]
+      ].forEach(function (item) {
+        var button = makeButton(item[1], item[2], null);
+        button.dataset.nodeAction = item[0];
+        button.dataset.index = String(index);
+        actions.appendChild(button);
+      });
+      card.appendChild(actions);
+      grid.appendChild(card);
+    });
+    if (proxies.length && !visible) {
+      var noMatch = document.createElement("div");
+      noMatch.className = "empty-state";
+      noMatch.textContent = "没有匹配当前筛选条件的节点";
+      grid.appendChild(noMatch);
+    }
+    setText("nodeSummary", String(proxies.length) + " 个节点" + (query || state.nodeProtocol ? " · 当前显示 " + visible : ""));
+  }
+
+  function changeNodeOrder(index, direction) {
+    var next = index + direction;
+    if (next < 0 || next >= state.config.proxies.length) return;
+    var list = state.config.proxies;
+    var current = list[index];
+    list[index] = list[next];
+    list[next] = current;
+    markDirty();
+    renderNodes();
+  }
+
+  function deleteNode(index) {
+    var node = state.config.proxies[index];
+    if (!node) return;
+    if (!window.confirm("确定删除节点“" + String(node.name || "") + "”？")) return;
+    state.config.proxies.splice(index, 1);
+    markDirty();
+    renderNodes();
+    renderStats();
+    showToast("节点已从草稿移除", "info");
+  }
+
+  async function importNodes() {
+    var input = $("importInput");
+    var value = input ? input.value.trim() : "";
+    if (!value) {
+      showToast("请输入要导入的内容", "error");
+      return;
+    }
+    var button = $("importBtn");
+    if (button) button.disabled = true;
+    try {
+      var body = {
+        mode: state.importMethod,
+        content: state.importMethod === "url" ? "" : value,
+        url: state.importMethod === "url" ? value : "",
+        name: state.importMethod === "url" ? "远程订阅" : (state.importMethod === "share" ? "分享链接" : "YAML 导入"),
+        existing_proxies: clone(state.config.proxies)
+      };
+      var result = await apiRequest("/api/import", { method: "POST", body: body });
+      var incoming = Array.isArray(result.proxies) ? result.proxies : [];
+      state.config.proxies = state.config.proxies.concat(incoming);
+      if (result.source && isObject(result.source)) {
+        var sources = Array.isArray(state.config.import_sources) ? state.config.import_sources : [];
+        var existing = sources.findIndex(function (source) { return source.id === result.source.id; });
+        if (existing >= 0) sources[existing] = clone(result.source);
+        else sources.push(clone(result.source));
+        state.config.import_sources = sources;
+      }
+      markDirty();
+      await flushDraftSave();
+      if (input) input.value = "";
+      renderAll();
+      var skipped = Array.isArray(result.skipped) ? result.skipped.length : 0;
+      var warnings = Array.isArray(result.warnings) ? result.warnings.length : 0;
+      setText("importSummary", "本次导入 " + incoming.length + " 个节点；跳过 " + skipped + " 个；警告 " + warnings + " 条");
+      if (warnings) showToast("导入完成，存在 " + warnings + " 条警告", "info");
+      else showToast("导入完成，新增 " + incoming.length + " 个节点", "info");
+      renderImportMessages(result);
+    } catch (error) {
+      displayApiError(error, "导入失败");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  function renderImportMessages(result) {
+    var box = $("importMessages");
+    if (!box) return;
+    clearElement(box);
+    var skipped = Array.isArray(result && result.skipped) ? result.skipped : [];
+    var warnings = Array.isArray(result && result.warnings) ? result.warnings : [];
+    if (!skipped.length && !warnings.length) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    if (skipped.length) appendText(box, "跳过重复节点：" + skipped.join("、"), "status-note");
+    if (warnings.length) appendText(box, "导入警告：" + warnings.join("；"), "status-note");
+  }
+
+  function addRule() {
+    var type = $("ruleType");
+    var value = $("ruleValue");
+    var target = $("ruleTarget");
+    if (!type || !target) return;
+    var targetValue = String(target.value || "").trim();
+    if (!targetValue) {
+      showToast("请填写目标策略", "error");
+      return;
+    }
+    // MATCH 是兜底规则，固定两段 MATCH,target，没有也不需要规则值。
+    if (type.value === "MATCH") {
+      state.config.custom_rules.push("MATCH," + targetValue);
+    } else {
+      if (!value || !value.value.trim()) {
+        showToast("请填写规则值", "error");
+        return;
+      }
+      state.config.custom_rules.push(type.value + "," + value.value.trim() + "," + targetValue);
+    }
+    if (value) value.value = "";
+    markDirty();
+    renderRules();
+    renderStats();
+  }
+
+  function changeRuleSource(value) {
+    state.config.selected_rule_type = value;
+    markDirty();
+    renderRuleSource();
+  }
+
+  function updateGlobalActionButtons() {
+    ["modeDesktopBtn", "modeRouterBtn", "presetDesktopBtn", "presetRouterBtn"].forEach(function (id) {
+      var button = $(id);
+      if (button) button.disabled = state.globalSaving || state.saveInFlight;
+    });
+  }
+
+  async function setMode(router) {
+    if (state.globalSaving || state.saveInFlight) return;
+    state.globalSaving = true;
+    updateGlobalActionButtons();
+    var config = state.config.global_config;
+    config.generation_profile = router ? "openclash-router" : "desktop-full";
+    config.is_desktop = !router;
+    markDirty();
+    renderGlobalConfig();
+    updateModeView();
+    try {
+      await flushDraftSave();
+      showToast("生成模式已保存", "info");
+    } catch (error) {
+      displayApiError(error, "生成模式保存失败");
+    } finally {
+      state.globalSaving = false;
+      updateGlobalActionButtons();
+    }
+  }
+
+  function updateModeView() {
+    var config = state.config.global_config || {};
+    var router = config.generation_profile === "openclash-router" || config.is_desktop === false;
+    var modeSwitch = $("modeSwitch");
+    if (modeSwitch) modeSwitch.classList.toggle("router", router);
+    setText("modeDesc", router ? "由 OpenClash 接管 DNS / TUN，仅输出节点与规则。" : "由 YAML 输出客户端 DNS / TUN 设置。");
+  }
+
+  async function applyPreset(key) {
+    if (state.globalSaving || state.saveInFlight) return;
+    var source = state.dnsPresets && Object.keys(state.dnsPresets).length ? state.dnsPresets : state.presets;
+    var preset = source && source[key];
+    if (!isObject(preset)) {
+      showToast("后端未提供该预设", "error");
+      return;
+    }
+    // 预设必须连同生成模式一起落盘：config_builder 以 is_desktop 反推 profile 并
+    // 门控 DNS/TUN 输出，只 merge 预设字段会让跨模式点击后 TUN/DNS 静默失效。
+    preset = clone(preset);
+    if (key === "full_client") {
+      preset.is_desktop = true;
+      preset.generation_profile = "desktop-full";
+      preset.target_mode_user_selected = true;
+    } else if (key === "openclash_router") {
+      preset.is_desktop = false;
+      preset.generation_profile = "openclash-router";
+      preset.target_mode_user_selected = true;
+    }
+    state.globalSaving = true;
+    updateGlobalActionButtons();
+    state.config.global_config = Object.assign({}, state.config.global_config, clone(preset));
+    markDirty();
+    renderGlobalConfig();
+    updateModeView();
+    try {
+      await flushDraftSave();
+      showToast("DNS 预设已保存", "info");
+    } catch (error) {
+      displayApiError(error, "DNS 预设保存失败");
+    } finally {
+      state.globalSaving = false;
+      updateGlobalActionButtons();
+    }
+  }
+
+  function renderChecks(checks) {
+    var box = $("checkResults");
+    if (!box) return;
+    clearElement(box);
+    var list = Array.isArray(checks) ? checks : [];
+    if (!list.length) {
+      var empty = document.createElement("div");
+      empty.className = "check-empty";
+      empty.textContent = "尚未校验，点击“校验草稿”开始";
+      box.appendChild(empty);
+      box.classList.add("show");
+      return;
+    }
+    box.classList.add("show");
+    list.forEach(function (check) {
+      var item = document.createElement("div");
+      item.className = "check-item " + (check.status === "ok" ? "ok" : (check.status === "warn" ? "warn" : "error"));
+      var icon = document.createElement("span");
+      icon.className = "icon-circle";
+      icon.textContent = check.status === "ok" ? "✓" : (check.status === "warn" ? "!" : "×");
+      item.appendChild(icon);
+      appendText(item, check.label || "检查", "");
+      appendText(item, check.detail || "", "detail");
+      box.appendChild(item);
+    });
+  }
+
+  function renderValidation(payload) {
+    var meta = $("validationStats");
+    var warningBox = $("validationWarnings");
+    var yamlWrap = $("yamlWrap");
+    var yamlCode = $("yamlCode");
+    var diff = $("publishDiff");
+    if (!payload) {
+      renderChecks([]);
+      if (meta) clearElement(meta);
+      if (warningBox) { clearElement(warningBox); warningBox.hidden = true; }
+      if (yamlWrap) yamlWrap.classList.remove("show");
+      if (yamlCode) clearElement(yamlCode);
+      if (diff) { diff.textContent = ""; diff.classList.remove("show"); }
+      updatePublishButton();
+      return;
+    }
+    renderChecks(payload.checks || []);
+    if (meta) {
+      clearElement(meta);
+      var stats = payload.stats || payload.statistics || {};
+      Object.keys(stats).forEach(function (key) {
+        var cell = document.createElement("div");
+        cell.className = "meta-cell";
+        appendText(cell, key, "meta-label");
+        appendText(cell, stats[key], "meta-value");
+        meta.appendChild(cell);
+      });
+    }
+    if (warningBox) {
+      clearElement(warningBox);
+      var warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+      warningBox.hidden = !warnings.length;
+      warnings.forEach(function (warning) { appendText(warningBox, "提示：" + warning, "status-note"); });
+    }
+    if (yamlWrap && yamlCode && typeof payload.yaml === "string" && payload.yaml) {
+      yamlWrap.classList.add("show");
+      clearElement(yamlCode);
+      payload.yaml.split("\n").forEach(function (line, index) {
+        var row = document.createElement("div");
+        row.className = "yaml-line";
+        appendText(row, String(index + 1), "ln");
+        appendText(row, line, "");
+        yamlCode.appendChild(row);
+      });
+      setText("yamlMeta", String(payload.yaml.length) + " bytes");
+    }
+    if (diff) {
+      var publishDiff = payload.publish_diff || payload.diff;
+      var diffText = "";
+      if (publishDiff && typeof publishDiff === "object") {
+        diffText = publishDiff.unified || (publishDiff.has_changes ? "草稿与已发布配置存在差异。" : "草稿与已发布配置没有差异。");
+      } else if (publishDiff) diffText = String(publishDiff);
+      diff.textContent = diffText;
+      diff.classList.toggle("show", Boolean(diffText));
+    }
+    setText("validationStatus", payload.ok ? "校验通过，可选择发布" : "校验未通过，请查看检查项", payload.ok ? "" : "—");
+    updatePublishButton();
+  }
+
+  function currentValidation() {
+    return Boolean(
+      state.validation &&
+      state.validation.ok === true &&
+      state.validatedGeneration === state.dirtyGeneration &&
+      state.validatedSignature
+    );
+  }
+
+  function updatePublishButton() {
+    var button = $("publishBtn");
+    if (!button) return;
+    button.disabled = state.publishInFlight || !currentValidation();
+    setText("publishGuard", currentValidation() ? "当前草稿与最近一次校验一致。" : "发布需要先校验当前未修改草稿。");
+  }
+
+  async function validateDraft() {
+    if (state.validateInFlight) return;
+    state.validateInFlight = true;
+    var button = $("validateBtn");
+    if (button) { button.disabled = true; button.classList.add("loading"); }
+    try {
+      await flushDraftSave();
+      var generation = state.dirtyGeneration;
+      var payload = await apiRequest("/api/validate", {
+        method: "POST",
+        body: draftPayload(),
+        allowNotOk: true
+      });
+      if (generation !== state.dirtyGeneration) {
+        state.validation = null;
+        state.validatedGeneration = -1;
+        state.validatedSignature = "";
+        renderValidation(null);
+        showToast("校验响应对应旧草稿，请重新校验", "error");
+        return;
+      }
+      state.validation = payload;
+      state.validatedGeneration = payload.ok === true ? generation : -1;
+      state.validatedSignature = payload.ok === true ? (payload.draft_signature || "") : "";
+      if (payload.config) state.config = canonicalDraft(payload.config);
+      updateServerFields(payload);
+      renderAll();
+      renderValidation(payload);
+      showToast(payload.ok ? "校验完成，可单独发布" : "校验未通过，请查看检查项", payload.ok ? "info" : "error");
+    } catch (error) {
+      var details = error && error.details;
+      if (details && Array.isArray(details.checks)) {
+        state.validation = details.validation || { ok: false, checks: details.checks };
+        renderValidation(state.validation);
+      }
+      displayApiError(error, "校验失败");
+    } finally {
+      state.validateInFlight = false;
+      if (button) { button.disabled = false; button.classList.remove("loading"); }
+      updatePublishButton();
+    }
+  }
+
+  async function publishDraft() {
+    await flushDraftSave();
+    if (!currentValidation()) {
+      showToast("请先校验当前未修改草稿", "error");
+      return;
+    }
+    var generation = state.dirtyGeneration;
+    state.publishInFlight = true;
+    updatePublishButton();
+    try {
+      var payload = await apiRequest("/api/publish", {
+        method: "POST",
+        body: draftPayload()
+      });
+      if (generation !== state.dirtyGeneration) {
+        showToast("发布完成，但本地已有更新草稿；请再次保存和校验", "info");
+        scheduleDraftSave();
+        return;
+      }
+      state.validation = payload;
+      state.validatedGeneration = generation;
+      state.validatedSignature = payload.draft_signature || state.validatedSignature;
+      applyServerResponse(payload, generation);
+      renderValidation(payload);
+      showToast("发布完成，订阅状态已刷新", "info");
+    } catch (error) {
+      var details = error && error.details;
+      if (details && details.validation) renderValidation(details.validation);
+      else if (details && details.checks) renderChecks(details.checks);
+      displayApiError(error, "发布失败");
+    } finally {
+      state.publishInFlight = false;
+      updatePublishButton();
+    }
+  }
+
+  function downloadYaml() {
+    if (!state.validation || typeof state.validation.yaml !== "string" || !state.validation.yaml) {
+      showToast("暂无已校验 YAML", "error");
+      return;
+    }
+    var blob = new Blob([state.validation.yaml], { type: "text/yaml;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = "config.yaml";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  async function copySubscription() {
+    var url = state.subscription && state.subscription.url;
+    if (!url) {
+      showToast("暂无已发布订阅链接", "error");
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(url);
+      else {
+        var input = document.createElement("textarea");
+        input.value = url;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        input.remove();
+      }
+      showToast("订阅链接已复制", "info");
+    } catch (error) {
+      showToast("复制失败，请手动复制链接", "error");
+    }
+  }
+
+  async function resetToken() {
+    if (!window.confirm("确定重置订阅 Token 吗？旧链接会失效。")) return;
+    var button = $("resetTokenBtn");
+    if (button) button.disabled = true;
+    try {
+      var payload = await apiRequest("/api/token/reset", { method: "POST" });
+      state.subscription = clone(payload.subscription || {});
+      renderSubscription();
+      renderStats();
+      showToast("订阅 Token 已重置", "info");
+    } catch (error) {
+      displayApiError(error, "Token 重置失败");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function loadAdminUsers() {
+    if (!state.user || state.user.is_admin !== true) return;
+    if (state.adminLoading) return;
+    state.adminLoading = true;
+    renderAdminPanel();
+    try {
+      var payload = await apiRequest("/api/users");
+      state.adminUsers = Array.isArray(payload.users) ? clone(payload.users) : [];
+      state.adminLoaded = true;
+    } catch (error) {
+      state.adminResult = error && error.message ? error.message : "用户列表加载失败";
+      displayApiError(error, "用户列表加载失败");
+    } finally {
+      state.adminLoading = false;
+      renderAdminPanel();
+    }
+  }
+
+  async function createAdminUser(event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    var username = String(form.elements.username.value || "").trim();
+    var password = String(form.elements.password.value || "");
+    var isAdmin = Boolean(form.elements.is_admin.checked);
+    if (!username || !password) {
+      showToast("请输入用户名和密码", "error");
+      return;
+    }
+    state.adminLoading = true;
+    renderAdminPanel();
+    try {
+      await apiRequest("/api/users/" + encodeURIComponent(username), {
+        method: "POST",
+        body: { password: password, is_admin: isAdmin }
+      });
+      state.adminResult = "用户已创建：" + username;
+      form.reset();
+    } catch (error) {
+      state.adminResult = error && error.message ? error.message : "创建用户失败";
+      displayApiError(error, "创建用户失败");
+    } finally {
+      state.adminLoading = false;
+      await loadAdminUsers();
+    }
+  }
+
+  async function toggleAdminUser(userId) {
+    if (state.adminLoading) return;
+    state.adminLoading = true;
+    renderAdminPanel();
+    try {
+      var payload = await apiRequest("/api/users/" + encodeURIComponent(String(userId)) + "/toggle", { method: "POST" });
+      state.adminResult = "用户状态已更新：" + (payload.is_enabled ? "启用" : "停用");
+    } catch (error) {
+      state.adminResult = error && error.message ? error.message : "更新用户状态失败";
+      displayApiError(error, "更新用户状态失败");
+    } finally {
+      state.adminLoading = false;
+      await loadAdminUsers();
+    }
+  }
+
+  async function resetAdminUserToken(userId) {
+    if (state.adminLoading) return;
+    state.adminLoading = true;
+    renderAdminPanel();
+    try {
+      var payload = await apiRequest("/api/users/" + encodeURIComponent(String(userId)) + "/reset-token", { method: "POST" });
+      state.adminResult = "临时订阅 URL：" + String(payload.subscription_url || (payload.subscription && payload.subscription.url) || "未返回") + "\nToken：" + String(payload.token || "未返回");
+    } catch (error) {
+      state.adminResult = error && error.message ? error.message : "重置用户 Token 失败";
+      displayApiError(error, "重置用户 Token 失败");
+    } finally {
+      state.adminLoading = false;
+      await loadAdminUsers();
+    }
+  }
+
+  async function deleteAdminUser(userId) {
+    if (state.adminLoading || state.adminConfirmDelete === null) return;
+    state.adminLoading = true;
+    renderAdminPanel();
+    try {
+      await apiRequest("/api/users/" + encodeURIComponent(String(userId)) + "/delete", { method: "POST" });
+      state.adminResult = "用户已删除";
+      state.adminConfirmDelete = null;
+    } catch (error) {
+      state.adminResult = error && error.message ? error.message : "删除用户失败";
+      displayApiError(error, "删除用户失败");
+    } finally {
+      state.adminLoading = false;
+      await loadAdminUsers();
+    }
+  }
+
+  function renderAdminPanel() {
+    var host = $("adminPanelHost");
+    if (!host) return;
+    clearElement(host);
+    var isAdmin = Boolean(state.user && state.user.is_admin === true);
+    host.hidden = !isAdmin;
+    if (!isAdmin) return;
+    var card = document.createElement("div");
+    card.className = "sp-card";
+    var head = document.createElement("div");
+    head.className = "sp-title";
+    head.textContent = "管理员用户";
+    var refresh = makeButton(state.adminLoading ? "加载中…" : "刷新用户", "btn btn-ghost", loadAdminUsers);
+    refresh.disabled = state.adminLoading;
+    head.appendChild(refresh);
+    card.appendChild(head);
+    var form = document.createElement("form");
+    form.id = "adminCreateForm";
+    form.className = "admin-form";
+    var username = rulesetField(form, "adminUsername", "用户名", "text", "");
+    username.name = "username";
+    var password = rulesetField(form, "adminPassword", "初始密码", "password", "");
+    password.name = "password";
+    var adminField = document.createElement("div");
+    adminField.className = "field field-wide";
+    var adminLabel = document.createElement("label");
+    adminLabel.className = "f-check";
+    var adminCheckbox = document.createElement("input");
+    adminCheckbox.id = "adminIsAdmin";
+    adminCheckbox.name = "is_admin";
+    adminCheckbox.type = "checkbox";
+    adminLabel.htmlFor = "adminIsAdmin";
+    adminLabel.appendChild(adminCheckbox);
+    appendText(adminLabel, " 创建为管理员", "");
+    adminField.appendChild(adminLabel);
+    form.appendChild(adminField);
+    var actions = document.createElement("div");
+    actions.className = "admin-actions field-wide";
+    var create = makeButton("创建用户", "btn btn-primary", null);
+    create.type = "submit";
+    create.disabled = state.adminLoading;
+    actions.appendChild(create);
+    form.appendChild(actions);
+    form.addEventListener("submit", createAdminUser);
+    card.appendChild(form);
+    var list = document.createElement("div");
+    list.className = "admin-list phase2-section";
+    if (!state.adminLoaded && !state.adminLoading) {
+      var prompt = document.createElement("div");
+      prompt.className = "phase2-empty";
+      prompt.textContent = "点击刷新用户读取管理员列表。";
+      list.appendChild(prompt);
+    } else if (!state.adminUsers.length && !state.adminLoading) {
+      var empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "暂无用户记录。";
+      list.appendChild(empty);
+    }
+    state.adminUsers.forEach(function (user) {
+      var row = document.createElement("div");
+      row.className = "admin-row";
+      var main = document.createElement("div");
+      main.className = "admin-row-main";
+      var name = document.createElement("div");
+      name.className = "admin-name";
+      name.textContent = String(user.username || "");
+      main.appendChild(name);
+      var meta = document.createElement("div");
+      meta.className = "admin-meta";
+      meta.textContent = (user.is_admin ? "管理员" : "普通用户") + " · " + (user.is_enabled ? "已启用" : "已停用");
+      main.appendChild(meta);
+      row.appendChild(main);
+      var rowActions = document.createElement("div");
+      rowActions.className = "admin-row-actions";
+      var toggle = makeButton(user.is_enabled ? "停用" : "启用", "chip-btn", function () { toggleAdminUser(user.id); });
+      toggle.disabled = state.adminLoading;
+      rowActions.appendChild(toggle);
+      var reset = makeButton("重置 Token", "chip-btn", function () { resetAdminUserToken(user.id); });
+      reset.disabled = state.adminLoading;
+      rowActions.appendChild(reset);
+      var remove = makeButton("删除", "chip-btn danger", function () {
+        state.adminConfirmDelete = user.id;
+        renderAdminPanel();
+      });
+      remove.disabled = state.adminLoading;
+      rowActions.appendChild(remove);
+      row.appendChild(rowActions);
+      list.appendChild(row);
+      if (state.adminConfirmDelete === user.id) {
+        var confirm = document.createElement("div");
+        confirm.className = "admin-confirm";
+        confirm.textContent = "确认删除用户“" + String(user.username || "") + "”？此操作不可恢复。";
+        var confirmActions = document.createElement("div");
+        confirmActions.className = "admin-actions";
+        confirmActions.appendChild(makeButton("确认删除", "btn btn-ghost danger", function () { deleteAdminUser(user.id); }));
+        confirmActions.appendChild(makeButton("取消", "btn btn-ghost", function () { state.adminConfirmDelete = null; renderAdminPanel(); }));
+        confirm.appendChild(confirmActions);
+        list.appendChild(confirm);
+      }
+    });
+    card.appendChild(list);
+    if (state.adminResult) {
+      var result = document.createElement("div");
+      result.className = "admin-result";
+      result.textContent = state.adminResult;
+      card.appendChild(result);
+    }
+    host.appendChild(card);
+  }
+
+  function renderAll() {
+    renderStats();
+    renderSubscription();
+    renderImport();
+    renderNodes();
+    renderProtocolPills();
+    renderRules();
+    renderRuleSource();
+    renderRulesets();
+    renderGlobalConfig();
+    renderNodeForm();
+    renderAdminPanel();
+    updateModeView();
+    updateGlobalActionButtons();
+    updatePublishButton();
+  }
+
+  function initializeEvents() {
+    initNavigation();
+    var themeToggle = $("themeToggle");
+    if (themeToggle) themeToggle.addEventListener("click", function () {
+      var root = document.documentElement;
+      var dark = !root.classList.contains("dark");
+      root.classList.toggle("dark", dark);
+      try { localStorage.setItem("v2-theme", dark ? "dark" : "light"); } catch (_) {}
+    });
+    try {
+      document.documentElement.classList.toggle("dark", localStorage.getItem("v2-theme") === "dark");
+    } catch (_) {}
+    var sidebar = $("sidebarToggle");
+    if (sidebar) sidebar.addEventListener("click", function () {
+      var layout = $("layout");
+      if (layout) layout.classList.toggle("side-hidden");
+    });
+    var avatar = $("userAvatar");
+    if (avatar) avatar.addEventListener("click", function (event) {
+      event.stopPropagation();
+      toggleUserDropdown();
+    });
+    document.addEventListener("click", function (event) {
+      var dropdown = $("userDropdown");
+      if (dropdown && !dropdown.contains(event.target) && event.target !== avatar) dropdown.classList.remove("open");
+    });
+    $("loginTabBtn") && $("loginTabBtn").addEventListener("click", function () { showAuthPane("login"); });
+    $("registerTabBtn") && $("registerTabBtn").addEventListener("click", function () { showAuthPane("register"); });
+    $("loginForm") && $("loginForm").addEventListener("submit", login);
+    $("registerForm") && $("registerForm").addEventListener("submit", register);
+    document.querySelectorAll(".method-card").forEach(function (card) {
+      card.addEventListener("click", function () {
+        state.importMethod = card.dataset.method || "yaml";
+        renderImport();
+      });
+      card.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          state.importMethod = card.dataset.method || "yaml";
+          renderImport();
+        }
+      });
+    });
+    $("importBtn") && $("importBtn").addEventListener("click", importNodes);
+    $("clearImportBtn") && $("clearImportBtn").addEventListener("click", function () {
+      if ($("importInput")) $("importInput").value = "";
+      if ($("importMessages")) $("importMessages").hidden = true;
+      setText("importSummary", "输入已清空");
+    });
+    $("nodeSearch") && $("nodeSearch").addEventListener("input", function (event) {
+      state.nodeQuery = event.target.value;
+      renderNodes();
+    });
+    $("protocolPills") && $("protocolPills").addEventListener("click", function (event) {
+      var pill = event.target.closest("[data-protocol]");
+      if (!pill) return;
+      state.nodeProtocol = pill.dataset.protocol;
+      renderProtocolPills();
+      renderNodes();
+    });
+    $("nodeGrid") && $("nodeGrid").addEventListener("click", function (event) {
+      var button = event.target.closest("[data-node-action]");
+      if (!button) return;
+      var index = Number(button.dataset.index);
+      var action = button.dataset.nodeAction;
+      if (action === "up") changeNodeOrder(index, -1);
+      if (action === "down") changeNodeOrder(index, 1);
+      if (action === "edit") openNodeForm(index);
+      if (action === "delete") deleteNode(index);
+    });
+    $("addNodeBtn") && $("addNodeBtn").addEventListener("click", function () {
+      openNodeForm(null, state.nodeProtocol);
+    });
+    $("toggleRawNodeBtn") && $("toggleRawNodeBtn").addEventListener("click", function () {
+      state.nodeForm.raw = !state.nodeForm.raw;
+      renderNodeForm();
+    });
+    $("saveNodeBtn") && $("saveNodeBtn").addEventListener("click", saveNodeForm);
+    $("cancelNodeBtn") && $("cancelNodeBtn").addEventListener("click", closeNodeForm);
+    $("addRuleBtn") && $("addRuleBtn").addEventListener("click", addRule);
+    $("ruleType") && $("ruleType").addEventListener("change", function (event) {
+      var ruleValue = $("ruleValue");
+      if (!ruleValue) return;
+      var isMatch = event.target.value === "MATCH";
+      ruleValue.disabled = isMatch;
+      ruleValue.placeholder = isMatch ? "MATCH 为兜底规则，无需填写值" : "example.com / 192.168.0.0/16";
+    });
+    $("ruleSource") && $("ruleSource").addEventListener("change", function (event) { changeRuleSource(event.target.value); });
+    $("validateBtn") && $("validateBtn").addEventListener("click", validateDraft);
+    $("publishBtn") && $("publishBtn").addEventListener("click", publishDraft);
+    $("downloadYamlBtn") && $("downloadYamlBtn").addEventListener("click", downloadYaml);
+    $("copySubBtn") && $("copySubBtn").addEventListener("click", copySubscription);
+    $("subCopyBtn") && $("subCopyBtn").addEventListener("click", copySubscription);
+    $("resetTokenBtn") && $("resetTokenBtn").addEventListener("click", resetToken);
+    $("saveDraftBtn") && $("saveDraftBtn").addEventListener("click", async function () {
+      try {
+        await flushDraftSave();
+        showToast("草稿已保存", "info");
+      } catch (error) {
+        displayApiError(error, "草稿保存失败");
+      }
+    });
+    $("modeDesktopBtn") && $("modeDesktopBtn").addEventListener("click", function () { setMode(false); });
+    $("modeRouterBtn") && $("modeRouterBtn").addEventListener("click", function () { setMode(true); });
+    $("presetDesktopBtn") && $("presetDesktopBtn").addEventListener("click", function () { applyPreset("full_client"); });
+    $("presetRouterBtn") && $("presetRouterBtn").addEventListener("click", function () { applyPreset("openclash_router"); });
+  }
+
+  async function init() {
+    initializeEvents();
+    renderAll();
+    try {
+      var session = await apiRequest("/api/session", { skipSessionRefresh: true });
+      if (!session.authenticated) {
+        showAuthOverlay(session);
+        return;
+      }
+      state.authenticated = true;
+      state.user = session.user || null;
+      state.csrfToken = session.csrf_token || "";
+      renderUserPanel(state.user);
+      await loadBootstrap();
+    } catch (error) {
+      state.loading = false;
+      showAuthOverlay({ csrf_token: state.authCsrf });
+      displayApiError(error, "会话加载失败");
+    }
+  }
+
+  init();
+})();
 </script>
 </body>
 </html>

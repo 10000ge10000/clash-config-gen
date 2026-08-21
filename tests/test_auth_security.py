@@ -73,7 +73,7 @@ class AuthSecurityTest(unittest.TestCase):
 
         self.assertEqual(303, response.status_code)
         self.assertIn("auth_error", response.headers["location"])
-        with storage._connect() as conn:
+        with storage._db() as conn:
             event = conn.execute(
                 "SELECT event_type, detail FROM auth_audit_log ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -95,7 +95,7 @@ class AuthSecurityTest(unittest.TestCase):
 
         self.assertEqual(303, response.status_code)
         self.assertIn(api.AUTH_COOKIE_NAME, response.cookies)
-        with storage._connect() as conn:
+        with storage._db() as conn:
             event = conn.execute(
                 "SELECT * FROM auth_audit_log ORDER BY id DESC LIMIT 1"
             ).fetchone()

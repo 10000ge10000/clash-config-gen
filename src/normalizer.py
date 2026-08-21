@@ -23,9 +23,11 @@ HOP_INTERVAL_RANGE_PATTERN = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
 INTERNAL_PROXY_FIELD_PREFIX = "_"
 BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
 BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
+STRICT_PORT_PATTERN = re.compile(r"^[0-9]+$")
 
 PROTOCOL_REQUIRED_FIELDS = {
     "ss": {"name", "type", "server", "port", "cipher", "password"},
+    "ssr": {"name", "type", "server", "port", "cipher", "password", "protocol", "obfs"},
     "trojan": {"name", "type", "server", "port", "password"},
     "vmess": {"name", "type", "server", "port", "uuid", "alterId", "cipher"},
     "vless": {"name", "type", "server", "port", "uuid"},
@@ -41,6 +43,21 @@ class NormalizationResult:
     proxy: dict[str, Any]
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+
+
+def parse_strict_port(value: Any, label: str = "端口") -> int:
+    """Parse only an integer or an unsigned decimal integer string port."""
+    if isinstance(value, bool):
+        raise ValueError(f"{label}必须是 1-65535 范围内的十进制整数")
+    if isinstance(value, int):
+        port = value
+    elif isinstance(value, str) and STRICT_PORT_PATTERN.fullmatch(value):
+        port = int(value)
+    else:
+        raise ValueError(f"{label}必须是 1-65535 范围内的十进制整数")
+    if not 1 <= port <= 65535:
+        raise ValueError(f"{label}必须在 1-65535 范围内")
+    return port
 
 
 def normalize_proxy(proxy: dict[str, Any]) -> NormalizationResult:
@@ -68,9 +85,11 @@ def normalize_proxy(proxy: dict[str, Any]) -> NormalizationResult:
             warnings.append(server_warning)
     if "port" in normalized:
         try:
-            normalized["port"] = int(normalized["port"])
-        except Exception:
-            errors.append("端口不是数字")
+            normalized["port"] = parse_strict_port(normalized["port"])
+        except ValueError:
+            # Keep the original value for validate_proxy_fields to report the
+            # canonical error once; never coerce an invalid port.
+            pass
 
     if normalized.get("type") == "hysteria2" and "hop-interval" in normalized:
         hop_interval = _normalize_hysteria2_hop_interval(normalized.get("hop-interval"))
@@ -292,7 +311,9 @@ def validate_proxy_fields(proxy: dict[str, Any]) -> list[str]:
     if missing:
         errors.append(f"缺少必填字段: {', '.join(missing)}")
 
-    port = proxy.get("port")
-    if isinstance(port, int) and not 1 <= port <= 65535:
-        errors.append("端口超出 1-65535")
+    if "port" in proxy:
+        try:
+            parse_strict_port(proxy.get("port"))
+        except ValueError as exc:
+            errors.append(str(exc))
     return errors

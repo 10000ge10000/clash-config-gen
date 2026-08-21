@@ -2,7 +2,6 @@ import html
 import streamlit as st
 import streamlit.components.v1 as components
 import yaml
-import requests
 import json
 import uuid
 import ipaddress
@@ -14,104 +13,57 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from auth import get_bool_env
-from config_defaults import build_default_global_config
+from config_defaults import (
+    FULL_CLIENT_DNS_PRESET,
+    OPENCLASH_ROUTER_SAFE_PRESET,
+    apply_v2_global_defaults,
+    build_default_global_config,
+    migrate_global_defaults,
+)
 from config_builder import (
     DEFAULT_RULE_TYPE,
     DUSTINWIN_PROVIDERS_MAP,
     LHIE1_PROVIDERS_MAP,
     build_config as build_subscription_config,
     build_yaml as build_subscription_yaml,
+    is_no_base_rule_type,
     validate_config as validate_subscription_config,
 )
-from importers import normalize_subscription_content, parse_proxy_yaml, parse_share_link
+from importers import (
+    MAX_REMOTE_SUBSCRIPTION_BYTES,
+    fetch_text_from_external_url,
+    normalize_subscription_content,
+    parse_proxy_yaml,
+    parse_share_link,
+    safe_ruleset_file_path,
+    tag_import_source,
+    validate_external_url,
+    validate_ruleset_alias,
+)
 from mihomo_validator import validate_with_mihomo
+from node_builder import build_manual_node
 from security import create_csrf_token
 from storage import (
-    delete_regular_user,
     ensure_admin_from_env,
     get_public_base_url,
     get_user_by_auth_session,
+    get_user_by_id,
     get_user_config,
     init_db,
     list_users,
     reset_subscription_token,
     save_user_config,
     save_user_draft,
-    set_user_enabled,
 )
 from ui.auth_view import render_auth_gate
 from ui.node_view import render_node_management
 from ui.publish_view import PUBLISH_DIFF_LABELS, render_publish_summary
 from ui.rule_view import collect_rule_targets, render_rule_provider_list, render_single_rule_editor
+from ui.time_display import format_beijing_time
 
-MAX_REMOTE_SUBSCRIPTION_BYTES = 5 * 1024 * 1024
 SAFE_RULESET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 PROJECT_REPOSITORY_URL = "https://github.com/10000ge10000/clash-config-gen"
 MIHOMO_DOCUMENTATION_URL = "https://wiki.metacubex.one/"
-
-
-def validate_external_url(url: str) -> str:
-    """限制服务端主动访问目标，避免公开注册场景下被用来探测内网。"""
-    parsed = urlparse((url or "").strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("只支持 http/https URL")
-
-    host = parsed.hostname
-    try:
-        addresses = {info[4][0] for info in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)}
-    except OSError as exc:
-        raise ValueError(f"无法解析 URL 主机: {host}") from exc
-
-    for address in addresses:
-        ip = ipaddress.ip_address(address)
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        ):
-            raise ValueError("URL 解析到内网、本机或保留地址，已拒绝服务端访问")
-    return parsed.geturl()
-
-
-def fetch_text_from_external_url(url: str, timeout: int = 15) -> tuple[str, str]:
-    safe_url = validate_external_url(url)
-    response = requests.get(safe_url, timeout=timeout, stream=True, allow_redirects=False)
-    if 300 <= response.status_code < 400:
-        response.close()
-        raise ValueError("远程 URL 返回重定向，出于安全原因已拒绝")
-    response.raise_for_status()
-    content_type = response.headers.get("content-type", "")
-    chunks: list[bytes] = []
-    total = 0
-    for chunk in response.iter_content(chunk_size=65536):
-        if not chunk:
-            continue
-        total += len(chunk)
-        if total > MAX_REMOTE_SUBSCRIPTION_BYTES:
-            raise ValueError("远程订阅内容超过 5MB，已停止下载")
-        chunks.append(chunk)
-    response.close()
-    return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace"), content_type
-
-
-def validate_ruleset_alias(name: str) -> str:
-    alias = (name or "").strip()
-    if not SAFE_RULESET_NAME_PATTERN.fullmatch(alias):
-        raise ValueError("规则集别名只能使用 1-64 位字母、数字、点、下划线或短横线")
-    return alias
-
-
-def safe_ruleset_file_path(alias: str, rule_format: str, ruleset_dir: str = "ruleset") -> Path:
-    safe_alias = validate_ruleset_alias(alias)
-    safe_format = validate_ruleset_alias(rule_format)
-    base_dir = Path(ruleset_dir).resolve()
-    target_path = (base_dir / f"{safe_alias}.{safe_format}").resolve()
-    if base_dir != target_path.parent:
-        raise ValueError("规则集文件路径越界")
-    return target_path
 
 # ==========================================
 # 1. 页面基础设置 (必须位于所有 Streamlit 命令之前)
@@ -2187,74 +2139,14 @@ def reset_global_widget_keys() -> None:
 
 def apply_full_client_dns_leak_preset() -> None:
     """完整客户端预设：由生成的 YAML 接管 DNS/TUN，重点防止本机 DNS 绕过代理。"""
-    st.session_state.global_config.update({
-        "include_global_compat": False,
-        "include_inbound_ports": False,
-        "include_controller": False,
-        "include_router_options": False,
-        "enable_core_options": True,
-        "tcp_concurrent": True,
-        "unified_delay": True,
-        "geodata_mode": True,
-        "enable_dns": True,
-        "dns_listen": "0.0.0.0:7874",
-        "dns_ipv6": False,
-        "enhanced_mode": "fake-ip",
-        "fake_ip_range": "198.18.0.1/16",
-        "fake_ip_range6": "fc00::/18",
-        "fake_ip_filter_mode": "blacklist",
-        "default_nameserver": "223.5.5.5\n119.29.29.29",
-        "nameserver": "https://dns.alidns.com/dns-query\nhttps://doh.pub/dns-query",
-        "direct_nameserver": "223.5.5.5\n119.29.29.29",
-        "proxy_server_nameserver": "223.5.5.5",
-        "fallback": "",
-        "dns_respect_rules": True,
-        "openclash_preset": False,
-        "enable_tun": True,
-        "tun_stack": "mixed",
-        "tun_auto_route": True,
-        "tun_auto_detect_interface": True,
-        "tun_dns_hijack": True,
-        "tun_dns_hijack_value": "127.0.0.1:53",
-        "tun_endpoint_independent_nat": True,
-        "tun_auto_redirect": False,
-        "tun_strict_route": True,
-        "enable_sniffer": True,
-        "sniff_override_dest": True,
-        "sniffer_parse_pure_ip": True,
-        "sniffer_force_dns_mapping": True,
-        "profile_store_selected": True,
-        "profile_store_fake_ip": True,
-        "generation_profile": "desktop-full",
-    })
+    st.session_state.global_config.update(FULL_CLIENT_DNS_PRESET)
     reset_global_widget_keys()
     st.session_state["target_mode"] = "全平台客户端 (PC/移动端)"
 
 
 def apply_openclash_router_safe_preset() -> None:
     """软路由预设：订阅只负责节点和规则，DNS/TUN 留给 OpenClash 插件统一接管。"""
-    st.session_state.global_config.update({
-        "include_global_compat": False,
-        "include_inbound_ports": False,
-        "include_controller": False,
-        "include_router_options": False,
-        "enable_core_options": False,
-        "enable_dns": False,
-        "dns_respect_rules": False,
-        "direct_nameserver": "",
-        "proxy_server_nameserver": "",
-        "enable_tun": False,
-        "tun_dns_hijack": False,
-        "tun_strict_route": False,
-        "enable_sniffer": False,
-        "sniff_override_dest": False,
-        "sniffer_parse_pure_ip": False,
-        "sniffer_force_dns_mapping": False,
-        "openclash_preset": False,
-        "profile_store_selected": False,
-        "profile_store_fake_ip": False,
-        "generation_profile": "openclash-router",
-    })
+    st.session_state.global_config.update(OPENCLASH_ROUTER_SAFE_PRESET)
     reset_global_widget_keys()
     st.session_state["target_mode"] = "OpenClash / 软路由"
 
@@ -2294,17 +2186,6 @@ def target_mode_from_global_config(global_config: dict) -> str:
     return "全平台客户端 (PC/移动端)"
 
 
-def migrate_global_defaults(global_config: dict, saved_global_config: dict) -> dict:
-    """把旧默认值迁移到当前推荐值，避免老账号继续显示旧 UI 默认。"""
-    migrated = dict(global_config)
-    if saved_global_config.get("url_test_tolerance") in (None, 50):
-        migrated["url_test_tolerance"] = 30
-    if not saved_global_config.get("target_mode_user_selected"):
-        migrated["generation_profile"] = "openclash-router"
-        migrated["is_desktop"] = False
-    return migrated
-
-
 def draft_state_signature(
     proxies: list[dict],
     global_config: dict,
@@ -2340,7 +2221,7 @@ def current_draft_signature() -> str:
     )
 
 
-def persist_current_draft(
+def _persist_current_draft_unlocked(
     validation_status: str = "unknown",
     validation_message: str = "",
 ) -> None:
@@ -2366,26 +2247,28 @@ def persist_current_draft(
     st.session_state.persisted_draft_signature = current_draft_signature()
 
 
+def _streamlit_user_is_active() -> bool:
+    user = get_user_by_id(int(current_user["id"]))
+    return bool(user and user["is_enabled"])
+
+
+def persist_current_draft(
+    validation_status: str = "unknown",
+    validation_message: str = "",
+) -> None:
+    """Persist a Streamlit draft under the same cross-process user guard as V2."""
+    from api import _ruleset_user_lock
+
+    with _ruleset_user_lock(int(current_user["id"])):
+        if not _streamlit_user_is_active():
+            st.error("当前账号已失效，草稿未保存。")
+            return
+        _persist_current_draft_unlocked(validation_status, validation_message)
+
+
 def register_import_source(source_name: str, source_type: str, proxies: list[dict]) -> list[dict]:
-    source_id = uuid.uuid4().hex
-    imported_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    clean_name = source_name.strip() or source_type
-    tagged_proxies = []
-    for proxy in proxies:
-        tagged = dict(proxy)
-        tagged["_source_id"] = source_id
-        tagged["_source_name"] = clean_name
-        tagged["_origin_name"] = str(proxy.get("name", ""))
-        tagged_proxies.append(tagged)
-    st.session_state.import_sources.append(
-        {
-            "id": source_id,
-            "name": clean_name,
-            "type": source_type,
-            "node_count": len(tagged_proxies),
-            "imported_at": imported_at,
-        }
-    )
+    tagged_proxies, source_dict = tag_import_source(source_name, source_type, proxies)
+    st.session_state.import_sources.append(source_dict)
     return tagged_proxies
 
 
@@ -2406,28 +2289,6 @@ def extract_proxy_names(config: dict | None) -> list[str]:
         for proxy in config.get("proxies") or []
         if isinstance(proxy, dict) and proxy.get("name")
     ]
-
-
-def normalize_hy2_hop_interval(raw_value: str) -> int:
-    """OpenClash/mihomo 当前把 Hysteria2 hop-interval 按整数秒解析。"""
-    value = str(raw_value or "").strip()
-    if not value:
-        return 30
-    if value.isdigit():
-        seconds = int(value)
-        if seconds <= 0:
-            raise ValueError("hop-interval 必须大于 0 秒")
-        return seconds
-    if "-" in value:
-        left, right = [part.strip() for part in value.split("-", 1)]
-        if not left.isdigit() or not right.isdigit():
-            raise ValueError("随机跳跃间隔必须写成 5-25 这种纯数字范围")
-        start = int(left)
-        end = int(right)
-        if start <= 0 or end <= 0 or start > end:
-            raise ValueError("随机跳跃间隔范围必须大于 0，且左侧不能大于右侧")
-        return start
-    raise ValueError("hop-interval 只支持整数秒，兼容输入 5-25 时会自动取 5 秒")
 
 
 # 初始化session state来存储节点
@@ -2453,24 +2314,10 @@ if st.session_state.get("session_loaded_user_id") != current_user["id"]:
     # 否则新用户空配置会继续沿用上一位用户的 session_state，下载到错误账号的 YAML。
     st.session_state.proxies_data = saved_config.get("proxies") or []
     saved_global_config = saved_config.get("global_config") or {}
-    st.session_state.global_config = build_default_global_config()
-    st.session_state.global_config.update(saved_global_config)
-    st.session_state.global_config = migrate_global_defaults(st.session_state.global_config, saved_global_config)
-    if not st.session_state.global_config.get("optional_globals_v2"):
-        st.session_state.global_config.update({
-            "include_global_compat": False,
-            "include_inbound_ports": False,
-            "include_controller": False,
-            "include_router_options": False,
-            "enable_core_options": False,
-            "enable_dns": False,
-            "enable_sniffer": False,
-            "openclash_preset": False,
-            "dns_respect_rules": False,
-            "profile_store_selected": False,
-            "profile_store_fake_ip": False,
-            "optional_globals_v2": True,
-        })
+    st.session_state.global_config = apply_v2_global_defaults(
+        build_default_global_config(),
+        saved_global_config,
+    )
     st.session_state.custom_rules = saved_config.get("custom_rules") or []
     st.session_state.custom_rule_providers = saved_config.get("custom_rule_providers") or {}
     st.session_state.import_sources = saved_config.get("import_sources") or []
@@ -2582,9 +2429,16 @@ with st.sidebar:
             st.toast("订阅链接已复制到剪贴板", icon="✅")
 
     if st.button("重置订阅 Token", help="旧订阅链接会立即失效，适合链接泄露后的应急处理"):
-        reset_subscription_token(current_user["id"])
-        st.success("订阅 Token 已重置。")
-        st.rerun()
+        from api import _ruleset_user_lock
+
+        with _ruleset_user_lock(int(current_user["id"])):
+            refreshed_user = get_user_by_id(int(current_user["id"]))
+            if not refreshed_user or not bool(refreshed_user["is_enabled"]):
+                st.error("当前账号已失效，未重置 Token。")
+            else:
+                reset_subscription_token(int(current_user["id"]))
+                st.success("订阅 Token 已重置。")
+                st.rerun()
     st.markdown(
         f"""
         <form class="auth-logout-form" method="post" action="/sub/auth/logout">
@@ -2608,18 +2462,55 @@ with st.sidebar:
                         target_enabled = not bool(user["is_enabled"])
                         label = "启用" if target_enabled else "禁用"
                         if st.button(label, key=f"toggle_user_{user['id']}"):
-                            set_user_enabled(int(user["id"]), target_enabled)
-                            st.rerun()
+                            try:
+                                from api import _toggle_user_with_admin
+
+                                actual_enabled = _toggle_user_with_admin(
+                                    int(user["id"]),
+                                    int(current_user["id"]),
+                                )
+                                if actual_enabled != target_enabled:
+                                    st.warning("用户状态已被其他操作更新，请刷新后重试。")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"用户状态更新失败: {exc}")
                 with cols[2]:
                     if st.button("重置Token", key=f"reset_token_{user['id']}"):
-                        reset_subscription_token(int(user["id"]))
-                        st.rerun()
+                        from api import _ruleset_user_lock
+
+                        with _ruleset_user_lock(int(user["id"])):
+                            refreshed_admin = get_user_by_id(int(current_user["id"]))
+                            target_user = get_user_by_id(int(user["id"]))
+                            if (
+                                not refreshed_admin
+                                or not bool(refreshed_admin["is_enabled"])
+                                or not bool(refreshed_admin["is_admin"])
+                            ):
+                                st.error("管理员会话已失效，未重置 Token。")
+                            elif not target_user or not bool(target_user["is_enabled"]):
+                                st.warning("目标用户已不存在或已禁用，未重置 Token。")
+                            else:
+                                reset_subscription_token(int(user["id"]))
+                                st.rerun()
                 with cols[3]:
                     if not user["is_admin"]:
                         if st.button("删除", key=f"delete_user_{user['id']}", type="secondary"):
                             try:
-                                delete_regular_user(int(user["id"]))
-                                st.success(f"已删除用户 {user['username']}")
+                                # V2 与回滚入口共用同一套规则集 tombstone 生命周期：
+                                # 先在用户锁内删除 DB，再移出 namespace；失败时由启动/管理员重试。
+                                from api import _delete_user_with_rulesets, _retry_ruleset_tombstones
+
+                                _retry_ruleset_tombstones()
+                                cleanup_pending = _delete_user_with_rulesets(
+                                    int(user["id"]),
+                                    int(current_user["id"]),
+                                )
+                                if cleanup_pending:
+                                    st.warning(
+                                        f"已删除用户 {user['username']}，但规则集临时目录清理待重试。"
+                                    )
+                                else:
+                                    st.success(f"已删除用户 {user['username']}")
                                 st.rerun()
                             except Exception as exc:
                                 st.error(f"删除失败: {exc}")
@@ -2991,6 +2882,7 @@ st.session_state.global_config.update({
     "enable_tun": enable_tun, "unified_delay": unified_delay, "find_process_mode": find_process_mode,
     "geodata_mode": geodata_mode, "enable_sniffer": enable_sniffer, "sniff_override_dest": sniff_override,
     "openclash_preset": openclash_preset, "is_desktop": is_desktop,
+    "enable_dns": enable_dns,
     "redir_port": redir_port,
     "tproxy_port": tproxy_port,
     "interface_name": interface_name,
@@ -3114,9 +3006,10 @@ workspace_status = (
     else "已同步"
 )
 workspace_published_at = (
-    saved_config.get("published_at")
-    or saved_config.get("validated_at")
-    or "尚未发布"
+    format_beijing_time(
+        saved_config.get("published_at")
+        or saved_config.get("validated_at"),
+    )
 )
 
 st.markdown(
@@ -3304,7 +3197,7 @@ with tab1:
   type: ss
   server: "1.2.3.4"
   port: 8888
-  cipher: "2022-blake3-aes-128-gcm"
+  cipher: "aes-128-gcm"
   password: "your_password"
   udp: true
 """
@@ -3459,15 +3352,15 @@ with tab1:
         if node_type == "vmess":
             col3, col4 = st.columns(2)
             with col3:
-                node_uuid = st.text_input("UUID", "your-uuid-here", help="VMess协议的用户UUID")
+                node_uuid = st.text_input("UUID", "", help="VMess协议的用户UUID")
                 node_alterid = st.number_input("Alter ID", 0, help="VMess协议的额外ID数量")
-                vmess_encryption = st.selectbox("加密方式", ["auto", "none", "aes-128-gcm", "chacha20-poly1305"], index=0, help="VMess协议的加密方式")
+                vmess_encryption = st.selectbox("加密方式", ["auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305"], index=0, help="VMess协议的加密方式")
             with col4:
                 node_tls = st.checkbox("启用TLS", value=True, key=f"node_tls_{node_type}", help="是否启用TLS加密")
                 node_skip_cert = st.checkbox("跳过证书验证", value=False, key=f"node_skip_cert_{node_type}", help="是否跳过TLS证书验证")
                 node_tfo = st.checkbox("TFO", value=False, key=f"node_tfo_{node_type}", help="是否启用TCP Fast Open")
             
-            network_type = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc", "http"], index=0, help="VMess协议的传输方式")
+            network_type = st.selectbox("传输协议", ["tcp", "ws", "h2", "grpc"], index=0, help="VMess协议的传输方式")
             ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
         
             if network_type == "ws":
@@ -3486,13 +3379,12 @@ with tab1:
                     "aes-128-gcm", "aes-192-gcm", "aes-256-gcm",
                     "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305",
                     "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"
-                ], index=5, help="Shadowsocks协议的加密方式；onekey 默认使用 2022-blake3-aes-128-gcm。")
+                ], index=0, help="Shadowsocks协议的加密方式；普通密码默认使用 aes-128-gcm；2022 cipher 需要对应 Base64 密钥。")
                 node_password = st.text_input("密码", type="password", help="Shadowsocks协议的密码")
             with col4:
                 ss_udp_over_tcp = st.checkbox("udp-over-tcp", value=False, key=f"ss_udp_over_tcp_{node_type}", help="是否启用UDP over TCP")
                 ss_tfo = st.checkbox("TFO", value=False, key=f"ss_tfo_{node_type}", help="是否启用TCP Fast Open")
         
-            ss_network = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc"], index=0, help="传输层协议")
             ss_ip_version = st.selectbox("IP Version", ["默认", "dual", "ipv4", "ipv4-prefer", "ipv6", "ipv6-prefer"], index=0, help="使用的IP协议版本，默认不设置")
             ss_mux = st.checkbox("多路复用", value=False, key=f"ss_mux_{node_type}", help="是否启用多路复用")
     
@@ -3533,10 +3425,6 @@ with tab1:
             enable_port_hopping = st.checkbox("启用端口跳跃", value=True, key=f"enable_port_hopping_{node_type}", help="启用后写入 ports 字段；mihomo 会忽略 port 并按端口范围跳跃。")
             if enable_port_hopping:
                 port_hopping_range = st.text_input("端口范围", "29950-30000", help="端口跳跃的范围；兼容 onekey 的 ports 字段。")
-        
-            enable_protocol = st.checkbox("启用传输协议设置", key=f"enable_protocol_{node_type}", help="是否自定义传输协议")
-            if enable_protocol:
-                hy2_protocol = st.selectbox("传输协议", ["udp"], index=0, help="使用的传输协议")
         
             enable_quic_params = st.checkbox("QUIC 参数", key=f"enable_quic_params_{node_type}", help="是否自定义QUIC参数")
             if enable_quic_params:
@@ -3597,11 +3485,11 @@ with tab1:
         elif node_type == "tuic":
             col3, col4 = st.columns(2)
             with col3:
-                tuic_uuid = st.text_input("UUID", "00000000-0000-4000-8000-000000000000", help="TUIC协议的用户UUID")
+                tuic_uuid = st.text_input("UUID", "", help="TUIC协议的用户UUID")
                 tuic_password = st.text_input("Password", type="password", help="TUIC协议的密码")
                 tuic_server_ip = st.text_input("Server IP", "1.2.3.4", help="服务器IP地址")
             with col4:
-                tuic_congestion = st.selectbox("Congestion Controller", ["bbr", "cubic", "new_reno", "bbr2", "none"], index=0, help="拥塞控制算法；onekey 默认使用 bbr。")
+                tuic_congestion = st.selectbox("Congestion Controller", ["bbr", "cubic", "new_reno"], index=0, help="拥塞控制算法；onekey 默认使用 bbr。")
                 tuic_alpn = st.selectbox("ALPN", ["h3", "h3-29", "h3-27"], index=0, help="应用层协议协商标识")
                 tuic_udp_relay_mode = st.selectbox("UDP Relay Mode", ["native", "quic"], index=0, help="UDP中继模式")
         
@@ -3617,13 +3505,13 @@ with tab1:
         elif node_type == "vless":
             col3, col4 = st.columns(2)
             with col3:
-                node_uuid = st.text_input("UUID", "your-uuid-here", help="VLESS协议的用户UUID")
+                node_uuid = st.text_input("UUID", "", help="VLESS协议的用户UUID")
                 vless_tls = st.checkbox("TLS", value=True, key=f"vless_tls_{node_type}", help="是否启用TLS加密")
             with col4:
                 vless_flow = st.selectbox("flow (reality)", ["none", "xtls-rprx-vision", "xtls-rprx-vision-udp443"], index=1, help="XTLS 的流量特征；VLESS Reality 默认使用 xtls-rprx-vision。")
                 vless_servername = st.text_input("servername", "v1-dy.ixigua.com", help="TLS握手时的服务器名称；onekey Reality 默认使用该伪装域名。")
         
-            vless_network = st.selectbox("传输协议", ["tcp", "kcp", "ws", "h2", "grpc", "http"], index=0, help="传输层协议")
+            vless_network = st.selectbox("传输协议", ["tcp", "ws", "h2", "grpc", "http", "xhttp"], index=0, help="传输层协议")
             vless_packet_encoding = st.text_input("Packet-Encoding", "", help="数据包编码方式")
             if vless_network == "ws":
                 vless_ws_path = st.text_input("WebSocket path", "/vless", help="VLESS WS 的 ws-opts.path，兼容 OpenClash/mihomo。")
@@ -3684,187 +3572,48 @@ with tab1:
                 st.warning("暂无可用节点，请先添加其他节点作为前置代理")
                 dialer_proxy_name = st.text_input("链式代理节点名称 (手动输入)", placeholder="输入用于链式连接的节点名称", key=f"dialer_proxy_name_{node_type}")
 
-        # 构建节点配置
-        manual_node = {
-            "name": node_name,
-            "type": node_type,
-            "server": node_server,
-            "port": node_port
-        }
-
-        # 根据节点类型添加特定配置
-        if node_type == "vmess":
-            manual_node["uuid"] = node_uuid
-            manual_node["alterId"] = node_alterid
-            manual_node["cipher"] = vmess_encryption
-            manual_node["tls"] = node_tls
-            manual_node["skip-cert-verify"] = node_skip_cert
-            manual_node["tfo"] = node_tfo
-            manual_node["network"] = network_type
-            if ip_version != "默认":
-                manual_node["ip-version"] = ip_version
-            
-            if network_type == "ws":
-                ws_opts = {"path": ws_path}
-                if ws_host:
-                    ws_opts["headers"] = {"Host": ws_host}
-                manual_node["ws-opts"] = ws_opts
-            elif network_type == "h2":
-                h2_opts = {"path": h2_path}
-                if h2_host:
-                    h2_opts["host"] = [h2_host]
-                manual_node["h2-opts"] = h2_opts
-            elif network_type == "grpc":
-                manual_node["grpc-service-name"] = grpc_service_name
-
-        elif node_type == "ss":
-            manual_node["password"] = node_password
-            manual_node["cipher"] = ss_encryption
-            manual_node["udp"] = node_udp
-            manual_node["udp-over-tcp"] = ss_udp_over_tcp
-            manual_node["tfo"] = ss_tfo
-            manual_node["network"] = ss_network
-            if ss_ip_version != "默认":
-                manual_node["ip-version"] = ss_ip_version
-            manual_node["mux"] = ss_mux
-
-        elif node_type == "trojan":
-            manual_node["password"] = node_password
-            manual_node["udp"] = node_udp
-            manual_node["udp-over-tcp"] = trojan_udp_over_tcp
-            manual_node["tfo"] = trojan_tfo
-            manual_node["network"] = trojan_network
-            if trojan_ip_version != "默认":
-                manual_node["ip-version"] = trojan_ip_version
-        
-            if trojan_network == "ws":
-                ws_opts = {"path": ws_path}
-                if ws_host:
-                    ws_opts["headers"] = {"Host": ws_host}
-                manual_node["ws-opts"] = ws_opts
-            elif trojan_network == "grpc":
-                manual_node["grpc-opts"] = {"grpc-service-name": grpc_service_name}
-
-        elif node_type == "hysteria2":
-            manual_node["password"] = node_password
-            manual_node["sni"] = hy2_sni
-            manual_node["skip-cert-verify"] = hy2_skip_cert
-            manual_node["alpn"] = [hy2_alpn]
-            if hy2_obfs_type and hy2_obfs_type != "none":
-                manual_node["obfs"] = hy2_obfs_type
-                manual_node["obfs-password"] = hy2_obfs_password
-            manual_node["up"] = f"{hy2_up_mbps} Mbps"
-            manual_node["down"] = f"{hy2_down_mbps} Mbps"
-            try:
-                manual_node["hop-interval"] = normalize_hy2_hop_interval(hy2_hop_interval)
-            except ValueError as exc:
-                st.warning(str(exc))
-                manual_node["hop-interval"] = 30
-            if hy2_fingerprint != "none":
-                manual_node["client-fingerprint"] = hy2_fingerprint
-            if hy2_ip_version != "默认":
-                manual_node["ip-version"] = hy2_ip_version
-            
-            if enable_port_hopping:
-                manual_node["ports"] = port_hopping_range
-            if enable_protocol:
-                manual_node["protocol"] = hy2_protocol
-            if enable_quic_params:
-                manual_node["quic-params"] = {
-                    "initial-stream-receive-window": initial_stream_receive_window,
-                    "max-stream-receive-window": max_stream_receive_window,
-                    "initial-connection-receive-window": initial_connection_receive_window,
-                    "max-connection-receive-window": max_connection_receive_window
-                }
-
-        elif node_type == "tuic":
-            manual_node["uuid"] = tuic_uuid
-            manual_node["password"] = tuic_password
-            manual_node["ip"] = tuic_server_ip
-            manual_node["congestion-controller"] = tuic_congestion
-            manual_node["alpn"] = [tuic_alpn]
-            manual_node["udp-relay-mode"] = tuic_udp_relay_mode
-            manual_node["disable-sni"] = tuic_close_sni
-            if not tuic_close_sni:
-                manual_node["sni"] = node_server
-            manual_node["reduce-rtt"] = tuic_reduce_rtt
-            manual_node["skip-cert-verify"] = tuic_skip_cert_verify
-            manual_node["fast-open"] = tuic_fast_open
-            if tuic_ip_version != "默认":
-                manual_node["ip-version"] = tuic_ip_version
-            manual_node["heartbeat-interval"] = tuic_heartbeat_interval
-
-        elif node_type == "vless":
-            manual_node["uuid"] = node_uuid
-            manual_node["tls"] = vless_tls
-            manual_node["servername"] = vless_servername
-            manual_node["network"] = vless_network
-            # 修复逻辑: 只有当 flow 不为 none 时才添加该字段
-            if vless_flow != "none":
-                manual_node["flow"] = vless_flow
-        
-            if vless_packet_encoding:
-                 manual_node["packet-encoding"] = vless_packet_encoding
-            manual_node["udp"] = node_udp
-            manual_node["tfo"] = vless_tfo
-            manual_node["client-fingerprint"] = vless_fp
-            if vless_ip_version != "默认":
-                manual_node["ip-version"] = vless_ip_version
-            manual_node["skip-cert-verify"] = vless_skip_cert_verify
-        
-            # Reality / Utils
-            if vless_public_key:
-                 manual_node["reality-opts"] = {"public-key": vless_public_key}
-                 if vless_short_id:
-                     manual_node["reality-opts"]["short-id"] = vless_short_id
-        
-            # WS Opts etc.
-            if vless_network == "ws":
-                ws_opts = {"path": vless_ws_path}
-                if vless_ws_host:
-                    ws_opts["headers"] = {"Host": vless_ws_host}
-                manual_node["ws-opts"] = ws_opts
-            elif vless_network == "grpc":
-                 manual_node["grpc-opts"] = {"grpc-service-name": vless_grpc_service_name}
-
-        elif node_type == "anytls":
-            manual_node["password"] = anytls_password
-            manual_node["skip-cert-verify"] = anytls_skip_cert_verify
-            manual_node["sni"] = anytls_sni
-            if anytls_alpn != "none":
-                manual_node["alpn"] = anytls_alpn.split(",") if "," in anytls_alpn else [anytls_alpn]
-            manual_node["idle-session-check-interval"] = anytls_idle_session_check_interval
-            manual_node["idle-session-timeout"] = anytls_idle_session_timeout
-            manual_node["min-idle-session"] = anytls_min_idle_session
-            manual_node["client-fingerprint"] = anytls_fp
-            manual_node["udp"] = node_udp
-            if anytls_ip_version != "默认":
-                manual_node["ip-version"] = anytls_ip_version
-            if anytls_ech_enabled:
-                manual_node["ech-opts"] = {"enable": True}
-                if anytls_ech_config.strip():
-                    manual_node["ech-opts"]["config"] = anytls_ech_config.strip()
-                if anytls_ech_query_server_name.strip():
-                    manual_node["ech-opts"]["query-server-name"] = anytls_ech_query_server_name.strip()
-
-        if common_ip_version != "默认" and "ip-version" not in manual_node:
-            manual_node["ip-version"] = common_ip_version
-        if enable_smux:
-            manual_node["smux"] = {
-                "enabled": smux_enabled,
-                "protocol": smux_protocol,
-                "max-connections": smux_max_connections,
+        # 表单只负责收集字段；协议字段、严格端口、SS2022 密钥、Reality
+        # 公钥和 grpc-opts 均由共享 builder 生成，避免 Streamlit 与 V2 API
+        # 再维护一套容易漂移的协议分支。
+        manual_field_keys = (
+            "node_name", "node_server", "node_port", "node_udp",
+            "common_ip_version", "enable_smux", "smux_enabled", "smux_protocol",
+            "smux_max_connections", "smux_brutal_enabled", "smux_brutal_up", "smux_brutal_down",
+            "node_uuid", "node_alterid", "vmess_encryption", "node_tls", "node_skip_cert",
+            "node_tfo", "network_type", "ip_version", "ws_path", "ws_host", "h2_path", "h2_host",
+            "grpc_service_name", "node_password", "ss_encryption", "ss_udp_over_tcp", "ss_tfo",
+            "ss_ip_version", "ss_mux", "trojan_udp_over_tcp", "trojan_tfo", "trojan_network",
+            "trojan_ip_version", "hy2_sni", "hy2_obfs_type", "hy2_up_mbps", "hy2_down_mbps",
+            "hy2_obfs_password", "hy2_skip_cert", "hy2_alpn", "enable_port_hopping",
+            "port_hopping_range", "enable_quic_params", "initial_stream_receive_window",
+            "max_stream_receive_window", "initial_connection_receive_window",
+            "max_connection_receive_window", "hy2_hop_interval", "hy2_fingerprint", "hy2_ip_version",
+            "tuic_uuid", "tuic_password", "tuic_server_ip", "tuic_congestion", "tuic_alpn",
+            "tuic_udp_relay_mode", "tuic_heartbeat_interval", "tuic_close_sni", "tuic_reduce_rtt",
+            "tuic_skip_cert_verify", "tuic_fast_open", "tuic_ip_version", "vless_tls", "vless_flow",
+            "vless_servername", "vless_network", "vless_packet_encoding", "vless_ws_path",
+            "vless_ws_host", "vless_h2_path", "vless_h2_host", "vless_grpc_service_name",
+            "vless_tfo", "vless_fp", "vless_ip_version", "vless_public_key", "vless_short_id",
+            "vless_skip_cert_verify", "anytls_password", "anytls_sni", "anytls_fp",
+            "anytls_skip_cert_verify", "anytls_alpn", "anytls_ip_version",
+            "anytls_idle_session_check_interval", "anytls_idle_session_timeout", "anytls_min_idle_session",
+            "anytls_ech_enabled", "anytls_ech_config", "anytls_ech_query_server_name",
+            "use_dialer_proxy", "dialer_proxy_name",
+        )
+        local_values = locals()
+        manual_fields = {key: local_values[key] for key in manual_field_keys if key in local_values}
+        try:
+            manual_node = build_manual_node(node_type, manual_fields)
+        except (TypeError, ValueError):
+            # Empty required controls are normal while the form is being
+            # filled.  This preview is never persisted; the add action below
+            # still parses and validates the edited YAML before saving.
+            manual_node = {
+                "name": node_name,
+                "type": node_type,
+                "server": node_server,
+                "port": node_port,
             }
-            if smux_brutal_enabled:
-                manual_node["smux"]["brutal-opts"] = {
-                    "enabled": True,
-                    "up": f"{smux_brutal_up} Mbps",
-                    "down": f"{smux_brutal_down} Mbps",
-                }
-
-        # 添加链式代理配置
-        if use_dialer_proxy and dialer_proxy_name:
-            manual_node["dialer-proxy"] = dialer_proxy_name
 
         manual_node_yaml = yaml.dump([manual_node], allow_unicode=True, sort_keys=False)
         if st.session_state.get("manual_node_yaml_source") != manual_node_yaml:
@@ -4087,15 +3836,8 @@ with tab3:
                 if rp_url:
                     if st.button("测试链接可用性", key="test_rp_url"):
                          try:
-                             safe_url = validate_external_url(rp_url)
-                             resp = requests.head(safe_url, timeout=5, allow_redirects=False)
-                             if 300 <= resp.status_code < 400:
-                                 st.warning("⚠️ 链接返回重定向，出于安全原因已拒绝自动跟随")
-                                 st.stop()
-                             if resp.status_code == 200:
-                                 st.success("✅ 链接可用")
-                             else:
-                                 st.warning(f"⚠️ 链接返回状态码: {resp.status_code}")
+                             _text, content_type = fetch_text_from_external_url(rp_url, timeout=5)
+                             st.success(f"✅ 链接可用（{content_type or '未知类型'}）")
                          except Exception as e:
                              st.error(f"❌ 连接失败: {e}")
                 
@@ -4233,8 +3975,10 @@ with tab4:
     published_stats = config_summary(published_config)
     has_unpublished_changes = draft_yaml != (saved_config.get("final_yaml") or "")
 
-    published_at = saved_config.get("published_at") or saved_config.get("validated_at") or "尚未发布"
-    render_publish_summary(has_unpublished_changes, str(published_at), draft_stats, published_stats)
+    published_at = format_beijing_time(
+        saved_config.get("published_at") or saved_config.get("validated_at")
+    )
+    render_publish_summary(has_unpublished_changes, published_at, draft_stats, published_stats)
 
     if draft_build_error:
         st.error(f"草稿生成失败：{draft_build_error}")
@@ -4260,52 +4004,80 @@ with tab4:
         )
 
     if check_clicked:
-        check_errors, check_warnings = validate_subscription_config(draft_config)
-        if check_errors:
-            st.session_state.pop("checked_draft_signature", None)
-            st.session_state.pop("checked_draft_yaml", None)
-            persist_current_draft("failed", "；".join(check_errors))
-            st.error(f"结构检查发现 {len(check_errors)} 个错误")
-            for error in check_errors:
-                st.code(error, language="text")
-        else:
-            mihomo_result = validate_with_mihomo(draft_yaml)
-            if not mihomo_result.ok:
+        from api import _ruleset_user_lock
+
+        with _ruleset_user_lock(int(current_user["id"])):
+            if not _streamlit_user_is_active():
+                st.error("当前账号已失效，校验未保存。")
+                st.stop()
+            check_errors, check_warnings = validate_subscription_config(
+                draft_config,
+                allow_no_match=is_no_base_rule_type(selected_rule),
+            )
+            if check_errors:
                 st.session_state.pop("checked_draft_signature", None)
                 st.session_state.pop("checked_draft_yaml", None)
-                persist_current_draft(mihomo_result.status, mihomo_result.message)
-                st.error(f"mihomo 内核校验失败：{mihomo_result.status}")
-                st.code(mihomo_result.message, language="text")
+                _persist_current_draft_unlocked("failed", "；".join(check_errors))
+                st.error(f"结构检查发现 {len(check_errors)} 个错误")
+                for error in check_errors:
+                    st.code(error, language="text")
             else:
-                st.session_state.checked_draft_signature = draft_signature
-                st.session_state.checked_draft_yaml = draft_yaml
-                st.session_state.checked_draft_warnings = check_warnings
-                st.session_state.checked_draft_validation_status = mihomo_result.status
-                st.session_state.checked_draft_validation_message = mihomo_result.message
-                persist_current_draft(mihomo_result.status, mihomo_result.message)
-                st.session_state.draft_check_notice = "草稿已通过结构检查和 mihomo 内核校验，可以发布。"
-                st.rerun()
+                mihomo_result = validate_with_mihomo(draft_yaml)
+                if not mihomo_result.ok:
+                    st.session_state.pop("checked_draft_signature", None)
+                    st.session_state.pop("checked_draft_yaml", None)
+                    _persist_current_draft_unlocked(mihomo_result.status, mihomo_result.message)
+                    st.error(f"mihomo 内核校验失败：{mihomo_result.status}")
+                    st.code(mihomo_result.message, language="text")
+                else:
+                    st.session_state.checked_draft_signature = draft_signature
+                    st.session_state.checked_draft_yaml = draft_yaml
+                    st.session_state.checked_draft_warnings = check_warnings
+                    st.session_state.checked_draft_validation_status = mihomo_result.status
+                    st.session_state.checked_draft_validation_message = mihomo_result.message
+                    _persist_current_draft_unlocked(mihomo_result.status, mihomo_result.message)
+                    st.session_state.draft_check_notice = "草稿已通过结构检查和 mihomo 内核校验，可以发布。"
+                    st.rerun()
 
     if publish_clicked:
-        published_token = saved_config["token"]
-        save_user_config(
-            current_user["id"],
-            st.session_state.proxies_data,
-            st.session_state.global_config,
-            st.session_state.custom_rules,
-            st.session_state.custom_rule_providers,
-            selected_rule,
-            st.session_state.checked_draft_yaml,
-            validation_status=st.session_state.get(
-                "checked_draft_validation_status",
-                "passed",
-            ),
-            validation_message=st.session_state.get(
-                "checked_draft_validation_message",
-                "草稿通过结构检查和 mihomo 内核校验后发布",
-            ),
-            import_sources=st.session_state.import_sources,
-        )
+        from api import _cleanup_unreferenced_user_rulesets, _ruleset_user_lock
+
+        with _ruleset_user_lock(int(current_user["id"])):
+            # Refresh the token/config after waiting for concurrent API
+            # operations, then keep DB write and version cleanup in this same
+            # critical section.  Do not use the pre-lock saved snapshot.
+            if not _streamlit_user_is_active():
+                st.error("当前账号已失效，发布未保存。")
+                st.stop()
+            latest_saved_config = get_user_config(current_user["id"])
+            published_token = latest_saved_config["token"]
+            save_user_config(
+                current_user["id"],
+                st.session_state.proxies_data,
+                st.session_state.global_config,
+                st.session_state.custom_rules,
+                st.session_state.custom_rule_providers,
+                selected_rule,
+                st.session_state.checked_draft_yaml,
+                validation_status=st.session_state.get(
+                    "checked_draft_validation_status",
+                    "passed",
+                ),
+                validation_message=st.session_state.get(
+                    "checked_draft_validation_message",
+                    "草稿通过结构检查和 mihomo 内核校验后发布",
+                ),
+                import_sources=st.session_state.import_sources,
+            )
+            refreshed_config = get_user_config(current_user["id"])
+            try:
+                _cleanup_unreferenced_user_rulesets(
+                    int(current_user["id"]),
+                    refreshed_config,
+                    strict=True,
+                )
+            except Exception:
+                st.warning("旧规则集版本清理未完成，将在后续上传或启动时重试。")
         st.session_state.persisted_draft_signature = draft_signature
         st.session_state.pop("checked_draft_signature", None)
         st.session_state.pop("checked_draft_yaml", None)

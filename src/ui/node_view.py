@@ -6,11 +6,33 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yaml
 
+from importers import parse_proxy_yaml
+
 
 NODE_DRAG_COMPONENT = components.declare_component(
     "ccg_node_drag_handle",
     path=str(Path(__file__).parents[1] / "components" / "node_drag_handle"),
 )
+
+
+def _parse_single_node_yaml(updated_yaml: str) -> dict:
+    """Parse one edited node through the shared importer contract.
+
+    The editor accepts the same YAML/list/config shapes as the import flow, but
+    deliberately requires exactly one resulting node before the caller mutates
+    ``st.session_state.proxies_data``.
+    """
+    parsed_nodes, _warnings = parse_proxy_yaml(updated_yaml)
+    if len(parsed_nodes) != 1:
+        raise ValueError("手动编辑一次只能保存 1 个节点")
+    return parsed_nodes[0]
+
+
+def _merge_internal_metadata(updated_proxy: dict, original_proxy: dict) -> dict:
+    """Keep storage-only source metadata out of the editor but in the result."""
+    merged = dict(updated_proxy)
+    merged.update({key: value for key, value in original_proxy.items() if str(key).startswith("_")})
+    return merged
 
 
 def render_node_management(render_workflow_step) -> None:
@@ -138,16 +160,8 @@ def _render_inline_editor(idx: int, proxy: dict) -> None:
     with save_col:
         if st.button("保存修改", key=f"save_proxy_{idx}", type="primary", use_container_width=True):
             try:
-                updated_data = yaml.safe_load(updated_yaml)
-                if not isinstance(updated_data, list) or not updated_data:
-                    raise ValueError("请确保输入的是包含一个节点的 YAML 列表")
-                updated_proxy = updated_data[0]
-                required_fields = {"name", "type", "server", "port"}
-                if not isinstance(updated_proxy, dict) or not required_fields.issubset(updated_proxy):
-                    raise ValueError("节点配置缺少必要字段 name、type、server 或 port")
-                updated_proxy.update(
-                    {key: value for key, value in editing_data.items() if str(key).startswith("_")}
-                )
+                updated_proxy = _parse_single_node_yaml(updated_yaml)
+                updated_proxy = _merge_internal_metadata(updated_proxy, editing_data)
                 st.session_state.proxies_data[idx] = updated_proxy
                 _clear_editor()
                 st.success("节点信息已更新")

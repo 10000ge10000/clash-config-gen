@@ -36,6 +36,16 @@ GOOGLE_RULESET_URL = "https://raw.githubusercontent.com/blackmatrix7/ios_rule_sc
 DEFAULT_RULE_TYPE = "dustinwin规则"
 
 
+def is_no_base_rule_type(value: object) -> bool:
+    """Return whether the draft explicitly requests only user rules/providers.
+
+    ``自定义规则`` was the label used by the first V2 drafts.  Keep it as an
+    input alias while exposing the clearer ``none`` value to new clients.
+    """
+    normalized = str(value or "").strip().lower()
+    return normalized in {"none", "无基础规则", "自定义规则", "custom"}
+
+
 def _base64_utf8(value: str) -> str:
     return "base64:" + base64.b64encode(value.encode("utf-8")).decode("ascii")
 
@@ -429,8 +439,16 @@ def build_config(
     if auth_list:
         final_config["authentication"] = auth_list
 
-    if generation_profile == "minimal":
+    if generation_profile == "minimal" and not is_no_base_rule_type(selected_rule_type):
         rules, rule_providers = ["MATCH,Proxy"], {}
+    elif generation_profile == "minimal":
+        rules, rule_providers = build_rules(
+            selected_rule_type,
+            custom_rules,
+            custom_rule_providers,
+            global_config.get("lhie1_provider_targets", {}),
+            global_config.get("dustinwin_provider_targets", {}),
+        )
     else:
         rules, rule_providers = build_rules(
             selected_rule_type,
@@ -547,7 +565,11 @@ def build_subscription_headers(proxy_count: int, group_count: int) -> dict[str, 
     }
 
 
-def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
+def validate_config(
+    config: dict[str, Any],
+    *,
+    allow_no_match: bool = False,
+) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     proxies = config.get("proxies") or []
@@ -558,12 +580,13 @@ def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
         errors.append("Proxies 为空")
     if not groups:
         errors.append("Proxy Groups 为空")
-    if not any(str(rule).startswith("MATCH,") for rule in rules):
+    if not allow_no_match and not any(str(rule).startswith("MATCH,") for rule in rules):
         errors.append("Rules 缺少 MATCH 兜底规则")
 
     proxy_names = [p.get("name") for p in proxies if isinstance(p, dict)]
     group_names = [g.get("name") for g in groups if isinstance(g, dict)]
-    valid_targets = set(proxy_names + group_names + ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "no-resolve"])
+    # no-resolve 是规则末尾的修饰符，不是可跳转的策略组目标。
+    valid_targets = set(proxy_names + group_names + ["DIRECT", "REJECT", "REJECT-DROP", "PASS"])
 
     for proxy in proxies:
         if not isinstance(proxy, dict):
@@ -585,7 +608,7 @@ def validate_config(config: dict[str, Any]) -> tuple[list[str], list[str]]:
             # 真正的策略组目标是倒数第二段。如果直接取最后一段，会漏掉
             # Domestic 这类缺失策略组，坏配置就会被误判为可用。
             target = parts[-2] if parts[-1] == "no-resolve" and len(parts) >= 3 else parts[-1]
-            if target not in valid_targets and target != "no-resolve":
+            if target not in valid_targets:
                 errors.append(f"规则 '{rule}' 指向了不存在的策略组: '{target}'")
 
     dns_config = config.get("dns") or {}
@@ -664,7 +687,13 @@ def build_rules(
         }
         rule_list.append("RULE-SET,google,Google")
         rule_list.extend(["GEOIP,CN,Domestic,no-resolve", "MATCH,Others"])
+    elif is_no_base_rule_type(selected_rule_type):
+        # Explicit "none"/custom mode deliberately has no built-in rules and
+        # no implicit MATCH fallback.  The caller owns the complete rule list.
+        rule_list = []
     else:
+        # Preserve the historical fallback for unknown legacy values while
+        # making the supported no-base mode explicit above.
         rule_list = [
             "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
             "DOMAIN-SUFFIX,services.googleapis.cn,Google",
@@ -685,6 +714,11 @@ def build_rules(
         }
         if provider["type"] == "http" and config.get("url"):
             provider["url"] = config["url"]
+        if "proxy" in config:
+            # Preserve the provider transport selector verbatim.  The API
+            # canonicalizes private user versions to DIRECT; external HTTP
+            # providers keep whatever explicit value the user supplied.
+            provider["proxy"] = config["proxy"]
         if config.get("format"):
             provider["format"] = config["format"]
         rule_providers[name] = provider
@@ -698,7 +732,7 @@ def build_rules(
     preset_normal = [rule for rule in rule_list if not rule.startswith("MATCH,")]
     preset_match = [rule for rule in rule_list if rule.startswith("MATCH,")]
     final_rules = list(custom_rules) + provider_rules_prepend + preset_normal + provider_rules_append + preset_match
-    if not any(rule.startswith("MATCH,") for rule in final_rules):
+    if not is_no_base_rule_type(selected_rule_type) and not any(rule.startswith("MATCH,") for rule in final_rules):
         final_rules.append("MATCH,Proxy")
     return final_rules, rule_providers
 
