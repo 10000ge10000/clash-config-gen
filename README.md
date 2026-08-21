@@ -30,7 +30,19 @@
 
 ## 一键部署
 
-在服务器中新建一个目录，例如 `clash-config-gen`，然后创建 `docker-compose.yml`：
+在服务器中新建一个目录，例如 `clash-config-gen`，先生成仅保存在本机的 CSRF 密钥，再创建 `docker-compose.yml`。密钥至少需要 32 个字符；下面的命令会生成 64 个十六进制字符：
+
+```bash
+mkdir -p clash-config-gen
+cd clash-config-gen
+umask 077
+printf 'CSRF_SECRET=%s\n' "$(openssl rand -hex 32)" > .env
+chmod 600 .env
+```
+
+`.env` 只用于当前服务器，不要提交到 Git，也不要在多套部署之间复用或把下面的示例密钥写死到 Compose 文件中。
+
+然后创建 `docker-compose.yml`：
 
 ```yaml
 services:
@@ -40,7 +52,7 @@ services:
     restart: always
     ports:
       # Web 管理页面端口。反代 Web UI 时指向这个端口。
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
       # 订阅 API 端口。反代 /sub/ 和 /health 时指向这个端口。
       - "8000:8000"
     environment:
@@ -50,6 +62,8 @@ services:
       - ALLOW_REGISTRATION=false
       # HTTPS 部署保持 true；仅本地 HTTP 调试时临时设为 false。
       - AUTH_COOKIE_SECURE=true
+      # 必须在本机 .env 中提供至少 32 字符的随机值；缺失时 Compose 直接失败。
+      - CSRF_SECRET=${CSRF_SECRET:?CSRF_SECRET must be set}
       # 初始化管理员账号。首次启动时自动创建。
       - ADMIN_USERNAME=admin
       # 必须改成强密码，不要使用示例值。
@@ -122,15 +136,15 @@ https://clash.910501.xyz/sub/用户自己的随机Token/diagnostics
 
 ## Nginx反向代理配置
 
-部署后需要配置 Nginx 反向代理，将订阅 API 和 Web UI 分别转发到不同端口。**这是最常见的部署问题**：如果配置错误，订阅链接会返回 HTML 页面而非 YAML 配置。
+部署后需要配置 Nginx（或 OpenResty）反向代理，将公网入口统一转发到 FastAPI。**这是最常见的部署问题**：如果配置错误，订阅链接会返回 HTML 页面而非 YAML 配置。
 
 ### 关键说明
 
 本服务包含两个独立的 Web 服务：
-- **Streamlit Web UI**：端口 8501，用于管理界面
-- **FastAPI 订阅 API**：端口 8000，用于 `/sub/`、`/ruleset/`、`/v2` 和 `/health` 接口
+- **FastAPI V2**：端口 8000，负责公网根页面、`/api/`、`/v2`、`/sub/`、`/ruleset/` 和 `/health`
+- **Streamlit 回滚后端**：端口 8501，仅保留为本机直连的快速回滚入口；生产反代不公开转发到 8501
 
-Nginx 必须将 `/sub/`、`/ruleset/`、`/v2` 和 `/health` 路径转发到 FastAPI 端口（8000），其他路径转发到 Streamlit 端口（8501）。
+生产反代必须将根路径和下列所有路径转发到 FastAPI 端口（8000）。8501 建议只监听 `127.0.0.1`，需要回滚时再把公网根路径临时切回 8501，并同时保留 Streamlit 所需的 WebSocket 头；不要把未配置的 Streamlit 页面误当作 V2 API。
 
 ### Nginx 配置示例
 
@@ -142,44 +156,57 @@ server {
     ssl_certificate /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
 
-    # Streamlit Web UI (端口 8501)
+    # V2 根页面（FastAPI 端口 8000）
     location / {
-        proxy_pass http://127.0.0.1:8501;
+        proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        # Streamlit WebSocket 支持
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
     }
 
-    # FastAPI 订阅 API (端口 8000) - 必须单独配置！
+    # FastAPI JSON API（端口 8000）
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # FastAPI 订阅 API（端口 8000）
     location /sub/ {
-        proxy_pass http://127.0.0.1:8000/sub/;
+        proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    # DustinWin 规则集缓存接口 (端口 8000)
+    # 规则集缓存接口（端口 8000）
     location /ruleset/ {
-        proxy_pass http://127.0.0.1:8000/ruleset/;
+        proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    # FastAPI 健康检查
-    location /health {
-        proxy_pass http://127.0.0.1:8000/health;
+    # 精确健康检查，避免被其它前缀规则截获
+    location = /health {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
     }
 
-    # V2 界面预览页（静态原型）
-    location /v2 {
-        proxy_pass http://127.0.0.1:8000/v2;
+    # V2 页面（FastAPI 端口 8000）
+    location = /v2 {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+    }
+    location /v2/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
     }
 }
 ```
+
+Streamlit 回滚后端不需要额外的公网 location。确认它只绑定本机后，可在服务器上直接访问 `http://127.0.0.1:8501`；若必须临时切换公网根入口，应恢复带 WebSocket 升级头的 Streamlit 反代，并在回滚完成后再次执行 OpenResty 配置检查。
 
 ### 常见问题
 
@@ -192,7 +219,8 @@ server {
 | 普通脚本测试返回 403 / Cloudflare 1010 | CDN 浏览器完整性检查拦截了默认脚本 User-Agent | 用 OpenClash、mihomo、浏览器或显式设置 User-Agent 测试；真实 OpenClash 拉取应返回 `application/x-yaml` |
 | 客户端只看到内置 Global | 订阅内容不是有效 YAML，或 YAML 缺少 `proxy-groups` | 重新在“生成与检查”中保存；新版本会拒绝继续提供没有策略组的坏配置 |
 | OpenClash 报 mihomo 字段错误 | 节点字段不符合 mihomo 规范 | 生成器会先规范化节点，再调用 mihomo 内核校验；校验失败不会保存订阅 |
-| Web UI 无法正常交互 | WebSocket 未配置 | 添加 WebSocket 升级头（见上方示例） |
+| Streamlit 回滚入口无法正常交互 | 回滚反代未保留 WebSocket 升级头 | 切回 8501 时恢复 Streamlit 的 WebSocket 配置；V2 FastAPI 根页面不依赖该连接 |
+| **双 UI 并发编辑** | **整草稿最后写入覆盖** | **同一份草稿的多个浏览器标签/窗口会最后写入获胜**（与现有 Streamlit UI 行为一致）；README 已注明，避免多标签页冲突 |
 
 ## mihomo 内核校验
 
@@ -255,6 +283,8 @@ https://你的域名/ruleset/dustinwin/ai.mrs
 
 如果你不想让订阅引用本服务缓存，可以把 `RULESET_CACHE_ENABLED=false`，订阅会直接引用 DustinWin GitHub Release 地址。
 
+V2 上传的自定义规则集会保存为用户隔离的内容哈希版本，并以带当前订阅 Token 的 HTTP provider 写入订阅 YAML。规则集 URL 只允许对应用户的当前 Token 访问；重置 Token 后旧规则集 URL 和旧订阅立即失效，新订阅会物化为新 URL。草稿移除不会立即删除物理版本，发布成功后才会按“当前草稿引用 + 已发布 YAML 引用”安全清理旧版本；旧草稿中的 `./ruleset/<alias>.<ext>` 全局兼容路径保持可读且不会被迁移。
+
 ## onekey 协议兼容
 
 | 协议 | 已适配字段 |
@@ -308,6 +338,7 @@ src/
   config_builder.py   # Clash 配置生成与校验
   config_defaults.py  # Web 与配置生成流程共享的 OpenClash 默认配置
   clash_meta_gen.py   # 策略组生成逻辑
+  node_builder.py     # **新增** 节点构建逻辑（build_manual_node + NODE_FORM_SCHEMA），供前端表单渲染 + 后端校验共用单一事实来源
 
 docker-compose.yml           # 本仓库开发/自建部署模板
 design/                      # V2 界面静态原型（/v2 路径在线预览）

@@ -2,7 +2,8 @@
   "name": "clash-config-gen-ui-regression",
   "private": true,
   "scripts": {
-    "test:ui": "playwright test tests/ui-regression.spec.mjs"
+    "test:ui": "playwright test tests/ui-regression.spec.mjs",
+    "test:v2": "playwright test tests/v2-ui-regression.spec.mjs --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1"

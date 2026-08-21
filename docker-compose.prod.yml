@@ -4,7 +4,7 @@ services:
     container_name: clash-gen
     restart: always
     ports:
-      - "${WEB_PORT:-8501}:8501"
+      - "127.0.0.1:8501:8501"
       - "${API_PORT:-8000}:8000"
     environment:
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL}

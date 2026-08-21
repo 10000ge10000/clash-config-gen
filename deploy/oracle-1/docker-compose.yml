@@ -4,12 +4,12 @@ services:
     container_name: clash-gen
     restart: always
     ports:
-      - "8501:8501"
-      - "8000:8000"
+      - "127.0.0.1:8501:8501"
+      - "127.0.0.1:8000:8000"
     environment:
       - PUBLIC_BASE_URL=https://clash.910501.xyz
       - APP_DB_PATH=/app/data/app.db
-      - ALLOW_REGISTRATION=false
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-false}
       - AUTH_COOKIE_SECURE=true
       - CSRF_SECRET=${CSRF_SECRET:?CSRF_SECRET must be set}
       - AUTH_RATE_LIMIT_WINDOW_SECONDS=${AUTH_RATE_LIMIT_WINDOW_SECONDS:-900}
