@@ -140,6 +140,18 @@ def _enum_field(
     return value
 
 
+def _alpn_items(raw_value: object, label: str, *, default: str) -> list[str]:
+    """ALPN 支持逗号分隔多值（如 'h3,h3-29'），逐项校验后返回数组。"""
+    text = _str(raw_value).strip() or default
+    items = [item.strip() for item in text.split(",") if item.strip()]
+    if not items:
+        raise ValueError(f"{label}不能为空")
+    for item in items:
+        if item not in ALPN_OPTIONS:
+            raise ValueError(f"{label}不支持：{item}")
+    return items
+
+
 def _int_field(
     fields: dict,
     key: str,
@@ -401,7 +413,7 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
         hy2_down_mbps = _int_field(f, "hy2_down_mbps", "Hysteria2 下行容量", default=100, minimum=1)
         hy2_obfs_password = _str(f.get("hy2_obfs_password"))
         hy2_skip_cert = _bool(f.get("hy2_skip_cert", True))
-        hy2_alpn = _enum_field(f, "hy2_alpn", "Hysteria2 ALPN", ALPN_OPTIONS, default="h3")
+        hy2_alpn_items = _alpn_items(f.get("hy2_alpn"), "Hysteria2 ALPN", default="h3")
         enable_port_hopping = _bool(f.get("enable_port_hopping", True))
         port_hopping_range = _str(f.get("port_hopping_range"), "29950-30000")
         enable_quic_params = _bool(f.get("enable_quic_params"))
@@ -422,7 +434,7 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
         if hy2_sni:
             manual_node["sni"] = hy2_sni
         manual_node["skip-cert-verify"] = hy2_skip_cert
-        manual_node["alpn"] = [hy2_alpn]
+        manual_node["alpn"] = hy2_alpn_items
         if hy2_obfs_type and hy2_obfs_type != "none":
             if not hy2_obfs_password.strip():
                 raise ValueError("Hysteria2 混淆启用时混淆密码不能为空")
@@ -459,7 +471,8 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
         tuic_password = _required_text(f, "tuic_password", "Password")
         tuic_server_ip = _str(f.get("tuic_server_ip")).strip()
         tuic_congestion = _enum_field(f, "tuic_congestion", "TUIC 拥塞控制", TUIC_CONGESTION_OPTIONS, default="bbr")
-        tuic_alpn = _enum_field(f, "tuic_alpn", "TUIC ALPN", ALPN_OPTIONS, default="h3")
+        tuic_alpn_items = _alpn_items(f.get("tuic_alpn"), "TUIC ALPN", default="h3")
+        tuic_sni = _str(f.get("tuic_sni")).strip()
         tuic_udp_relay_mode = _enum_field(f, "tuic_udp_relay_mode", "TUIC UDP Relay Mode", TUIC_RELAY_OPTIONS, default="native")
         tuic_heartbeat_interval = _int_field(f, "tuic_heartbeat_interval", "TUIC 心跳间隔", default=10000, minimum=1)
         tuic_close_sni = _bool(f.get("tuic_close_sni"))
@@ -473,11 +486,11 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
         if tuic_server_ip:
             manual_node["ip"] = tuic_server_ip
         manual_node["congestion-controller"] = tuic_congestion
-        manual_node["alpn"] = [tuic_alpn]
+        manual_node["alpn"] = tuic_alpn_items
         manual_node["udp-relay-mode"] = tuic_udp_relay_mode
         manual_node["disable-sni"] = tuic_close_sni
         if not tuic_close_sni:
-            manual_node["sni"] = node_server
+            manual_node["sni"] = tuic_sni or node_server
         manual_node["reduce-rtt"] = tuic_reduce_rtt
         manual_node["skip-cert-verify"] = tuic_skip_cert_verify
         manual_node["fast-open"] = tuic_fast_open
@@ -690,7 +703,8 @@ NODE_FORM_SCHEMA = {
         _f("ss_udp_over_tcp", "udp-over-tcp", "checkbox"),
         _f("ss_tfo", "TFO", "checkbox"),
         _ip_version_field("ss_ip_version"),
-        _f("ss_mux", "多路复用", "checkbox"),
+        _f("ss_mux", "多路复用 (旧式 mux)", "checkbox",
+           help_="旧式 mux 字段；如需 TCP 多路复用建议使用下方 smux 组"),
     ] + _smux_fields("ss") + _dialer_fields(),
     "ssr": _common_fields("ssr") + [
         _f("node_password", "密码", "password", required=True),
@@ -768,7 +782,10 @@ NODE_FORM_SCHEMA = {
         _f("tuic_password", "Password", "password", required=True),
         _f("tuic_server_ip", "Server IP"),
         _f("tuic_congestion", "Congestion Controller", "select", default="bbr", options=TUIC_CONGESTION_OPTIONS),
-        _f("tuic_alpn", "ALPN", "select", default="h3", options=ALPN_OPTIONS),
+        _f("tuic_alpn", "ALPN", "select", default="h3", options=ALPN_OPTIONS,
+           help_="可手动输入逗号分隔多值，如 h3,h3-29"),
+        _f("tuic_sni", "SNI",
+           help_="留空则使用服务器地址作为 SNI"),
         _f("tuic_udp_relay_mode", "UDP Relay Mode", "select", default="native", options=TUIC_RELAY_OPTIONS),
         _f("tuic_heartbeat_interval", "心跳间隔 (毫秒)", "number", default=10000, minimum=1),
         _f("tuic_close_sni", "关闭 SNI 服务器名称指示", "checkbox"),
@@ -785,7 +802,8 @@ NODE_FORM_SCHEMA = {
         _f("hy2_down_mbps", "下行链路容量 (Mbps)", "number", default=100, minimum=1),
         _f("hy2_obfs_password", "混淆密码", "password", visible={"key": "hy2_obfs_type", "not_equals": "none"}, required=True),
         _f("hy2_skip_cert", "跳过证书验证", "checkbox", default=True),
-        _f("hy2_alpn", "ALPN", "select", default="h3", options=ALPN_OPTIONS),
+        _f("hy2_alpn", "ALPN", "select", default="h3", options=ALPN_OPTIONS,
+           help_="可手动输入逗号分隔多值，如 h3,h3-29"),
         _f("enable_port_hopping", "启用端口跳跃", "checkbox", default=True),
         _f("port_hopping_range", "端口范围", default="29950-30000", visible={"key": "enable_port_hopping", "equals": True}),
         _f("enable_quic_params", "QUIC 参数", "checkbox"),

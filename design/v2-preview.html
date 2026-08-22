@@ -563,6 +563,8 @@ html.dark .hero h1 .grad {
   opacity: 0; transition: opacity .35s; pointer-events: none;
 }
 .node-card:hover { transform: translateY(-5px); border-color: rgba(34,211,238,.3); box-shadow: var(--shadow-card); }
+.node-card.dragging { opacity: .45; border-style: dashed; }
+.node-card.drop-target { border-color: rgba(34,211,238,.75); box-shadow: 0 0 0 2px rgba(34,211,238,.25); }
 .node-card:hover::before { opacity: 1; }
 .node-card:nth-child(1) { animation-delay: .05s; } .node-card:nth-child(2) { animation-delay: .1s; }
 .node-card:nth-child(3) { animation-delay: .15s; } .node-card:nth-child(4) { animation-delay: .2s; }
@@ -1198,6 +1200,8 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
           <div style="display:flex;gap:10px;margin-top:16px;align-items:center;flex-wrap:wrap">
             <button class="btn btn-primary btn-lg" id="importBtn" type="button"><span>↓</span> 导入节点</button>
             <button class="btn btn-ghost" id="clearImportBtn" type="button">清空</button>
+            <button class="btn btn-ghost" id="uploadConfigBtn" type="button" title="读取本工具导出的旧配置文件并恢复其中的节点">上传配置文件恢复</button>
+            <input type="file" id="uploadConfigInput" accept=".yaml,.yml,.json" hidden>
             <span class="status-note" id="importSummary">尚未导入节点</span>
           </div>
           <div id="importMessages" class="phase2-empty" hidden></div>
@@ -1304,7 +1308,7 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
       <div class="login-brand"><h2 id="loginTitle">Clash Config Gen<span class="grad"> · V2</span></h2><p>登录后管理你的节点、规则与订阅</p></div>
       <div class="login-tabs" role="tablist"><button class="login-tab active" id="loginTabBtn" type="button" role="tab" aria-selected="true">登录</button><button class="login-tab" id="registerTabBtn" type="button" role="tab" aria-selected="false">注册</button></div>
       <div class="login-pane active" id="loginPane"><form id="loginForm"><label class="f-label">用户名</label><input class="f-input" name="username" type="text" autocomplete="username" required><label class="f-label">密码</label><input class="f-input" name="password" type="password" autocomplete="current-password" required><label class="f-check"><input type="checkbox" name="remember"> 保持登录 30 天</label><button class="f-btn" type="submit">登录</button></form></div>
-      <div class="login-pane" id="registerPane"><form id="registerForm"><label class="f-label">用户名</label><input class="f-input" name="username" type="text" autocomplete="username" required><label class="f-label">密码</label><input class="f-input" name="password" type="password" autocomplete="new-password" required><label class="f-label">确认密码</label><input class="f-input" name="passwordConfirm" type="password" autocomplete="new-password" required><button class="f-btn" type="submit">注册</button></form></div>
+      <div class="login-pane" id="registerPane"><form id="registerForm"><label class="f-label">用户名</label><input class="f-input" name="username" type="text" autocomplete="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.-]{3,32}" title="3-32 位字母、数字、下划线、点或短横线" placeholder="3-32 位字母、数字、_ . -"><label class="f-label">密码</label><input class="f-input" name="password" type="password" autocomplete="new-password" required minlength="8" title="至少 8 位字符" placeholder="至少 8 位字符"><label class="f-label">确认密码</label><input class="f-input" name="passwordConfirm" type="password" autocomplete="new-password" required minlength="8" title="再次输入密码" placeholder="再次输入密码"><button class="f-btn" type="submit">注册</button></form></div>
     </div>
   </div>
 
@@ -1682,7 +1686,11 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
   }
 
   function queueDraftSave(generation) {
-    if (!state.authenticated || generation !== state.dirtyGeneration) return state.saveSequence;
+    if (!state.authenticated || generation !== state.dirtyGeneration) {
+      // 排队期间又有新修改：跳过过期快照，但必须重新排队，否则最新修改会静默丢失。
+      if (state.authenticated && state.dirtyGeneration > state.savedGeneration) scheduleDraftSave();
+      return state.saveSequence;
+    }
     var snapshot = draftPayload();
     state.savePending += 1;
     state.saveInFlight = true;
@@ -2808,7 +2816,8 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
       tuic_password: value.password || "",
       tuic_server_ip: value.ip || "",
       tuic_congestion: value["congestion-controller"] || "bbr",
-      tuic_alpn: Array.isArray(value.alpn) ? value.alpn[0] : (value.alpn || "h3"),
+      tuic_alpn: Array.isArray(value.alpn) ? value.alpn.join(",") : (value.alpn || "h3"),
+      tuic_sni: value.sni || "",
       tuic_udp_relay_mode: value["udp-relay-mode"] || "native",
       tuic_heartbeat_interval: value["heartbeat-interval"] || 10000,
       tuic_close_sni: Boolean(value["disable-sni"]),
@@ -2825,7 +2834,7 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
       hy2_up_mbps: Number(String(value.up || "").split(" ")[0]) || 50,
       hy2_down_mbps: Number(String(value.down || "").split(" ")[0]) || 100,
       hy2_skip_cert: value["skip-cert-verify"] !== false,
-      hy2_alpn: Array.isArray(value.alpn) ? value.alpn[0] : (value.alpn || "h3"),
+      hy2_alpn: Array.isArray(value.alpn) ? value.alpn.join(",") : (value.alpn || "h3"),
       enable_port_hopping: Boolean(value.ports),
       port_hopping_range: value.ports || "",
       hy2_hop_interval: value["hop-interval"] || "30",
@@ -2915,6 +2924,7 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
         });
         updateSchemaVisibility(schemaRoot);
         attachDialerSuggestions(schemaRoot);
+        attachQuicAdvisor(schemaRoot);
       }
     }
     var raw = $("nodeRawEditor");
@@ -2927,7 +2937,49 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
     if (toggle) toggle.textContent = state.nodeForm.raw ? "使用字段表单" : "编辑原始 YAML";
   }
 
-  // 链式代理上游节点：输入框 + datalist 提供现有节点名候选（对齐 V1 智能下拉）。
+  // Hysteria2 QUIC 窗口推荐（BDP 模型，对齐 V1）：带宽 × RTT 推算四项窗口值。
+  function attachQuicAdvisor(schemaRoot) {
+    if (state.nodeForm.protocol !== "hysteria2") return;
+    var quicToggle = schemaRoot.querySelector('[data-field-key="enable_quic_params"]');
+    if (!quicToggle) return;
+    var wrapper = quicToggle.closest(".schema-field");
+    if (!wrapper || schemaRoot.querySelector("#quicBdpTool")) return;
+    var tool = document.createElement("div");
+    tool.id = "quicBdpTool";
+    tool.className = "schema-note";
+    tool.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px";
+    var bw = document.createElement("input");
+    bw.type = "number"; bw.min = "1"; bw.value = "1000"; bw.title = "带宽 (Mbps)";
+    bw.style.width = "90px"; bw.setAttribute("aria-label", "带宽 Mbps");
+    var rtt = document.createElement("input");
+    rtt.type = "number"; rtt.min = "1"; rtt.value = "50"; rtt.title = "延迟 RTT (ms)";
+    rtt.style.width = "90px"; rtt.setAttribute("aria-label", "延迟 RTT ms");
+    var calc = makeButton("按 BDP 推荐窗口", "btn btn-ghost", function () {
+      var bandwidth = Number(bw.value) || 0;
+      var latency = Number(rtt.value) || 0;
+      if (bandwidth < 1 || latency < 1) { showToast("请填写有效的带宽与 RTT", "error"); return; }
+      var bdp = Math.round(bandwidth * latency * 125);
+      var stream = Math.max(2097152, bdp);
+      var values = {
+        initial_stream_receive_window: stream,
+        max_stream_receive_window: Math.round(stream * 1.5),
+        initial_connection_receive_window: Math.round(stream * 2.5),
+        max_connection_receive_window: Math.round(stream * 4),
+      };
+      Object.keys(values).forEach(function (key) {
+        var control = schemaRoot.querySelector('[data-field-key="' + key + '"]');
+        if (control) control.value = String(values[key]);
+      });
+      if (!quicToggle.checked) quicToggle.click();
+      showToast("已按 " + bandwidth + "Mbps / " + latency + "ms 推荐窗口（BDP " + (bdp / 1048576).toFixed(2) + " MB）", "info");
+    });
+    calc.style.padding = "5px 10px"; calc.style.fontSize = "12px";
+    var label = document.createElement("span");
+    label.textContent = "BDP 推荐：";
+    tool.appendChild(label); tool.appendChild(bw); tool.appendChild(rtt); tool.appendChild(calc);
+    wrapper.appendChild(tool);
+  }
+
   function attachDialerSuggestions(schemaRoot) {
     var input = schemaRoot.querySelector('[data-field-key="dialer_proxy_name"]');
     if (!input || input.tagName !== "INPUT") return;
@@ -3072,8 +3124,12 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
           merged._origin_name = name;
         }
         state.config.proxies.push(merged);
+      } else {
+        // 编辑期间列表可能被拖拽重排：按节点引用重新定位，避免快照索引错位覆盖其它节点。
+        var current = state.config.proxies.indexOf(original);
+        if (current >= 0) state.config.proxies[current] = merged;
+        else state.config.proxies.push(merged);
       }
-      else state.config.proxies[index] = merged;
       markDirty();
       renderNodes();
       renderStats();
@@ -3110,6 +3166,34 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
       var card = document.createElement("div");
       card.className = "node-card";
       card.dataset.index = String(index);
+      // 拖拽排序（对齐 V1）：基于真实索引交换，筛选状态下也可用。
+      card.draggable = true;
+      card.addEventListener("dragstart", function (event) {
+        dragState.fromIndex = index;
+        card.classList.add("dragging");
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", String(index));
+        }
+      });
+      card.addEventListener("dragend", function () {
+        card.classList.remove("dragging");
+        grid.querySelectorAll(".node-card.drop-target").forEach(function (item) { item.classList.remove("drop-target"); });
+        dragState.fromIndex = null;
+      });
+      card.addEventListener("dragover", function (event) {
+        if (dragState.fromIndex === null || dragState.fromIndex === index) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        card.classList.add("drop-target");
+      });
+      card.addEventListener("dragleave", function () { card.classList.remove("drop-target"); });
+      card.addEventListener("drop", function (event) {
+        event.preventDefault();
+        card.classList.remove("drop-target");
+        if (dragState.fromIndex === null || dragState.fromIndex === index) return;
+        moveNodeTo(dragState.fromIndex, index);
+      });
       var top = document.createElement("div");
       top.className = "node-top";
       appendText(top, name, "node-name");
@@ -3157,6 +3241,18 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
     list[next] = current;
     markDirty();
     renderNodes();
+  }
+
+  // 拖拽排序：把 from 移动到 to（跨任意距离），保持其余节点相对顺序。
+  var dragState = { fromIndex: null };
+  function moveNodeTo(from, to) {
+    var list = state.config.proxies;
+    if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return;
+    var moved = list.splice(from, 1)[0];
+    list.splice(to, 0, moved);
+    markDirty();
+    renderNodes();
+    showToast("节点顺序已更新", "info");
   }
 
   function deleteNode(index) {
@@ -3412,6 +3508,10 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
       var diffText = "";
       if (publishDiff && typeof publishDiff === "object") {
         diffText = publishDiff.unified || (publishDiff.has_changes ? "草稿与已发布配置存在差异。" : "草稿与已发布配置没有差异。");
+        var added = Array.isArray(publishDiff.added_proxies) ? publishDiff.added_proxies : [];
+        var removed = Array.isArray(publishDiff.removed_proxies) ? publishDiff.removed_proxies : [];
+        if (added.length) diffText = "新增节点：" + added.join("、") + "\n移除节点：" + (removed.length ? removed.join("、") : "无") + "\n\n" + diffText;
+        else if (removed.length) diffText = "移除节点：" + removed.join("、") + "\n\n" + diffText;
       } else if (publishDiff) diffText = String(publishDiff);
       diff.textContent = diffText;
       diff.classList.toggle("show", Boolean(diffText));
@@ -3840,6 +3940,63 @@ body.login-overlay .layout, body.login-overlay header, body.login-overlay footer
       if ($("importInput")) $("importInput").value = "";
       if ($("importMessages")) $("importMessages").hidden = true;
       setText("importSummary", "输入已清空");
+    });
+    // 上传本工具导出的旧配置文件：读入后填入 YAML 导入框并立即导入（对齐 V1 恢复入口）。
+    $("uploadConfigBtn") && $("uploadConfigBtn").addEventListener("click", function () {
+      var input = $("uploadConfigInput");
+      if (input) input.click();
+    });
+    $("uploadConfigInput") && $("uploadConfigInput").addEventListener("change", async function (event) {
+      var file = event.target.files && event.target.files[0];
+      event.target.value = "";
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        showToast("配置文件超过 5MB，请检查是否选择了正确文件", "error");
+        return;
+      }
+      try {
+        var text = await file.text();
+        if (!text.trim()) {
+          showToast("配置文件为空", "error");
+          return;
+        }
+        state.importMethod = "yaml";
+        renderImport();
+        var area = $("importInput");
+        if (area) area.value = text;
+        await importNodes();
+      } catch (error) {
+        displayApiError(error, "配置文件读取失败");
+      }
+    });
+    // 上传本工具旧配置恢复节点：读取文件文本后复用 YAML 导入管线。
+    $("uploadConfigBtn") && $("uploadConfigBtn").addEventListener("click", function () {
+      var picker = $("uploadConfigInput");
+      if (picker) picker.click();
+    });
+    $("uploadConfigInput") && $("uploadConfigInput").addEventListener("change", async function (event) {
+      var file = event.target.files && event.target.files[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        showToast("配置文件超过 5MB 上限", "error");
+        event.target.value = "";
+        return;
+      }
+      try {
+        var text = await file.text();
+        var input = $("importInput");
+        if (input) input.value = text;
+        state.importMethod = "yaml";
+        document.querySelectorAll(".method-card").forEach(function (card) {
+          card.classList.toggle("active", card.dataset.method === "yaml");
+          card.setAttribute("aria-selected", card.dataset.method === "yaml" ? "true" : "false");
+        });
+        await importNodes();
+      } catch (error) {
+        displayApiError(error, "配置文件读取失败");
+      } finally {
+        event.target.value = "";
+      }
     });
     $("nodeSearch") && $("nodeSearch").addEventListener("input", function (event) {
       state.nodeQuery = event.target.value;

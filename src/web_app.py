@@ -3848,7 +3848,9 @@ with tab3:
                         st.warning("请先填写规则集别名，再上传文件。")
                     else:
                         try:
-                            file_path = safe_ruleset_file_path(rp_name, rp_format)
+                            # 磁盘文件名带用户前缀：V1 共享 ./ruleset/ 目录，
+                            # 不同用户使用相同别名时不互相覆盖。
+                            file_path = safe_ruleset_file_path(f"u{current_user['id']}-{rp_name}", rp_format)
                             file_path.parent.mkdir(parents=True, exist_ok=True)
                             file_path.write_bytes(uploaded_file.getbuffer())
                             safe_filename = file_path.name
@@ -3886,9 +3888,9 @@ with tab3:
                     
                     if rp_type == "http":
                         provider_config["url"] = validate_external_url(rp_url)
-                        provider_config["path"] = f"./ruleset/{safe_rp_name}.{rp_format}"
+                        provider_config["path"] = f"./ruleset/u{current_user['id']}-{safe_rp_name}.{rp_format}"
                     elif rp_type == "file":
-                         file_path = safe_ruleset_file_path(safe_rp_name, rp_format)
+                         file_path = safe_ruleset_file_path(f"u{current_user['id']}-{safe_rp_name}", rp_format)
                          if not file_path.is_file():
                              file_path.parent.mkdir(parents=True, exist_ok=True)
                              file_path.write_bytes(uploaded_file.getbuffer())

@@ -772,7 +772,7 @@ async def api_login(request: Request):
     if not all(isinstance(value, str) for value in (username, password)):
         raise HTTPException(status_code=400, detail="username、password、csrf_token 必须是字符串")
     if not _is_valid_auth_request(request, csrf_token, "auth"):
-        record_auth_audit_event("login_rejected", "", client_ip, False, "csrf_or_origin")
+        record_auth_audit_event("login_rejected", str(username or "").strip().lower(), client_ip, False, "csrf_or_origin")
         raise HTTPException(status_code=403, detail="请求验证失败，请刷新页面后重试")
 
     result = _try_login(
@@ -815,10 +815,10 @@ async def api_register(request: Request):
     if not all(isinstance(value, str) for value in (username, password, password_confirm)):
         raise HTTPException(status_code=400, detail="username、password、password_confirm、csrf_token 必须是字符串")
     if not _is_valid_auth_request(request, csrf_token, "auth"):
-        record_auth_audit_event("register_rejected", "", client_ip, False, "csrf_or_origin")
+        record_auth_audit_event("register_rejected", str(username or "").strip().lower(), client_ip, False, "csrf_or_origin")
         raise HTTPException(status_code=403, detail="请求验证失败，请刷新页面后重试")
     if not get_bool_env("ALLOW_REGISTRATION", False):
-        record_auth_audit_event("register", "", client_ip, False, "registration_disabled")
+        record_auth_audit_event("register", str(username or "").strip().lower(), client_ip, False, "registration_disabled")
         raise HTTPException(status_code=403, detail="当前部署已关闭公开注册")
 
     if password != password_confirm:
@@ -880,7 +880,7 @@ def api_logout(request: Request):
     return response
 
 
-async def _read_json_body(request: Request, required: bool = True) -> dict | None:
+async def _read_json_body(request: Request) -> dict:
     """读取 JSON 请求体，区分空请求与格式错误，并统一限制请求大小。"""
     try:
         raw = await request.body()
@@ -889,9 +889,7 @@ async def _read_json_body(request: Request, required: bool = True) -> dict | Non
     if len(raw) > MAX_DRAFT_BODY_BYTES:
         raise HTTPException(status_code=413, detail="请求体超过 2MB，请精简节点后重试")
     if not raw.strip():
-        if required:
-            raise HTTPException(status_code=400, detail="请求体不能为空，必须提交 JSON")
-        return None
+        raise HTTPException(status_code=400, detail="请求体不能为空，必须提交 JSON")
     try:
         body = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -911,7 +909,7 @@ def _merged_global_config(raw_global_config: dict | None, saved_global_config: d
     return apply_v2_global_defaults(build_default_global_config(), base)
 
 
-def _draft_source(body: dict, saved_config: dict | None) -> dict:
+def _draft_source(body: dict) -> dict:
     if isinstance(body.get("config"), dict):
         source = copy.deepcopy(body["config"])
     else:
@@ -921,7 +919,7 @@ def _draft_source(body: dict, saved_config: dict | None) -> dict:
 
 def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict, dict]:
     """将旧/新请求收敛到同一份完整 canonical draft，不写入数据库。"""
-    source = _draft_source(body, saved_config)
+    source = _draft_source(body)
     saved = saved_config or {}
     if not isinstance(source.get("proxies"), list):
         raise HTTPException(status_code=400, detail="proxies 必须是节点数组")
@@ -1113,6 +1111,24 @@ def _config_stats(built_config: dict | None, draft: dict) -> dict:
     }
 
 
+def _proxy_names_from_yaml(yaml_text: str) -> list[str]:
+    """从配置 YAML 提取 proxies 名称列表（解析失败时返回空，不阻塞 diff）。"""
+    if not (yaml_text or "").strip():
+        return []
+    try:
+        parsed = yaml.safe_load(yaml_text)
+    except Exception:
+        return []
+    proxies = parsed.get("proxies") if isinstance(parsed, dict) else None
+    if not isinstance(proxies, list):
+        return []
+    names: list[str] = []
+    for proxy in proxies:
+        if isinstance(proxy, dict) and proxy.get("name"):
+            names.append(str(proxy["name"]))
+    return names
+
+
 def _yaml_diff(draft_yaml: str, published_yaml: str) -> dict:
     draft_lines = draft_yaml.splitlines()
     published_lines = (published_yaml or "").splitlines()
@@ -1125,11 +1141,19 @@ def _yaml_diff(draft_yaml: str, published_yaml: str) -> dict:
             lineterm="",
         )
     )
+    draft_names = _proxy_names_from_yaml(draft_yaml)
+    published_names = _proxy_names_from_yaml(published_yaml)
+    published_set = set(published_names)
+    draft_set = set(draft_names)
+    added = [name for name in draft_names if name not in published_set]
+    removed = [name for name in published_names if name not in draft_set]
     return {
         "has_changes": draft_yaml != (published_yaml or ""),
         "published": bool((published_yaml or "").strip()),
         "unified": unified,
         "lines": len(unified.splitlines()) if unified else 0,
+        "added_proxies": added,
+        "removed_proxies": removed,
     }
 
 

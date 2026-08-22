@@ -2376,6 +2376,125 @@ class APITest(unittest.TestCase):
         )
         self.assertEqual(400, duplicate.status_code)
 
+    def test_alpn_supports_comma_separated_multi_values(self):
+        """hy2/tuic 的 ALPN 支持逗号分隔多值并回传数组。"""
+        self._login()
+        hy2 = self.client.post(
+            "/api/node/build",
+            json={
+                "type": "hysteria2",
+                "fields": {
+                    "node_name": "hy2-alpn",
+                    "node_server": "alpn.example.com",
+                    "node_port": 443,
+                    "node_password": "pw",
+                    "hy2_alpn": "h3,h3-29",
+                },
+            },
+            headers=self._headers(),
+        )
+        self.assertEqual(200, hy2.status_code, hy2.text)
+        self.assertEqual(["h3", "h3-29"], hy2.json()["node"]["alpn"])
+
+        tuic = self.client.post(
+            "/api/node/build",
+            json={
+                "type": "tuic",
+                "fields": {
+                    "node_name": "tuic-alpn",
+                    "node_server": "tuic-alpn.example.com",
+                    "node_port": 443,
+                    "tuic_uuid": "5c7f7b8a-1111-2222-3333-444455556666",
+                    "tuic_password": "pw",
+                    "tuic_alpn": "h3, h3-29",
+                },
+            },
+            headers=self._headers(),
+        )
+        self.assertEqual(200, tuic.status_code, tuic.text)
+        self.assertEqual(["h3", "h3-29"], tuic.json()["node"]["alpn"])
+
+        invalid = self.client.post(
+            "/api/node/build",
+            json={
+                "type": "tuic",
+                "fields": {
+                    "node_name": "tuic-bad",
+                    "node_server": "bad.example.com",
+                    "node_port": 443,
+                    "tuic_uuid": "5c7f7b8a-1111-2222-3333-444455556666",
+                    "tuic_password": "pw",
+                    "tuic_alpn": "h3,bogus",
+                },
+            },
+            headers=self._headers(),
+        )
+        self.assertEqual(400, invalid.status_code)
+        self.assertIn("bogus", invalid.json()["error"])
+
+    def test_tuic_sni_explicit_value_wins_over_server(self):
+        """tuic 显式填写 SNI 时优先使用，留空才回落服务器地址。"""
+        self._login()
+        explicit = self.client.post(
+            "/api/node/build",
+            json={
+                "type": "tuic",
+                "fields": {
+                    "node_name": "tuic-sni",
+                    "node_server": "tuic-sni.example.com",
+                    "node_port": 443,
+                    "tuic_uuid": "5c7f7b8a-1111-2222-3333-444455556666",
+                    "tuic_password": "pw",
+                    "tuic_sni": "custom.sni.example.com",
+                },
+            },
+            headers=self._headers(),
+        )
+        self.assertEqual(200, explicit.status_code, explicit.text)
+        self.assertEqual("custom.sni.example.com", explicit.json()["node"]["sni"])
+
+        fallback = self.client.post(
+            "/api/node/build",
+            json={
+                "type": "tuic",
+                "fields": {
+                    "node_name": "tuic-sni2",
+                    "node_server": "fallback.example.com",
+                    "node_port": 443,
+                    "tuic_uuid": "5c7f7b8a-1111-2222-3333-444455556666",
+                    "tuic_password": "pw",
+                },
+            },
+            headers=self._headers(),
+        )
+        self.assertEqual(200, fallback.status_code, fallback.text)
+        self.assertEqual("fallback.example.com", fallback.json()["node"]["sni"])
+
+    def test_yaml_diff_reports_added_and_removed_proxies(self):
+        draft_lines = ["proxies:", "  - name: keep-node", "    type: ss", "  - name: brand-new", "    type: ss"]
+        published_lines = ["proxies:", "  - name: keep-node", "    type: ss", "  - name: old-node", "    type: ss"]
+        draft_yaml = "\n".join(draft_lines) + "\n"
+        published_yaml = "\n".join(published_lines) + "\n"
+        diff = api._yaml_diff(draft_yaml, published_yaml)
+        self.assertEqual(["brand-new"], diff["added_proxies"])
+        self.assertEqual(["old-node"], diff["removed_proxies"])
+        self.assertTrue(diff["has_changes"])
+
+    def test_json_auth_failure_audits_username(self):
+        """JSON 登录/注册 CSRF 失败时 audit 事件应记录用户名（与表单端一致）。"""
+        response = self.client.post(
+            "/api/auth/login",
+            json={"username": "audit-user", "password": "password123", "csrf_token": "bogus-token"},
+            headers={"Origin": "https://test.local"},
+        )
+        self.assertEqual(403, response.status_code)
+        with storage._db() as conn:
+            row = conn.execute(
+                "SELECT username FROM auth_audit_log WHERE event_type = 'login_rejected' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual("audit-user", row["username"])
+
     def test_import_uses_provided_source_name(self):
         self._login()
         response = self.client.post(

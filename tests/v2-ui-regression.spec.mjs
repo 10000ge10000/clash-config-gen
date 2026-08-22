@@ -1020,3 +1020,161 @@ test('V2 修补回归：新增节点默认值、smux/链式代理、MATCH 规则
 
   tracker.assertClean();
 });
+
+test('V2 后续增强回归：拖拽排序、上传恢复、ALPN 多值、TUIC SNI 与发布名单', async ({ page }) => {
+  test.setTimeout(150_000);
+  const tracker = trackPageFailures(page);
+  const response = await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  expect(response?.status()).toBe(200);
+  await expect(page.locator('#loginOverlay')).toHaveClass(/active/);
+  // 注册输入框带格式约束提示
+  await expect(page.locator('#registerTabBtn')).toBeVisible();
+  const usernameInput = page.locator('#registerForm input[name="username"]');
+  expect(await usernameInput.getAttribute('minlength')).toBe('3');
+  expect(await page.locator('#registerForm input[name="password"]').getAttribute('minlength')).toBe('8');
+  await page.locator('#loginTabBtn').click();
+  await page.locator('#loginForm input[name="username"]').fill(adminUsername);
+  await page.locator('#loginForm input[name="password"]').fill(adminPassword);
+  const loginResponsePromise = page.waitForResponse((loginResponse) => loginResponse.url() === `${baseURL}/api/auth/login`);
+  await page.locator('#loginForm button[type="submit"]').click();
+  expect((await loginResponsePromise).status()).toBe(200);
+  await expect(page.locator('#loginOverlay')).not.toHaveClass(/active/, { timeout: 15_000 });
+
+  // serial 模式下前面用例共用 admin 草稿；先清空，保证节点索引可预期。
+  // 必须等 bootstrap 拉完 /api/config 再清，否则会被随后的渲染覆盖回服务器数据。
+  await page.waitForFunction(
+    () => window.v2State && window.v2State.authenticated && !window.v2State.loading,
+    null,
+    { timeout: 15_000 },
+  );
+  // 走产品自身的保存链（markDirty + flushDraftSave），避免裸 fetch 与 reload 竞态。
+  const resetState = await page.evaluate(async () => {
+    const before = window.v2State.config.proxies.length;
+    window.v2State.config.proxies = [];
+    window.v2State.config.custom_rules = [];
+    window.v2State.config.custom_rule_providers = {};
+    window.saveChain.markDirty();
+    await window.saveChain.flushDraftSave();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      before,
+      afterLocal: window.v2State.config.proxies.length,
+      dirty: window.v2State.dirtyGeneration,
+      saved: window.v2State.savedGeneration,
+      saveInFlight: window.v2State.saveInFlight,
+    };
+  });
+  console.log('resetState:', JSON.stringify(resetState));
+  expect(resetState.afterLocal).toBe(0);
+  expect(resetState.saved).toBe(resetState.dirty);
+
+  // --- 1. 导入含 ALPN 数组与自定义 SNI 的节点 ---
+  await page.locator('#step-tab-1').click();
+  const hybridYaml = [
+    'proxies:',
+    '  - name: Hybrid-First',
+    '    type: hysteria2',
+    '    server: hybrid.example.com',
+    '    port: 443',
+    '    password: pw',
+    '    alpn: [h3, h3-29]',
+    '  - name: TUIC-CustomSni',
+    '    type: tuic',
+    '    server: tuic-cs.example.com',
+    '    port: 443',
+    '    uuid: 123e4567-e89b-12d3-a456-426614174030',
+    '    password: pw',
+    '    sni: custom.sni.example.com',
+    '  - name: Hybrid-Third',
+    '    type: ss',
+    '    server: third.example.com',
+    '    port: 8388',
+    '    cipher: aes-128-gcm',
+    '    password: pw',
+  ].join('\n');
+  const importResponse = await importMethod(page, 'yaml', hybridYaml);
+  expect(importResponse.status(), await importResponse.text()).toBe(200);
+  await expect(page.locator('#nodeGrid .node-card')).toHaveCount(3, { timeout: 15_000 });
+
+  // --- 2. ALPN 数组与 TUIC SNI 编辑往返不丢失 ---
+  await page.locator('#step-tab-2').click();
+  const hybridCard = page.locator('#nodeGrid .node-card').filter({ hasText: 'Hybrid-First' }).first();
+  await hybridCard.getByRole('button', { name: '编辑' }).click();
+  await expect(page.locator('#nodeFormPanel')).toBeVisible();
+  expect(await page.locator('[data-field-key="hy2_alpn"]').inputValue()).toBe('h3,h3-29');
+  await page.locator('#saveNodeBtn').click();
+  await expect(page.locator('#nodeGrid .node-card').filter({ hasText: 'Hybrid-First' })).toHaveCount(1);
+
+  const tuicCard = page.locator('#nodeGrid .node-card').filter({ hasText: 'TUIC-CustomSni' }).first();
+  await tuicCard.getByRole('button', { name: '编辑' }).click();
+  await expect(page.locator('#nodeFormPanel')).toBeVisible();
+  expect(await page.locator('[data-field-key="tuic_sni"]').inputValue()).toBe('custom.sni.example.com');
+  await page.locator('#saveNodeBtn').click();
+  await expect(page.locator('#nodeGrid .node-card').filter({ hasText: 'TUIC-CustomSni' })).toHaveCount(1);
+  await waitForSaved(page);
+  expect(await state(page, () => {
+    const nodes = Object.fromEntries(window.v2State.config.proxies.map((node) => [node.name, node]));
+    return { alpn: nodes['Hybrid-First'].alpn, sni: nodes['TUIC-CustomSni'].sni };
+  })).toEqual({ alpn: ['h3', 'h3-29'], sni: 'custom.sni.example.com' });
+
+  // --- 3. 拖拽排序（HTML5 DnD 事件）---
+  // 先把表单编辑的保存链冲刷完毕，避免防抖窗口内编辑响应与拖拽交错。
+  await state(page, () => window.saveChain.flushDraftSave());
+  const dragTrace = await page.evaluate(() => {
+    window.__dragTrace = [];
+    const cards = document.querySelectorAll('#nodeGrid .node-card');
+    const from = cards[2]; // Hybrid-Third
+    const to = cards[0];   // 拖到第一位
+    ['dragstart', 'dragover', 'drop'].forEach((type) => {
+      from.addEventListener(type, () => window.__dragTrace.push('from:' + type));
+      to.addEventListener(type, () => window.__dragTrace.push('to:' + type));
+    });
+    const dataTransfer = new DataTransfer();
+    from.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
+    const afterStart = window.v2State.config.proxies.map((node) => node.name);
+    to.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+    to.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+    from.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
+    return {
+      trace: window.__dragTrace,
+      order: Array.from(cards).map((card) => card.dataset.index),
+      namesAtStart: afterStart,
+      namesAfterDrop: window.v2State.config.proxies.map((node) => node.name),
+      dirty: window.v2State.dirtyGeneration,
+      saved: window.v2State.savedGeneration,
+    };
+  });
+  expect(dragTrace.trace).toContain('to:drop');
+  expect(dragTrace.namesAfterDrop[0]).toBe('Hybrid-Third');
+  // 保存链是防抖+单飞队列，轮询等待最终顺序收敛而非瞬时快照。
+  await expect.poll(
+    () => state(page, () => window.v2State.config.proxies.map((node) => node.name)),
+    { timeout: 20_000, message: '拖拽排序未在保存链收敛后保持' },
+  ).toEqual(['Hybrid-Third', 'Hybrid-First', 'TUIC-CustomSni']);
+  await waitForSaved(page);
+
+  // --- 4. 上传配置文件恢复（setInputFiles）---
+  await page.locator('#step-tab-1').click();
+  const uploadYaml = ['proxies:', '  - name: Restored-By-Upload', '    type: ss', '    server: upload.example.com', '    port: 8388', '    cipher: aes-128-gcm', '    password: pw'].join('\n');
+  const uploadPromise = page.waitForResponse((uploadResponse) => uploadResponse.url() === `${baseURL}/api/import`);
+  await page.locator('#uploadConfigInput').setInputFiles({
+    name: 'old-config.yaml',
+    mimeType: 'text/yaml',
+    buffer: Buffer.from(uploadYaml, 'utf-8'),
+  });
+  expect((await uploadPromise).status()).toBe(200);
+  await expect(page.locator('#nodeGrid .node-card').filter({ hasText: 'Restored-By-Upload' })).toHaveCount(1, { timeout: 15_000 });
+
+  // --- 5. 校验返回发布差异节点名单 ---
+  await page.locator('#step-tab-4').click();
+  const validatePromise = page.waitForResponse((validateResponse) => validateResponse.url() === `${baseURL}/api/validate`);
+  await page.locator('#validateBtn').click();
+  const validateResponse = await validatePromise;
+  expect(validateResponse.status()).toBe(200);
+  const validatePayload = await validateResponse.json();
+  expect(validatePayload.publish_diff.added_proxies).toEqual(
+    expect.arrayContaining(['Hybrid-First', 'TUIC-CustomSni', 'Hybrid-Third', 'Restored-By-Upload']),
+  );
+
+  tracker.assertClean();
+});

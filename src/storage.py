@@ -608,10 +608,15 @@ def save_user_draft(
     validation_message: str = "",
 ) -> None:
     """保存编辑中的配置，不覆盖线上 final_yaml。"""
-    ensure_user_config(user_id)
     now = utc_now()
     proxies = normalize_proxies_for_mihomo(proxies)
     with _db() as conn:
+        # 兜底插入与更新放同一事务，避免两段式之间被并发读取到半初始化状态。
+        conn.execute(
+            "INSERT OR IGNORE INTO subscription_configs (user_id, token, selected_rule_type, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (user_id, generate_token(), DEFAULT_RULE_TYPE, now, now),
+        )
         conn.execute(
             """
             UPDATE subscription_configs
@@ -743,12 +748,18 @@ def _normalize_final_yaml_proxies(final_yaml: str) -> str:
 
 
 def reset_subscription_token(user_id: int) -> str:
-    ensure_user_config(user_id)
     token = generate_token()
+    now = utc_now()
     with _db() as conn:
+        # 兜底插入与 token 更新同一事务，保证返回的 token 一定已落库。
+        conn.execute(
+            "INSERT OR IGNORE INTO subscription_configs (user_id, token, selected_rule_type, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (user_id, generate_token(), DEFAULT_RULE_TYPE, now, now),
+        )
         conn.execute(
             "UPDATE subscription_configs SET token = ?, updated_at = ? WHERE user_id = ?",
-            (token, utc_now(), user_id),
+            (token, now, user_id),
         )
     return token
 
