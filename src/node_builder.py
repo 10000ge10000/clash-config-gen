@@ -501,7 +501,14 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
     elif node_type == "vless":
         node_uuid = _required_uuid(f, "node_uuid", "UUID")
         vless_tls = _bool(f.get("vless_tls"))
-        vless_flow = _enum_field(f, "vless_flow", "VLESS flow", VLESS_FLOW_OPTIONS, default="none")
+        raw_flow = f.get("vless_flow") if "vless_flow" in f else f.get("flow")
+        vless_flow = _enum_field(
+            {**f, "vless_flow": raw_flow} if raw_flow is not None else f,
+            "vless_flow",
+            "VLESS flow",
+            VLESS_FLOW_OPTIONS,
+            default="none",
+        )
         vless_servername = _str(f.get("vless_servername")).strip()
         vless_network = _enum_field(f, "vless_network", "VLESS 传输协议", VLESS_NETWORK_OPTIONS, default="tcp")
         vless_packet_encoding = _str(f.get("vless_packet_encoding")).strip()
@@ -596,6 +603,9 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
     if common_ip_version != "默认" and "ip-version" not in manual_node:
         manual_node["ip-version"] = common_ip_version
     if enable_smux:
+        has_vision = "xtls-rprx-vision" in str(manual_node.get("flow") or f.get("vless_flow") or f.get("flow") or "").lower()
+        if has_vision and smux_enabled:
+            raise ValueError("xtls-rprx-vision 与 smux 多路复用互斥，不可同时启用")
         manual_node["smux"] = {
             "enabled": smux_enabled,
             "protocol": smux_protocol,
@@ -665,7 +675,7 @@ def _ip_version_field(key):
     return _f(key, "IP Version", "select", default="默认", options=IP_VERSION_OPTIONS)
 
 
-def _smux_fields(node_type: str):
+def _smux_fields(node_type: str = ""):
     """通用多路复用 (smux) 字段组，仅 ss / vless / vmess 支持（对齐 Streamlit 通用高级区）。"""
     show = {"key": "enable_smux", "equals": True}
     show_brutal = {"key": "smux_brutal_enabled", "equals": True}
@@ -677,8 +687,8 @@ def _smux_fields(node_type: str):
            options=SMUX_PROTOCOL_OPTIONS, visible=show),
         _f("smux_max_connections", "最大连接数", "number", default=4, minimum=1, visible=show),
         _f("smux_brutal_enabled", "Brutal 拥塞控制", "checkbox",
-           default=node_type == "vless", visible=show,
-           help_="需服务端配合，vless 默认开启"),
+           default=False, visible=show,
+           help_="客户端 smux Brutal 握手（仅限装有内核模块的 Linux 客户端）。若服务端已部署 TCP Brutal V2（内核全自动加速），客户端无需且不应开启此项。"),
         _f("smux_brutal_up", "Brutal 上行 (Mbps)", "number", default=100, minimum=1, visible=show_brutal),
         _f("smux_brutal_down", "Brutal 下行 (Mbps)", "number", default=100, minimum=1, visible=show_brutal),
     ]

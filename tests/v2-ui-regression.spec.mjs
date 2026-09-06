@@ -894,7 +894,7 @@ test('V2 修补回归：新增节点默认值、smux/链式代理、MATCH 规则
   // --- 2. smux 与链式代理字段出现在表单并可配置 ---
   await fieldControl('enable_smux').check();
   await fieldControl('smux_protocol').selectOption('yamux');
-  // vmess 的 Brutal 默认关闭（仅 vless 默认开启），手动勾选并填写速率。
+  // vmess 的 Brutal 默认关闭，手动勾选并填写速率。
   expect(await fieldControl('smux_brutal_enabled').isChecked()).toBe(false);
   await expect(fieldControl('smux_brutal_enabled')).toBeVisible();
   await fieldControl('smux_brutal_enabled').click();
@@ -945,11 +945,11 @@ test('V2 修补回归：新增节点默认值、smux/链式代理、MATCH 规则
     sourceName: '手动添加',
   });
 
-  // --- 3b. vless 的 Brutal 默认开启（对齐 V1） ---
+  // --- 3b. vless 的 Brutal 默认关闭（防止非 Linux 客户端握手报错） ---
   await openManualForm('vless');
   await fieldControl('enable_smux').click();
   await expect(fieldControl('smux_brutal_enabled')).toBeVisible();
-  expect(await fieldControl('smux_brutal_enabled').isChecked()).toBe(true);
+  expect(await fieldControl('smux_brutal_enabled').isChecked()).toBe(false);
   await page.locator('#cancelNodeBtn').click();
 
   // --- 5. MATCH 兜底规则：值为空合法，生成两段 MATCH,target ---

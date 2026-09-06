@@ -3334,7 +3334,7 @@ with tab1:
                     smux_enabled = st.checkbox("smux.enabled", value=True, key=f"smux_enabled_{node_type}") if enable_smux else False
                     smux_protocol = st.selectbox("smux.protocol", ["h2mux", "yamux", "smux"], index=0, key=f"smux_protocol_{node_type}") if enable_smux else "h2mux"
                     smux_max_connections = st.number_input("smux.max-connections", min_value=1, value=4, key=f"smux_max_conn_{node_type}") if enable_smux else 4
-                    smux_brutal_enabled = st.checkbox("smux.brutal-opts.enabled", value=node_type == "vless", key=f"smux_brutal_enabled_{node_type}") if enable_smux else False
+                    smux_brutal_enabled = st.checkbox("smux.brutal-opts.enabled", value=False, key=f"smux_brutal_enabled_{node_type}", help="客户端 smux Brutal 握手（仅限装有内核模块的 Linux 客户端）。若服务端已部署 TCP Brutal V2（内核全自动加速），客户端无需且不应开启此项。") if enable_smux else False
                     smux_brutal_up = st.number_input("brutal up Mbps", min_value=1, value=100, key=f"smux_brutal_up_{node_type}") if enable_smux and smux_brutal_enabled else 100
                     smux_brutal_down = st.number_input("brutal down Mbps", min_value=1, value=100, key=f"smux_brutal_down_{node_type}") if enable_smux and smux_brutal_enabled else 100
         else:

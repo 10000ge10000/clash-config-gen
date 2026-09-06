@@ -133,6 +133,21 @@ def normalize_proxy(proxy: dict[str, Any]) -> NormalizationResult:
         elif raw_client_fingerprint != client_fingerprint:
             normalized["client-fingerprint"] = raw_client_fingerprint
 
+    flow = str(normalized.get("flow") or "").strip().lower()
+    if "xtls-rprx-vision" in flow and "smux" in normalized:
+        smux_val = normalized.get("smux")
+        smux_enabled = False
+        if isinstance(smux_val, dict):
+            smux_enabled = _normalize_bool_value(smux_val.get("enabled")) is True
+        elif isinstance(smux_val, bool):
+            smux_enabled = smux_val
+        elif isinstance(smux_val, (str, int)):
+            smux_enabled = _normalize_bool_value(smux_val) is True
+
+        if smux_enabled:
+            normalized.pop("smux", None)
+            warnings.append("已自动移除与 xtls-rprx-vision 互斥的 smux 多路复用配置")
+
     errors.extend(validate_proxy_fields(normalized))
     return NormalizationResult(proxy=normalized, warnings=warnings, errors=errors)
 

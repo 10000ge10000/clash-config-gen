@@ -2190,11 +2190,16 @@ class APITest(unittest.TestCase):
             keys = {field["key"] for field in api.NODE_FORM_SCHEMA[protocol]}
             self.assertIn("use_dialer_proxy", keys, protocol)
             self.assertIn("dialer_proxy_name", keys, protocol)
-        # vless 的 Brutal 默认开启，其余协议默认关闭（对齐 V1）。
+        # vless / ss / vmess 的 Brutal 默认均关闭（避免非 Linux 客户端握手报错；服务端 TCP Brutal V2 无需客户端开启）。
         vless_brutal = next(f for f in api.NODE_FORM_SCHEMA["vless"] if f["key"] == "smux_brutal_enabled")
         ss_brutal = next(f for f in api.NODE_FORM_SCHEMA["ss"] if f["key"] == "smux_brutal_enabled")
-        self.assertTrue(vless_brutal["default"])
+        vmess_brutal = next(f for f in api.NODE_FORM_SCHEMA["vmess"] if f["key"] == "smux_brutal_enabled")
+        self.assertFalse(vless_brutal["default"])
         self.assertFalse(ss_brutal["default"])
+        self.assertFalse(vmess_brutal["default"])
+        self.assertIn("TCP Brutal V2", vless_brutal["help"])
+        self.assertEqual(vless_brutal["help"], ss_brutal["help"])
+        self.assertEqual(vless_brutal["help"], vmess_brutal["help"])
 
     def test_node_form_schema_defaults_match_streamlit(self):
         def default_of(protocol, key):
@@ -2202,6 +2207,9 @@ class APITest(unittest.TestCase):
 
         self.assertTrue(default_of("vmess", "node_tls"))
         self.assertTrue(default_of("vless", "vless_tls"))
+        self.assertFalse(default_of("vless", "smux_brutal_enabled"))
+        self.assertFalse(default_of("vmess", "smux_brutal_enabled"))
+        self.assertFalse(default_of("ss", "smux_brutal_enabled"))
         self.assertEqual("www.bing.com", default_of("hysteria2", "hy2_sni"))
         self.assertEqual("www.bing.com", default_of("anytls", "anytls_sni"))
         self.assertEqual("v1-dy.ixigua.com", default_of("vless", "vless_servername"))
@@ -2232,6 +2240,45 @@ class APITest(unittest.TestCase):
         self.assertEqual("200 Mbps", node["smux"]["brutal-opts"]["up"])
         self.assertEqual("300 Mbps", node["smux"]["brutal-opts"]["down"])
         self.assertEqual("入口节点", node["dialer-proxy"])
+
+        # 验证 vless 在仅启用 smux 时，默认不会生成 smux.brutal-opts（规避非 Linux 客户端报错）
+        vless_default_smux = self.client.post(
+            "/api/node/build",
+            json={
+                "type": "vless",
+                "fields": {
+                    "node_name": "vless-smux-default",
+                    "node_server": "vless.example.com",
+                    "node_port": 443,
+                    "node_uuid": "5c7f7b8a-1111-2222-3333-444455556666",
+                    "enable_smux": True,
+                },
+            },
+            headers=self._headers(),
+        )
+        self.assertEqual(200, vless_default_smux.status_code, vless_default_smux.text)
+        default_node = vless_default_smux.json()["node"]
+        self.assertTrue(default_node["smux"]["enabled"])
+        self.assertNotIn("brutal-opts", default_node["smux"])
+
+        # 验证 vless 同时开启 xtls-rprx-vision 与 smux 时被防呆拒绝 (400)
+        vless_conflict = self.client.post(
+            "/api/node/build",
+            json={
+                "type": "vless",
+                "fields": {
+                    "node_name": "vless-conflict",
+                    "node_server": "vless.example.com",
+                    "node_port": 443,
+                    "node_uuid": "5c7f7b8a-1111-2222-3333-444455556666",
+                    "vless_flow": "xtls-rprx-vision",
+                    "enable_smux": True,
+                },
+            },
+            headers=self._headers(),
+        )
+        self.assertEqual(400, vless_conflict.status_code)
+        self.assertIn("xtls-rprx-vision 与 smux 多路复用互斥，不可同时启用", vless_conflict.json()["error"])
 
         vmess = self.client.post(
             "/api/node/build",
