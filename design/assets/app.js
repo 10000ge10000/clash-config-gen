@@ -30,6 +30,8 @@
     nodeProtocol: "",
     nodeQuery: "",
     nodeForm: { open: false, index: null, protocol: "", raw: false },
+    // 当前显示的步骤；非当前步骤的区块变化只标记待渲染，切换或空闲时再渲染。
+    activeStep: 1,
     dirtyGeneration: 0,
     savedGeneration: 0,
     saveTimer: null,
@@ -135,7 +137,53 @@
 
   function clearElement(element) {
     if (!element) return;
-    while (element.firstChild) element.removeChild(element.firstChild);
+    if (typeof element.replaceChildren === "function") element.replaceChildren();
+    else element.textContent = "";
+  }
+
+  // 为对象分配稳定的短 id，用于区块签名里比较“是否还是同一个对象”（不比较内容）。
+  var objectIds = new WeakMap();
+  var objectIdSeq = 0;
+  function objectId(value) {
+    if (!value || typeof value !== "object") return String(value);
+    var id = objectIds.get(value);
+    if (!id) {
+      objectIdSeq += 1;
+      id = objectIdSeq;
+      objectIds.set(value, id);
+    }
+    return "#" + id;
+  }
+
+  // 单次渲染最多给多少个新元素播放入场动画；一次性出现大量卡片（首屏、换号）时只动画前若干个，
+  // 避免上百个动画同时合成。
+  var ENTER_ANIMATION_LIMIT = 40;
+
+  // 入场动画只在元素首次出现/新增时播放：加 is-entering，animationend 后移除（400ms 兜底，
+  // 处理元素在 display:none 区域内动画不运行的情况）。重建、重排、筛选都不应调用它。
+  function markEntering(element) {
+    if (!element) return;
+    var finished = false;
+    var timer = null;
+    function finish(event) {
+      if (event && event.target !== element) return;
+      if (finished) return;
+      finished = true;
+      if (timer !== null) window.clearTimeout(timer);
+      element.classList.remove("is-entering");
+      element.removeEventListener("animationend", finish);
+      element.removeEventListener("animationcancel", finish);
+    }
+    element.classList.add("is-entering");
+    element.addEventListener("animationend", finish);
+    element.addEventListener("animationcancel", finish);
+    timer = window.setTimeout(function () { finish(); }, 400);
+  }
+
+  function focusInside(hosts) {
+    var active = document.activeElement;
+    if (!active || active === document.body) return false;
+    return hosts.some(function (host) { return Boolean(host) && host.contains(active); });
   }
 
   function appendText(parent, value, className) {
@@ -369,12 +417,34 @@
     return payload;
   }
 
+  // 服务端派生字段的 JSON 缓存：内容未变时保留原对象引用，区块签名据此跳过重渲染。
+  // 缓存按对象引用失效（这些字段只会被整体替换，不会被原地修改）。
+  var serverJsonCache = {};
+  function stateJson(key) {
+    var entry = serverJsonCache[key];
+    if (entry && entry.ref === state[key]) return entry.json;
+    var json = JSON.stringify(state[key]);
+    serverJsonCache[key] = { ref: state[key], json: json };
+    return json;
+  }
+
+  // 内容变化时才替换 state[key]；返回是否发生替换。
+  function replaceServerField(key, value) {
+    var json = JSON.stringify(value);
+    if (json === stateJson(key)) return false;
+    state[key] = clone(value);
+    serverJsonCache[key] = { ref: state[key], json: json };
+    return true;
+  }
+
+  // 返回本次实际变化的派生字段，供调用方只刷新受影响的区域。
   function updateServerFields(payload) {
-    if (!payload || !isObject(payload)) return;
-    if (payload.subscription) state.subscription = clone(payload.subscription);
-    if (payload.counts || payload.statistics) state.counts = clone(payload.counts || payload.statistics);
-    if (Array.isArray(payload.all_targets)) state.allTargets = clone(payload.all_targets);
-    if (Array.isArray(payload.warnings)) state.warnings = clone(payload.warnings);
+    var changed = {};
+    if (!payload || !isObject(payload)) return changed;
+    if (payload.subscription) changed.subscription = replaceServerField("subscription", payload.subscription);
+    if (payload.counts || payload.statistics) changed.counts = replaceServerField("counts", payload.counts || payload.statistics);
+    if (Array.isArray(payload.all_targets)) changed.targets = replaceServerField("allTargets", payload.all_targets);
+    if (Array.isArray(payload.warnings)) replaceServerField("warnings", payload.warnings);
     if (Array.isArray(payload.warnings) && payload.warnings.some(function (warning) {
       return String(warning).indexOf("历史草稿字段损坏") >= 0;
     })) {
@@ -383,14 +453,60 @@
       state.draftCorrupted = false;
       state.draftCorruptionAcknowledged = false;
     }
-    if (isObject(payload.provider_defaults)) state.providerDefaults = clone(payload.provider_defaults);
-    if (isObject(payload.presets)) state.presets = clone(payload.presets);
-    if (isObject(payload.dns_presets)) state.dnsPresets = clone(payload.dns_presets);
+    if (isObject(payload.provider_defaults)) changed.providerDefaults = replaceServerField("providerDefaults", payload.provider_defaults);
+    if (isObject(payload.presets)) replaceServerField("presets", payload.presets);
+    if (isObject(payload.dns_presets)) replaceServerField("dnsPresets", payload.dns_presets);
     if (payload.user) {
       state.user = clone(payload.user);
       state.authenticated = true;
       renderUserPanel(state.user);
     }
+    return changed;
+  }
+
+  // 节点表单 / 全局设置 schema：内容不变时保留引用，避免每次保存回包都重建表单与协议按钮。
+  function updateSchemas(payload) {
+    var changed = {};
+    if (!payload) return changed;
+    if (isObject(payload.node_form_schema)) changed.nodeFormSchema = replaceServerField("nodeFormSchema", payload.node_form_schema);
+    if (isObject(payload.global_config_schema)) changed.globalConfigSchema = replaceServerField("globalConfigSchema", payload.global_config_schema);
+    return changed;
+  }
+
+  // 把服务端回包中的草稿与本地草稿逐项比对：内容一致的部分沿用本地对象引用（节点卡片复用、
+  // 节点表单定位都依赖引用），只有服务端规范化后确实不同的部分才替换。返回发生替换的草稿键。
+  function reconcileDraft(incoming) {
+    var changed = {};
+    var local = state.config;
+    var localProxies = Array.isArray(local.proxies) ? local.proxies : [];
+    var nextProxies = Array.isArray(incoming.proxies) ? incoming.proxies : [];
+    var pool = new Map();
+    localProxies.forEach(function (node) {
+      var key = stableStringify(node);
+      if (!pool.has(key)) pool.set(key, []);
+      pool.get(key).push(node);
+    });
+    var proxiesSame = nextProxies.length === localProxies.length && Array.isArray(local.proxies);
+    var mergedProxies = nextProxies.map(function (node, index) {
+      var bucket = pool.get(stableStringify(node));
+      var reuse = bucket && bucket.length ? bucket.shift() : null;
+      if (!reuse || reuse !== localProxies[index]) proxiesSame = false;
+      return reuse || node;
+    });
+    if (!proxiesSame) {
+      local.proxies = mergedProxies;
+      changed.proxies = true;
+    }
+    ["global_config", "custom_rules", "custom_rule_providers", "import_sources"].forEach(function (key) {
+      if (stableStringify(local[key]) === stableStringify(incoming[key])) return;
+      local[key] = incoming[key];
+      changed[key] = true;
+    });
+    if (local.selected_rule_type !== incoming.selected_rule_type) {
+      local.selected_rule_type = incoming.selected_rule_type;
+      changed.selected_rule_type = true;
+    }
+    return changed;
   }
 
   function applyBootstrap(payload, resetGeneration) {
@@ -398,11 +514,12 @@
     state.config = canonicalDraft(payload);
     state.serverConfig = clone(state.config);
     updateServerFields(payload);
-    state.nodeFormSchema = isObject(payload.node_form_schema) ? clone(payload.node_form_schema) : {};
-    state.globalConfigSchema = isObject(payload.global_config_schema) ? clone(payload.global_config_schema) : {};
-    state.presets = isObject(payload.presets) ? clone(payload.presets) : {};
-    state.dnsPresets = isObject(payload.dns_presets) ? clone(payload.dns_presets) : state.presets;
-    state.providerDefaults = isObject(payload.provider_defaults) ? clone(payload.provider_defaults) : {};
+    replaceServerField("nodeFormSchema", isObject(payload.node_form_schema) ? payload.node_form_schema : {});
+    replaceServerField("globalConfigSchema", isObject(payload.global_config_schema) ? payload.global_config_schema : {});
+    replaceServerField("presets", isObject(payload.presets) ? payload.presets : {});
+    if (isObject(payload.dns_presets)) replaceServerField("dnsPresets", payload.dns_presets);
+    else state.dnsPresets = state.presets;
+    replaceServerField("providerDefaults", isObject(payload.provider_defaults) ? payload.provider_defaults : {});
     state.loading = false;
     state.saveError = null;
     if (resetGeneration) {
@@ -419,21 +536,47 @@
     updateDraftStatus();
   }
 
+  // 保存/发布回包：本地代数与回包一致（期间没有更新的修改）时才落地。
+  // 不整页重建：用户编辑的数据按内容比对保留本地引用，只刷新服务端派生信息（统计、订阅、
+  // 状态栏、目标列表）以及服务端规范化后确实变化的区块。
   function applyServerResponse(payload, generation) {
     if (!payload || generation !== state.dirtyGeneration) return false;
-    state.config = canonicalDraft(payload);
-    state.serverConfig = clone(state.config);
-    updateServerFields(payload);
-    if (payload.node_form_schema) state.nodeFormSchema = clone(payload.node_form_schema);
-    if (payload.global_config_schema) state.globalConfigSchema = clone(payload.global_config_schema);
-    if (payload.presets) state.presets = clone(payload.presets);
-    if (payload.dns_presets) state.dnsPresets = clone(payload.dns_presets);
-    if (payload.provider_defaults) state.providerDefaults = clone(payload.provider_defaults);
+    var incoming = canonicalDraft(payload);
+    state.serverConfig = clone(incoming);
+    var changedKeys = reconcileDraft(incoming);
+    var derived = updateServerFields(payload);
+    var schemas = updateSchemas(payload);
+    if (isObject(payload.presets) && !isObject(payload.dns_presets)) state.dnsPresets = state.presets;
     state.savedGeneration = generation;
     state.saveError = null;
-    renderAll();
+    refreshDerivedViews(changedKeys, derived, schemas);
     updateDraftStatus();
     return true;
+  }
+
+  // 只刷新受变化影响的区域；各区块仍经 renderBlock 做签名比对与“非当前步骤延后渲染”。
+  function refreshDerivedViews(changedKeys, derived, schemas) {
+    var keys = changedKeys || {};
+    var server = derived || {};
+    var schema = schemas || {};
+    renderStats();
+    renderSubscription();
+    renderImport();
+    if (keys.proxies || schema.nodeFormSchema) {
+      renderBlock("nodes");
+      renderBlock("pills");
+      renderNodeForm(false);
+    }
+    if (keys.custom_rules || server.targets) renderBlock("rules");
+    if (keys.selected_rule_type || keys.global_config || server.providerDefaults || server.targets) renderBlock("ruleSource");
+    if (keys.custom_rule_providers) renderBlock("rulesets");
+    if (server.targets) refreshRulesetTargetSelect();
+    if (keys.global_config || schema.globalConfigSchema) {
+      renderBlock("global");
+      updateModeView();
+    }
+    updateGlobalActionButtons();
+    updatePublishButton();
   }
 
   function scheduleDraftSave() {
@@ -500,7 +643,7 @@
   // 服务端确认的版本并重绘，保持本地与服务端一致。
   function rollbackToServerDraft() {
     state.config = canonicalDraft(state.serverConfig || emptyDraft());
-    renderAll();
+    renderAll(true);
     updateDraftStatus();
     showToast("已取消修改，服务器上的原草稿未被覆盖", "info");
   }
@@ -621,6 +764,7 @@
   function showAuthOverlay(session) {
     state.loading = false;
     state.authenticated = false;
+    writeAuthHint(false);
     state.authCsrf = (session && session.csrf_token) || state.authCsrf || "";
     closeUserDropdown();
     document.body.classList.add("login-overlay");
@@ -716,6 +860,10 @@
       window.clearTimeout(state.saveTimer);
       state.saveTimer = null;
     }
+    if (nodeSearchTimer !== null) {
+      window.clearTimeout(nodeSearchTimer);
+      nodeSearchTimer = null;
+    }
     state.config = emptyDraft();
     state.serverConfig = emptyDraft();
     state.subscription = {};
@@ -755,7 +903,8 @@
     renderValidation(null);
     setText("validationStatus", "尚未校验");
     setText("importSummary", "尚未导入节点");
-    renderAll();
+    // 强制立即重绘所有区块（含非当前步骤），确保上一用户的数据不会残留在 DOM 中。
+    renderAll(true);
     updateDraftStatus();
   }
 
@@ -792,6 +941,7 @@
     state.user = null;
     state.authenticated = false;
     state.csrfToken = "";
+    writeAuthHint(false);
     resetUserState();
     renderUserPanel(null);
     var session = null;
@@ -817,6 +967,7 @@
     state.authenticated = true;
     state.user = nextUser;
     state.csrfToken = payload.csrf_token || state.csrfToken;
+    writeAuthHint(true);
     renderUserPanel(state.user);
     hideAuthOverlay();
     if (sameUser && hasUnsavedChanges() && window.confirm("登录过期前有尚未保存的修改。\n\n确定：保留这些修改并保存到服务器。\n取消：放弃这些修改，重新加载服务器上的草稿。")) {
@@ -885,17 +1036,50 @@
     }
   }
 
-  async function loadBootstrap() {
+  // 首屏并行预取：只有本浏览器上次处于登录状态（本地提示位）时才与 /api/session 并行请求
+  // /api/config，避免未登录访问时多出一个 401。提示位只是便利缓存，读写失败一律按未登录处理。
+  var AUTH_HINT_KEY = "ccg-auth-hint";
+  function readAuthHint() {
+    try { return window.localStorage.getItem(AUTH_HINT_KEY) === "1"; } catch (_) { return false; }
+  }
+
+  function writeAuthHint(on) {
+    try {
+      if (on) window.localStorage.setItem(AUTH_HINT_KEY, "1");
+      else window.localStorage.removeItem(AUTH_HINT_KEY);
+    } catch (_) {}
+  }
+
+  // 用原生 fetch 预取，不走 apiRequest：失败（含 401）时不触发会话刷新与提示，由 loadBootstrap 正常重试。
+  function prefetchConfig() {
+    return fetch("/api/config", { credentials: "include", headers: { Accept: "application/json" } })
+      .then(function (response) {
+        return parseResponse(response).then(function (data) {
+          return { ok: response.ok && !(data && data.ok === false), data: data };
+        });
+      })
+      .catch(function () { return null; });
+  }
+
+  async function loadBootstrap(prefetched) {
     var epoch = state.authEpoch;
     state.loading = true;
     updateDraftStatus();
     try {
-      var payload = await apiRequest("/api/config");
+      var payload = null;
+      if (prefetched) {
+        var early = await prefetched;
+        if (isStale(epoch)) return;
+        if (early && early.ok) payload = early.data;
+      }
+      if (!payload) payload = await apiRequest("/api/config");
       if (isStale(epoch)) return;
       state.authenticated = true;
+      writeAuthHint(true);
       applyBootstrap(payload, true);
       hideAuthOverlay();
-      if (state.user && state.user.is_admin === true) await loadAdminUsers();
+      // 管理员用户列表不阻塞首屏：后台加载，面板自行显示加载状态。
+      if (state.user && state.user.is_admin === true) loadAdminUsers().catch(function () {});
     } catch (error) {
       if (isStale(epoch) || (error && error.accountChanged)) return;
       if (error && (error.status === 401 || error.status === 403)) {
@@ -925,6 +1109,9 @@
       panel.classList.toggle("active", active);
       panel.setAttribute("aria-hidden", active ? "false" : "true");
     });
+    state.activeStep = value;
+    // 切换到某步骤时补渲染该步骤下被延后的区块。
+    flushDirtyBlocks(value);
   }
 
   function initNavigation() {
@@ -1033,13 +1220,59 @@
     return "";
   }
 
+  // 规则目标候选（去掉 no-resolve、空值并去重）：按 allTargets 引用缓存，每次变化只用 Set 计算一次，
+  // 规则目标 datalist、规则源目标下拉、规则集目标下拉共用同一份结果。
+  var targetOptionsCache = { source: null, list: [], key: "" };
+  function targetOptions() {
+    var source = Array.isArray(state.allTargets) ? state.allTargets : [];
+    if (targetOptionsCache.source !== source) {
+      var seen = new Set();
+      var list = [];
+      source.forEach(function (value) {
+        var text = String(value);
+        if (!text || text === "no-resolve" || seen.has(text)) return;
+        seen.add(text);
+        list.push(text);
+      });
+      targetOptionsCache = { source: source, list: list, key: list.join("\u0001") };
+    }
+    return targetOptionsCache;
+  }
+
+  function appendOptions(select, values) {
+    var fragment = document.createDocumentFragment();
+    values.forEach(function (value) {
+      var option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      fragment.appendChild(option);
+    });
+    select.appendChild(fragment);
+  }
+
+  // 规则源目标下拉懒填充：初始只放当前值，首次获得焦点/按下鼠标/按键时才填入全部候选，
+  // 填充后保持原选中值不变；选项变化（allTargets 更新）由区块重建处理。
+  function fillProviderTargetSelect(select) {
+    if (!select || select.dataset.filled === "true") return;
+    var selected = select.value || select.dataset.selected || "";
+    var list = targetOptions().list;
+    var values = selected && list.indexOf(selected) < 0 ? [selected].concat(list) : list;
+    clearElement(select);
+    appendOptions(select, values.length ? values : (selected ? [selected] : []));
+    select.value = selected;
+    select.dataset.filled = "true";
+  }
+
   function renderProviderTargets() {
     var panel = $("providerTargetsPanel");
     if (!panel) return;
     clearElement(panel);
     var sourceKey = selectedProviderSource();
     panel.hidden = !sourceKey;
-    if (!sourceKey) return;
+    if (!sourceKey) {
+      blockRendered("ruleSource");
+      return;
+    }
     var defaults = isObject(state.providerDefaults[sourceKey]) ? state.providerDefaults[sourceKey] : {};
     var overrideKey = sourceKey + "_provider_targets";
     var overrides = isObject(state.config.global_config[overrideKey]) ? state.config.global_config[overrideKey] : {};
@@ -1071,6 +1304,7 @@
       empty.textContent = "服务端尚未提供该规则源的默认目标策略。";
       editor.appendChild(empty);
     }
+    var fragment = document.createDocumentFragment();
     providerNames.forEach(function (providerName, index) {
       var defaultTarget = String(defaults[providerName] === undefined ? "" : defaults[providerName]);
       var selected = String(Object.prototype.hasOwnProperty.call(overrides, providerName) ? overrides[providerName] : defaultTarget);
@@ -1090,45 +1324,56 @@
       var select = document.createElement("select");
       select.id = "provider-target-" + sourceKey + "-" + index;
       select.setAttribute("aria-label", providerName + " 目标策略");
-      var options = Array.isArray(state.allTargets) ? state.allTargets.map(String).filter(function (value) { return value !== "no-resolve"; }) : [];
-      if (options.indexOf(selected) < 0) options.unshift(selected);
-      if (!options.length) options = [selected];
-      options.filter(function (value, optionIndex, list) { return value && list.indexOf(value) === optionIndex; }).forEach(function (value) {
-        var option = document.createElement("option");
-        option.value = value;
-        option.textContent = value;
-        select.appendChild(option);
-      });
+      // 初始只放当前值；全部候选在交互时由 fillProviderTargetSelect 懒填充（见 initializeEvents 的委托）。
+      select.dataset.lazyTargets = "true";
+      select.dataset.selected = selected;
+      if (selected) appendOptions(select, [selected]);
       select.value = selected;
       select.addEventListener("change", function () {
         var next = isObject(state.config.global_config[overrideKey]) ? clone(state.config.global_config[overrideKey]) : {};
         if (select.value === defaultTarget) delete next[providerName];
         else next[providerName] = select.value;
+        select.dataset.selected = select.value;
         state.config.global_config[overrideKey] = next;
-        markDirty();
+        if (!markDirty()) return;
+        // DOM 已反映最新选择，同步区块签名，保存回包后不再重建这一面板。
+        blockRendered("ruleSource");
       });
       row.appendChild(select);
-      editor.appendChild(row);
+      fragment.appendChild(row);
     });
+    editor.appendChild(fragment);
     panel.appendChild(editor);
+    blockRendered("ruleSource");
   }
+
+  // 规则目标 datalist：只在候选列表变化时重建。
+  var ruleTargetListKey = null;
+  function refreshRuleTargetDatalist() {
+    var datalist = $("ruleTargetOptions");
+    if (!datalist) return;
+    var options = targetOptions();
+    if (ruleTargetListKey === options.key && datalist.childNodes.length === options.list.length) return;
+    clearElement(datalist);
+    var fragment = document.createDocumentFragment();
+    options.list.forEach(function (value) {
+      var option = document.createElement("option");
+      option.value = value;
+      fragment.appendChild(option);
+    });
+    datalist.appendChild(fragment);
+    ruleTargetListKey = options.key;
+  }
+
+  // 上次渲染的规则字符串（多重集比对），用于只给新增的规则项播放入场动画。
+  var renderedRuleList = null;
 
   function renderRules() {
     var target = $("ruleTarget");
     var targets = Array.isArray(state.allTargets) ? state.allTargets : [];
     if (target) {
       // 目标策略支持从列表选择与手动输入（对齐 V1 双模式），datalist 提供候选。
-      var datalist = $("ruleTargetOptions");
-      var fillTarget = function (element) {
-        if (!element) return;
-        clearElement(element);
-        targets.filter(function (value) { return String(value) !== "no-resolve"; }).forEach(function (value) {
-          var option = document.createElement("option");
-          option.value = String(value);
-          element.appendChild(option);
-        });
-      };
-      fillTarget(datalist);
+      refreshRuleTargetDatalist();
       if (!target.value) {
         var preferred = targets.find(function (value) { return String(value) === "Proxy"; }) || targets[0];
         if (preferred !== undefined) target.value = String(preferred);
@@ -1139,17 +1384,29 @@
     if (!list) return;
     clearElement(list);
     var rules = Array.isArray(state.config.custom_rules) ? state.config.custom_rules : [];
+    var previousCounts = new Map();
+    (renderedRuleList || []).forEach(function (raw) { previousCounts.set(raw, (previousCounts.get(raw) || 0) + 1); });
+    renderedRuleList = rules.map(String);
+    var entering = 0;
     if (!rules.length) {
       var empty = document.createElement("div");
       empty.className = "check-empty";
       empty.textContent = "暂无自定义规则";
       list.appendChild(empty);
+      blockRendered("rules");
       return;
     }
+    var fragment = document.createDocumentFragment();
     rules.forEach(function (raw, index) {
       var parts = String(raw).split(",");
       var item = document.createElement("div");
       item.className = "rule-item";
+      var seen = previousCounts.get(String(raw)) || 0;
+      if (seen > 0) previousCounts.set(String(raw), seen - 1);
+      else if (entering < ENTER_ANIMATION_LIMIT) {
+        markEntering(item);
+        entering += 1;
+      }
       appendText(item, String(index + 1).padStart(2, "0"), "rule-idx");
       appendText(item, parts[0] || "", "rule-type");
       appendText(item, parts[1] || "", "rule-value");
@@ -1170,8 +1427,10 @@
         renderStats();
       });
       item.appendChild(remove);
-      list.appendChild(item);
+      fragment.appendChild(item);
     });
+    list.appendChild(fragment);
+    blockRendered("rules");
   }
 
   function moveRule(index, direction) {
@@ -1213,12 +1472,23 @@
   }
 
   function rulesetTargetOptions(current) {
-    var options = Array.isArray(state.allTargets) ? state.allTargets.map(String).filter(function (value) { return value !== "no-resolve"; }) : [];
+    var options = targetOptions().list;
     var selected = String(current || "Proxy");
     if (selected === "no-resolve") selected = "Proxy";
-    if (options.indexOf(selected) < 0) options.unshift(selected);
-    if (!options.length) options = [selected];
-    return options.filter(function (value, index, list) { return value && list.indexOf(value) === index; });
+    return options.indexOf(selected) < 0 ? [selected].concat(options) : options.slice();
+  }
+
+  // 目标候选变化时只刷新规则集表单里的目标下拉（保留当前选择），不重建整个规则集面板。
+  function refreshRulesetTargetSelect() {
+    var select = $("rulesetTarget");
+    if (!select || document.activeElement === select) return;
+    var key = targetOptions().key;
+    if (select.dataset.targetsKey === key) return;
+    var current = select.value || "Proxy";
+    clearElement(select);
+    appendOptions(select, rulesetTargetOptions(current));
+    select.value = current;
+    select.dataset.targetsKey = key;
   }
 
   function renderRulesets() {
@@ -1334,6 +1604,7 @@
     order.setAttribute("aria-describedby", "rulesetOrderHelp");
     var target = rulesetField(form, "rulesetTarget", "目标策略", "select", "Proxy", rulesetTargetOptions("Proxy"));
     target.setAttribute("aria-label", "规则集目标策略");
+    target.dataset.targetsKey = targetOptions().key;
     formSection.appendChild(form);
     var orderHelp = document.createElement("div");
     orderHelp.id = "rulesetOrderHelp";
@@ -1357,6 +1628,7 @@
     message.textContent = state.rulesetMessage || "";
     formSection.appendChild(message);
     panel.appendChild(formSection);
+    blockRendered("rulesets");
   }
 
   function rulesetFormValues() {
@@ -1440,7 +1712,8 @@
       await flushDraftSave();
       if (isStale(epoch)) return;
       state.rulesetMessage = "HTTP 规则集已保存到草稿。";
-      renderAll();
+      // 保存回包已刷新派生信息；这里只重绘规则集面板（清空表单并显示提示）。
+      renderRulesets();
       showToast("HTTP 规则集已保存", "info");
     } catch (error) {
       if (isStale(epoch)) return;
@@ -1481,7 +1754,7 @@
       if (isStale(epoch)) return;
       var serverWarnings = Array.isArray(payload.warnings) ? payload.warnings : [];
       state.rulesetMessage = serverWarnings.length ? "文件已保存；服务端提示：" + serverWarnings.join("；") : "文件规则集已保存到草稿。";
-      renderAll();
+      renderRulesets();
       if (serverWarnings.length) showToast("文件规则集已保存，但有服务端提示", "info");
       else showToast("文件规则集已保存", "info");
     } catch (error) {
@@ -1497,7 +1770,7 @@
     var epoch = state.authEpoch;
     state.config.custom_rule_providers[name] = provider;
     if (!markDirty()) return;
-    renderAll();
+    renderRulesets();
     // 会话已过期（登录层已弹出）：只在本地恢复，不保存也不提示“草稿已恢复”。
     if (!state.authenticated) return;
     try {
@@ -1524,7 +1797,7 @@
       await flushDraftSave();
       if (isStale(epoch)) return;
       state.rulesetMessage = isPrivateVersion ? "规则集已从草稿移除；发布后清理旧版本。" : "规则集已从草稿移除。";
-      renderAll();
+      renderRulesets();
       showToast(state.rulesetMessage, "info");
     } catch (error) {
       if (isStale(epoch)) return;
@@ -1567,7 +1840,28 @@
     return fallback;
   }
 
-  function addSchemaControl(parent, field, values, onChange) {
+  // 字段可见条件引用到的 key 集合：只有这些字段变化时才需要重算可见性。
+  function conditionKeysOf(fields) {
+    var keys = {};
+    (fields || []).forEach(function (field) {
+      var condition = field && (field.visible_condition || field.visible);
+      if (condition && typeof condition === "object" && condition.key) keys[condition.key] = true;
+    });
+    return keys;
+  }
+
+  // 控件显示值，与 addSchemaControl 的初始回填规则一致（就地刷新全局设置时复用）。
+  function schemaDisplayValue(field, values) {
+    var type = field.type || "input";
+    var value = valueForField(field, values, type === "checkbox" ? false : "");
+    if (type === "checkbox") return Boolean(value);
+    if (type === "textarea") return isObject(value) ? JSON.stringify(value, null, 2) : (value === undefined || value === null ? "" : String(value));
+    return value === undefined || value === null ? "" : String(value);
+  }
+
+  // visibility：{ root, keys }。root 为可见性计算范围（全局设置是整个面板，跨分组条件才能取到值），
+  // keys 为被条件引用的字段；未提供时按旧行为以 parent 为范围、任意变化都重算。
+  function addSchemaControl(parent, field, values, onChange, visibility) {
     var wrapper = document.createElement("div");
     wrapper.className = "field schema-field";
     var condition = field.visible_condition || field.visible;
@@ -1615,12 +1909,14 @@
     if (field.required && type !== "checkbox") control.required = true;
     control.id = (field._idPrefix || "schema") + "-" + String(field.key || "field").replace(/[^a-zA-Z0-9_-]/g, "-");
     label.htmlFor = control.id;
+    var visibilityRoot = visibility && visibility.root ? visibility.root : parent;
+    var affectsVisibility = !visibility || !visibility.keys || Boolean(visibility.keys[field.key]);
     control.addEventListener("change", function () {
       onChange(field, control);
-      updateSchemaVisibility(parent);
+      if (affectsVisibility) updateSchemaVisibility(visibilityRoot);
     });
-    if (control.type !== "checkbox") {
-      control.addEventListener("input", function () { updateSchemaVisibility(parent); });
+    if (control.type !== "checkbox" && affectsVisibility) {
+      control.addEventListener("input", function () { updateSchemaVisibility(visibilityRoot); });
     }
     wrapper.appendChild(control);
     if (field.help) {
@@ -1646,81 +1942,190 @@
     return control.value;
   }
 
-  function renderGlobalConfig() {
+  var GLOBAL_GROUPS = [
+    { id: "basic", label: "基础与模式", keys: ["optional_globals_v2", "generation_profile", "is_desktop", "include_inbound_ports", "include_global_compat", "include_router_options", "enable_core_options", "port", "socks_port", "mixed_port", "allow_lan", "bind_address", "mode", "log_level", "ipv6_support", "openclash_preset"] },
+    { id: "controller", label: "控制器", keys: ["include_controller", "external_controller", "secret", "external_ui", "external_ui_name", "external_ui_url"] },
+    { id: "speed", label: "测速与性能", keys: ["find_process_mode", "url_test_url", "url_test_interval", "url_test_tolerance", "tcp_concurrent", "unified_delay", "geodata_mode", "geodata_loader", "keep_alive_interval", "keep_alive_idle"] },
+    { id: "tun", label: "TUN 与路由", keys: ["enable_tun", "tun_stack", "tun_device", "tun_auto_route", "tun_auto_detect_interface", "tun_dns_hijack", "tun_dns_hijack_value", "tun_endpoint_independent_nat", "tun_auto_redirect", "tun_strict_route", "redir_port", "tproxy_port", "interface_name"] },
+    { id: "dns", label: "DNS", keys: ["enable_dns", "dns_listen", "dns_ipv6", "enhanced_mode", "fake_ip_range", "fake_ip_range6", "fake_ip_filter_mode", "dns_respect_rules", "direct_nameserver", "proxy_server_nameserver", "default_nameserver", "nameserver", "fallback", "nameserver_policy"] },
+    { id: "sniffer", label: "嗅探", keys: ["enable_sniffer", "sniff_override_dest", "sniffer_parse_pure_ip", "sniffer_force_dns_mapping"] },
+    { id: "profile", label: "配置与其他", keys: ["profile_store_selected", "profile_store_fake_ip", "ntp_enable", "ntp_server", "ntp_port", "ntp_interval", "ntp_write_to_system", "authentication"] }
+  ];
+
+  // 全局设置面板的渲染状态：schema 引用不变时只就地刷新控件值，不重建（保留展开状态、焦点与未提交输入）。
+  // values 记录每个字段最近一次写入控件的值（稳定序列化），用于判断哪些控件需要刷新。
+  var globalRender = { schema: null, built: false, values: {}, pendingRebuild: false };
+
+  function isProviderTargetKey(key) {
+    return key === "lhie1_provider_targets" || key === "dustinwin_provider_targets";
+  }
+
+  function globalFieldFor(schema, key) {
+    return Object.assign({ key: key, label: key, _idPrefix: "global" }, schema[key] || {});
+  }
+
+  function renderGlobalConfig(forceRebuild) {
     var container = $("globalSchemaPanel");
     if (!container) return;
-    clearElement(container);
     var schema = state.globalConfigSchema || {};
     var values = state.config.global_config || {};
+    var canPatch = !forceRebuild && !globalRender.pendingRebuild && globalRender.built && globalRender.schema === schema;
+    if (canPatch && patchGlobalConfigValues(container, schema, values)) {
+      blockRendered("global");
+      return;
+    }
+    // 必须重建，但用户正在面板内输入：先不重建，等焦点离开面板后再刷新。
+    if (!forceRebuild && focusInside([container])) {
+      globalRender.pendingRebuild = true;
+      renderWhenFocusLeaves("global", [container]);
+      return;
+    }
+    rebuildGlobalConfig(container, schema, values);
+    blockRendered("global");
+  }
+
+  // 就地刷新：只改动值发生变化且当前未聚焦的控件；返回 false 表示需要整体重建（如下拉缺少新值的选项）。
+  function patchGlobalConfigValues(container, schema, values) {
+    var active = document.activeElement;
+    var changed = false;
+    var needRebuild = false;
+    container.querySelectorAll("[data-field-key]").forEach(function (control) {
+      if (needRebuild) return;
+      var key = control.dataset.fieldKey;
+      var stamp = stableStringify(values[key]);
+      if (globalRender.values[key] === stamp) return;
+      // 正在编辑的控件保留用户输入，记录保持旧值，下一次刷新再同步。
+      if (control === active) return;
+      var display = schemaDisplayValue(globalFieldFor(schema, key), values);
+      if (control.type === "checkbox") {
+        if (control.checked !== display) {
+          control.checked = display;
+          changed = true;
+        }
+      } else if (control.tagName === "SELECT") {
+        var hasOption = Array.prototype.some.call(control.options, function (option) { return option.value === display; });
+        if (!hasOption && display !== "") {
+          needRebuild = true;
+          return;
+        }
+        if (control.value !== display) {
+          control.value = display;
+          changed = true;
+        }
+      } else if (control.value !== display) {
+        control.value = display;
+        changed = true;
+      }
+      globalRender.values[key] = stamp;
+    });
+    if (needRebuild) return false;
+    if (changed) updateSchemaVisibility(container);
+    return true;
+  }
+
+  function rebuildGlobalConfig(container, schema, values) {
+    // 记录重建前的界面状态：分组展开、焦点与光标位置、页面滚动位置。
+    var openState = {};
+    container.querySelectorAll("details[data-group]").forEach(function (details) { openState[details.dataset.group] = details.open; });
+    var active = document.activeElement;
+    var focusId = active && container.contains(active) && active.id ? active.id : "";
+    var selectionStart = null;
+    var selectionEnd = null;
+    if (focusId) {
+      try {
+        selectionStart = active.selectionStart;
+        selectionEnd = active.selectionEnd;
+      } catch (_) {}
+    }
+    var scrollX = window.scrollX;
+    var scrollY = window.scrollY;
+    globalRender = { schema: schema, built: false, values: {}, pendingRebuild: false };
     var keys = Object.keys(schema);
     if (!keys.length) {
+      clearElement(container);
       var empty = document.createElement("div");
       empty.className = "phase2-empty";
       empty.textContent = "服务端尚未提供全局设置字段定义，暂无可编辑的设置。";
       container.appendChild(empty);
       return;
     }
-    var groups = [
-      { id: "basic", label: "基础与模式", keys: ["optional_globals_v2", "generation_profile", "is_desktop", "include_inbound_ports", "include_global_compat", "include_router_options", "enable_core_options", "port", "socks_port", "mixed_port", "allow_lan", "bind_address", "mode", "log_level", "ipv6_support", "openclash_preset"] },
-      { id: "controller", label: "控制器", keys: ["include_controller", "external_controller", "secret", "external_ui", "external_ui_name", "external_ui_url"] },
-      { id: "speed", label: "测速与性能", keys: ["find_process_mode", "url_test_url", "url_test_interval", "url_test_tolerance", "tcp_concurrent", "unified_delay", "geodata_mode", "geodata_loader", "keep_alive_interval", "keep_alive_idle"] },
-      { id: "tun", label: "TUN 与路由", keys: ["enable_tun", "tun_stack", "tun_device", "tun_auto_route", "tun_auto_detect_interface", "tun_dns_hijack", "tun_dns_hijack_value", "tun_endpoint_independent_nat", "tun_auto_redirect", "tun_strict_route", "redir_port", "tproxy_port", "interface_name"] },
-      { id: "dns", label: "DNS", keys: ["enable_dns", "dns_listen", "dns_ipv6", "enhanced_mode", "fake_ip_range", "fake_ip_range6", "fake_ip_filter_mode", "dns_respect_rules", "direct_nameserver", "proxy_server_nameserver", "default_nameserver", "nameserver", "fallback", "nameserver_policy"] },
-      { id: "sniffer", label: "嗅探", keys: ["enable_sniffer", "sniff_override_dest", "sniffer_parse_pure_ip", "sniffer_force_dns_mapping"] },
-      { id: "profile", label: "配置与其他", keys: ["profile_store_selected", "profile_store_fake_ip", "ntp_enable", "ntp_server", "ntp_port", "ntp_interval", "ntp_write_to_system", "authentication"] }
-    ];
+    var groups = GLOBAL_GROUPS.map(function (group) { return { id: group.id, label: group.label, keys: group.keys.slice() }; });
     var assigned = {};
     groups.forEach(function (group) { group.keys.forEach(function (key) { assigned[key] = true; }); });
-    var remaining = keys.filter(function (key) { return !assigned[key] && key !== "lhie1_provider_targets" && key !== "dustinwin_provider_targets"; });
+    var remaining = keys.filter(function (key) { return !assigned[key] && !isProviderTargetKey(key); });
     if (remaining.length) groups[groups.length - 1].keys = groups[groups.length - 1].keys.concat(remaining);
+    var visibility = {
+      root: container,
+      keys: conditionKeysOf(keys.map(function (key) { return schema[key]; }))
+    };
+    var fragment = document.createDocumentFragment();
     groups.forEach(function (group, groupIndex) {
-      var groupKeys = group.keys.filter(function (key) { return Object.prototype.hasOwnProperty.call(schema, key) && key !== "lhie1_provider_targets" && key !== "dustinwin_provider_targets"; });
+      var groupKeys = group.keys.filter(function (key) { return Object.prototype.hasOwnProperty.call(schema, key) && !isProviderTargetKey(key); });
       if (!groupKeys.length) return;
       var details = document.createElement("details");
       details.className = "schema-group";
-      details.open = groupIndex === 0 || group.id === "dns";
+      details.dataset.group = group.id;
+      details.open = Object.prototype.hasOwnProperty.call(openState, group.id) ? openState[group.id] : (groupIndex === 0 || group.id === "dns");
       var summary = document.createElement("summary");
       summary.textContent = group.label;
       details.appendChild(summary);
       var grid = document.createElement("div");
       grid.className = "schema-grid schema-group-grid";
       groupKeys.forEach(function (key) {
-        var field = schema[key] || {};
-        addSchemaControl(grid, Object.assign({ key: key, label: key, _idPrefix: "global" }, field), values, function (field, control) {
+        addSchemaControl(grid, globalFieldFor(schema, key), values, function (field, control) {
           state.config.global_config[field.key] = serializeTextValue(control, field);
+          // 控件已显示该值，记录下来，保存回包后无需再刷新此控件。
+          globalRender.values[field.key] = stableStringify(state.config.global_config[field.key]);
           markDirty();
-        });
+        }, visibility);
+        globalRender.values[key] = stableStringify(values[key]);
       });
       details.appendChild(grid);
-      container.appendChild(details);
+      fragment.appendChild(details);
     });
+    clearElement(container);
+    container.appendChild(fragment);
     updateSchemaVisibility(container);
+    globalRender.built = true;
+    if (focusId) {
+      var target = document.getElementById(focusId);
+      if (target && container.contains(target)) {
+        try { target.focus({ preventScroll: true }); } catch (_) { target.focus(); }
+        try {
+          if (selectionStart !== null && selectionStart !== undefined) target.setSelectionRange(selectionStart, selectionEnd);
+        } catch (_) {}
+      }
+    }
+    if (window.scrollX !== scrollX || window.scrollY !== scrollY) window.scrollTo(scrollX, scrollY);
   }
 
+  function protocolList() {
+    var protocols = Object.keys(state.nodeFormSchema || {});
+    if (protocols.length) return protocols;
+    var seen = new Set();
+    (Array.isArray(state.config.proxies) ? state.config.proxies : []).forEach(function (node) {
+      var type = String(node && node.type || "");
+      if (type) seen.add(type);
+    });
+    return Array.from(seen);
+  }
+
+  // 协议筛选按钮只负责渲染；点击统一由 initializeEvents 中 #protocolPills 的事件委托处理。
   function renderProtocolPills() {
     var container = $("protocolPills");
     if (!container) return;
     clearElement(container);
-    var protocols = Object.keys(state.nodeFormSchema || {});
-    if (!protocols.length) {
-      protocols = state.config.proxies.map(function (node) { return String(node.type || ""); }).filter(Boolean).filter(function (item, index, list) { return list.indexOf(item) === index; });
-    }
-    var all = makeButton("全部", "pill" + (!state.nodeProtocol ? " active" : ""), function () {
-      state.nodeProtocol = "";
-      renderProtocolPills();
-      renderNodes();
-    });
+    var fragment = document.createDocumentFragment();
+    var all = makeButton("全部", "pill" + (!state.nodeProtocol ? " active" : ""), null);
     all.dataset.protocol = "";
-    container.appendChild(all);
-    protocols.forEach(function (protocol) {
-      var pill = makeButton(protocol, "pill" + (state.nodeProtocol === protocol ? " active" : ""), function () {
-        state.nodeProtocol = protocol;
-        renderProtocolPills();
-        renderNodes();
-      });
+    fragment.appendChild(all);
+    protocolList().forEach(function (protocol) {
+      var pill = makeButton(protocol, "pill" + (state.nodeProtocol === protocol ? " active" : ""), null);
       pill.dataset.protocol = protocol;
-      container.appendChild(pill);
+      fragment.appendChild(pill);
     });
+    container.appendChild(fragment);
+    blockRendered("pills");
   }
 
   function nodeToFields(node) {
@@ -2002,8 +2407,9 @@
         empty.textContent = "服务端尚未提供该协议的字段表单，请改用原始 YAML 编辑。";
         schemaRoot.appendChild(empty);
       } else {
+        var visibility = { root: schemaRoot, keys: conditionKeysOf(fields) };
         fields.forEach(function (field) {
-          addSchemaControl(schemaRoot, field, values, function () {});
+          addSchemaControl(schemaRoot, field, values, function () {}, visibility);
         });
         updateSchemaVisibility(schemaRoot);
         attachDialerSuggestions(schemaRoot);
@@ -2257,109 +2663,237 @@
     }
   }
 
+  // 节点卡片复用：按节点对象引用缓存卡片 DOM；排序/删除只移动或移除对应卡片，筛选只切换隐藏，
+  // 只有新出现的节点才新建卡片并播放入场动画。
+  var nodeCards = new WeakMap();
+  // 卡片 → { key: 内容签名, buttons: 操作按钮 }
+  var nodeCardParts = new WeakMap();
+  // 最近一次渲染的节点与卡片顺序：节点对象被替换（编辑保存、服务端规范化）时按位置沿用原卡片。
+  var nodeGridView = { nodes: [], cards: [] };
+  var nodeGridStatus = null;
+  // 节点筛选输入的去抖定时器（退出/换号时需清除，避免把上一用户的筛选词写回）。
+  var nodeSearchTimer = null;
+
+  function nodeCardInfo(proxy, index) {
+    var node = proxy || {};
+    var name = String(node.name || ("节点 " + (index + 1)));
+    var type = String(node.type || "");
+    var server = String(node.server || node.ip || "");
+    var port = node.port === undefined || node.port === null ? "" : String(node.port);
+    var source = String(node._source_name || "");
+    return {
+      name: name,
+      type: type,
+      server: server,
+      port: port,
+      source: source,
+      key: [name, type, server, port, source].join("\u0001"),
+      haystack: (name + " " + type + " " + server + " " + port + " " + source).toLowerCase()
+    };
+  }
+
+  function fillNodeCard(card, info) {
+    var fragment = document.createDocumentFragment();
+    var top = document.createElement("div");
+    top.className = "node-top";
+    appendText(top, info.name, "node-name");
+    appendText(top, info.type || "未指定协议", "badge b-" + info.type.replace(/[^a-z0-9_-]/gi, ""));
+    fragment.appendChild(top);
+    var serverLine = document.createElement("div");
+    serverLine.className = "node-server";
+    serverLine.textContent = info.server + (info.port ? ":" + info.port : "");
+    fragment.appendChild(serverLine);
+    var meta = document.createElement("div");
+    meta.className = "node-meta";
+    meta.textContent = info.source ? "来源：" + info.source : "运行时延迟：后端未提供";
+    fragment.appendChild(meta);
+    var actions = document.createElement("div");
+    actions.className = "node-actions";
+    var buttons = [
+      ["up", "上移", "chip-btn"],
+      ["down", "下移", "chip-btn"],
+      ["edit", "编辑", "chip-btn"],
+      ["delete", "删除", "chip-btn danger"]
+    ].map(function (item) {
+      var button = makeButton(item[1], item[2], null);
+      button.dataset.nodeAction = item[0];
+      actions.appendChild(button);
+      return button;
+    });
+    fragment.appendChild(actions);
+    clearElement(card);
+    card.appendChild(fragment);
+    nodeCardParts.set(card, { key: info.key, buttons: buttons, index: null, editing: null });
+  }
+
+  // 每次渲染都要同步的动态状态：真实索引、编辑锁定、筛选隐藏。只在值变化时写 DOM。
+  function syncNodeCardState(card, index, editing, filteredOut) {
+    var parts = nodeCardParts.get(card);
+    var indexText = String(index);
+    if (card.dataset.index !== indexText) card.dataset.index = indexText;
+    if (filteredOut) {
+      if (card.dataset.hidden !== "true") {
+        card.dataset.hidden = "true";
+        card.hidden = true;
+      }
+    } else if (card.dataset.hidden) {
+      delete card.dataset.hidden;
+      card.hidden = false;
+    }
+    if (parts.index === indexText && parts.editing === editing) return;
+    card.classList.toggle("editing", editing);
+    card.draggable = !editing;
+    parts.buttons.forEach(function (button) {
+      button.dataset.index = indexText;
+      var locked = editing && button.dataset.nodeAction !== "edit";
+      button.disabled = locked;
+      if (locked) button.title = "该节点正在编辑，保存或取消后才能排序或删除";
+      else button.removeAttribute("title");
+    });
+    parts.index = indexText;
+    parts.editing = editing;
+  }
+
   function renderNodes() {
     var grid = $("nodeGrid");
     if (!grid) return;
-    clearElement(grid);
     var proxies = Array.isArray(state.config.proxies) ? state.config.proxies : [];
     var query = String(state.nodeQuery || "").trim().toLowerCase();
     var visible = 0;
     // 表单编辑中的节点禁止排序、拖拽与删除；先按稳定依据重新定位它的当前索引。
     if (state.nodeForm.open && state.nodeForm.index !== null) syncNodeFormTarget();
     var editingIndex = editingNodeIndex();
-    if (!proxies.length) {
-      var empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.textContent = state.loading ? "正在加载节点…" : "暂无节点，请使用导入或手动添加";
-      grid.appendChild(empty);
-    }
+    var present = new Set(proxies);
+    var previous = nodeGridView;
+    var used = new Set();
+    var cards = [];
+    var entering = 0;
     proxies.forEach(function (proxy, index) {
-      var name = String(proxy.name || ("节点 " + (index + 1)));
-      var type = String(proxy.type || "");
-      var server = String(proxy.server || proxy.ip || "");
-      var port = proxy.port === undefined || proxy.port === null ? "" : String(proxy.port);
-      var source = String(proxy._source_name || "");
-      var haystack = (name + " " + type + " " + server + " " + port + " " + source).toLowerCase();
-      if (state.nodeProtocol && type !== state.nodeProtocol) return;
-      if (query && haystack.indexOf(query) < 0) return;
-      visible += 1;
-      var card = document.createElement("div");
-      card.className = "node-card";
-      card.dataset.index = String(index);
-      var editing = index === editingIndex;
-      if (editing) card.classList.add("editing");
-      // 拖拽排序（对齐 V1）：基于真实索引交换，筛选状态下也可用；正在编辑的节点不可拖动。
-      card.draggable = !editing;
-      card.addEventListener("dragstart", function (event) {
-        if (editing) {
-          event.preventDefault();
+      var info = nodeCardInfo(proxy, index);
+      var matched = (!state.nodeProtocol || info.type === state.nodeProtocol) && (!query || info.haystack.indexOf(query) >= 0);
+      if (matched) visible += 1;
+      var cacheable = proxy !== null && typeof proxy === "object";
+      var card = cacheable ? nodeCards.get(proxy) : null;
+      if (card && used.has(card)) card = null;
+      if (!card) {
+        // 同一位置上的旧节点已不在列表中：视为被替换，沿用其卡片并更新内容，不重播入场动画。
+        var oldCard = previous.cards[index];
+        var oldNode = previous.nodes[index];
+        if (oldCard && !used.has(oldCard) && !present.has(oldNode)) card = oldCard;
+      }
+      if (!card) {
+        card = document.createElement("div");
+        card.className = "node-card";
+        fillNodeCard(card, info);
+        if (entering < ENTER_ANIMATION_LIMIT) {
+          markEntering(card);
+          entering += 1;
+        }
+      } else if (nodeCardParts.get(card).key !== info.key) {
+        fillNodeCard(card, info);
+      }
+      if (cacheable) nodeCards.set(proxy, card);
+      used.add(card);
+      syncNodeCardState(card, index, index === editingIndex, !matched);
+      cards.push(card);
+    });
+    var statusText = "";
+    if (!proxies.length) statusText = state.loading ? "正在加载节点…" : "暂无节点，请使用导入或手动添加";
+    else if (!visible) statusText = "没有匹配当前筛选条件的节点";
+    var desired = cards.slice();
+    if (statusText) {
+      if (!nodeGridStatus) {
+        nodeGridStatus = document.createElement("div");
+        nodeGridStatus.className = "empty-state";
+      }
+      nodeGridStatus.textContent = statusText;
+      desired.push(nodeGridStatus);
+    }
+    if (!grid.querySelector(".node-card") && desired.length > 1) {
+      // 首次批量出现：一次性插入，避免逐个插入。
+      var fragment = document.createDocumentFragment();
+      desired.forEach(function (node) { fragment.appendChild(node); });
+      clearElement(grid);
+      grid.appendChild(fragment);
+    } else {
+      // 按目标顺序就地调整：位置正确的卡片不动，只移动错位的、移除多余的。
+      var cursor = grid.firstChild;
+      desired.forEach(function (node) {
+        if (node === cursor) {
+          cursor = cursor.nextSibling;
           return;
         }
-        dragState.fromIndex = index;
-        card.classList.add("dragging");
-        if (event.dataTransfer) {
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("text/plain", String(index));
-        }
+        grid.insertBefore(node, cursor);
       });
-      card.addEventListener("dragend", function () {
-        card.classList.remove("dragging");
-        grid.querySelectorAll(".node-card.drop-target").forEach(function (item) { item.classList.remove("drop-target"); });
-        dragState.fromIndex = null;
-      });
-      card.addEventListener("dragover", function (event) {
-        if (dragState.fromIndex === null || dragState.fromIndex === index) return;
-        event.preventDefault();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-        card.classList.add("drop-target");
-      });
-      card.addEventListener("dragleave", function () { card.classList.remove("drop-target"); });
-      card.addEventListener("drop", function (event) {
-        event.preventDefault();
-        card.classList.remove("drop-target");
-        if (dragState.fromIndex === null || dragState.fromIndex === index) return;
-        moveNodeTo(dragState.fromIndex, index);
-      });
-      var top = document.createElement("div");
-      top.className = "node-top";
-      appendText(top, name, "node-name");
-      appendText(top, type || "未指定协议", "badge b-" + type.replace(/[^a-z0-9_-]/gi, ""));
-      card.appendChild(top);
-      var serverLine = document.createElement("div");
-      serverLine.className = "node-server";
-      serverLine.textContent = server + (port ? ":" + port : "");
-      card.appendChild(serverLine);
-      var meta = document.createElement("div");
-      meta.className = "node-meta";
-      meta.textContent = source ? "来源：" + source : "运行时延迟：后端未提供";
-      card.appendChild(meta);
-      var actions = document.createElement("div");
-      actions.className = "node-actions";
-      [
-        ["up", "上移", "chip-btn"],
-        ["down", "下移", "chip-btn"],
-        ["edit", "编辑", "chip-btn"],
-        ["delete", "删除", "chip-btn danger"]
-      ].forEach(function (item) {
-        var button = makeButton(item[1], item[2], null);
-        button.dataset.nodeAction = item[0];
-        button.dataset.index = String(index);
-        if (editing && item[0] !== "edit") {
-          button.disabled = true;
-          button.title = "该节点正在编辑，保存或取消后才能排序或删除";
-        }
-        actions.appendChild(button);
-      });
-      card.appendChild(actions);
-      grid.appendChild(card);
-    });
-    if (proxies.length && !visible) {
-      var noMatch = document.createElement("div");
-      noMatch.className = "empty-state";
-      noMatch.textContent = "没有匹配当前筛选条件的节点";
-      grid.appendChild(noMatch);
+      while (cursor) {
+        var next = cursor.nextSibling;
+        grid.removeChild(cursor);
+        cursor = next;
+      }
     }
+    nodeGridView = { nodes: proxies.slice(), cards: cards };
     setText("nodeSummary", String(proxies.length) + " 个节点" + (query || state.nodeProtocol ? " · 当前显示 " + visible : ""));
+    blockRendered("nodes");
+  }
+
+  // 拖拽排序（对齐 V1）：事件委托在 #nodeGrid 上，基于卡片 data-index 的真实索引交换，
+  // 筛选状态下也可用；正在编辑的节点不可拖动。
+  function nodeCardFromEvent(event) {
+    var target = event.target;
+    var card = target && target.closest ? target.closest(".node-card") : null;
+    var grid = $("nodeGrid");
+    return card && grid && grid.contains(card) ? card : null;
+  }
+
+  function initNodeDragEvents() {
+    var grid = $("nodeGrid");
+    if (!grid) return;
+    grid.addEventListener("dragstart", function (event) {
+      var card = nodeCardFromEvent(event);
+      if (!card) return;
+      var index = Number(card.dataset.index);
+      if (card.classList.contains("editing") || index === editingNodeIndex()) {
+        event.preventDefault();
+        return;
+      }
+      dragState.fromIndex = index;
+      card.classList.add("dragging");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", String(index));
+      }
+    });
+    grid.addEventListener("dragend", function (event) {
+      var card = nodeCardFromEvent(event);
+      if (card) card.classList.remove("dragging");
+      grid.querySelectorAll(".node-card.drop-target, .node-card.dragging").forEach(function (item) {
+        item.classList.remove("drop-target");
+        item.classList.remove("dragging");
+      });
+      dragState.fromIndex = null;
+    });
+    grid.addEventListener("dragover", function (event) {
+      var card = nodeCardFromEvent(event);
+      if (!card) return;
+      var index = Number(card.dataset.index);
+      if (dragState.fromIndex === null || dragState.fromIndex === index) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      card.classList.add("drop-target");
+    });
+    grid.addEventListener("dragleave", function (event) {
+      var card = nodeCardFromEvent(event);
+      if (card) card.classList.remove("drop-target");
+    });
+    grid.addEventListener("drop", function (event) {
+      var card = nodeCardFromEvent(event);
+      if (!card) return;
+      event.preventDefault();
+      card.classList.remove("drop-target");
+      var index = Number(card.dataset.index);
+      if (dragState.fromIndex === null || dragState.fromIndex === index) return;
+      moveNodeTo(dragState.fromIndex, index);
+    });
   }
 
   // 正在表单中编辑的节点不允许排序/删除（按钮已禁用，这里再兜底一次）。
@@ -2439,7 +2973,11 @@
       await flushDraftSave();
       if (isStale(epoch)) return;
       if (input) input.value = "";
-      renderAll();
+      // 保存回包已刷新派生信息；这里只渲染节点相关区域（新卡片才播放入场动画）。
+      renderBlock("nodes");
+      renderBlock("pills");
+      renderStats();
+      renderImport();
       var skipped = Array.isArray(result.skipped) ? result.skipped.length : 0;
       var warnings = Array.isArray(result.warnings) ? result.warnings.length : 0;
       setText("importSummary", "本次导入 " + incoming.length + " 个节点；跳过 " + skipped + " 个；警告 " + warnings + " 条");
@@ -2611,6 +3149,9 @@
     });
   }
 
+  // 最近一次写入 #yamlCode 的 YAML 文本；相同内容不重复构建。
+  var renderedYamlText = null;
+
   function renderValidation(payload) {
     var meta = $("validationStats");
     var warningBox = $("validationWarnings");
@@ -2623,6 +3164,7 @@
       if (warningBox) { clearElement(warningBox); warningBox.hidden = true; }
       if (yamlWrap) yamlWrap.classList.remove("show");
       if (yamlCode) clearElement(yamlCode);
+      renderedYamlText = null;
       setText("yamlMeta", "", "");
       if (diff) { diff.textContent = ""; diff.classList.remove("show"); }
       updatePublishButton();
@@ -2648,14 +3190,21 @@
     }
     if (yamlWrap && yamlCode && typeof payload.yaml === "string" && payload.yaml) {
       yamlWrap.classList.add("show");
-      clearElement(yamlCode);
-      payload.yaml.split("\n").forEach(function (line, index) {
-        var row = document.createElement("div");
-        row.className = "yaml-line";
-        appendText(row, String(index + 1), "ln");
-        appendText(row, line, "");
-        yamlCode.appendChild(row);
-      });
+      // YAML 内容不变时不重建；变化时只生成“行号列 + 正文列”两个文本节点，而不是每行一组元素。
+      if (renderedYamlText !== payload.yaml || !yamlCode.firstChild) {
+        var lineCount = payload.yaml.split("\n").length;
+        var numbers = new Array(lineCount);
+        for (var lineIndex = 0; lineIndex < lineCount; lineIndex += 1) numbers[lineIndex] = String(lineIndex + 1);
+        var block = document.createElement("div");
+        block.className = "yaml-block";
+        // 复用 .yaml-line 的排版（flex + pre），但不挂 .yaml-line 类，避免整块触发逐行悬停高亮。
+        block.style.cssText = "display:flex;padding:0 18px;white-space:pre";
+        appendText(block, numbers.join("\n"), "ln");
+        appendText(block, payload.yaml, "yaml-text");
+        clearElement(yamlCode);
+        yamlCode.appendChild(block);
+        renderedYamlText = payload.yaml;
+      }
       setText("yamlMeta", String(payload.yaml.length) + " bytes");
     }
     if (diff) {
@@ -2718,9 +3267,10 @@
       state.validation = payload;
       state.validatedGeneration = payload.ok === true ? generation : -1;
       state.validatedSignature = payload.ok === true ? (payload.draft_signature || "") : "";
-      if (payload.config) state.config = canonicalDraft(payload.config);
-      updateServerFields(payload);
-      renderAll();
+      // 校验回包按内容比对合并草稿（保留未变化部分的对象引用），只刷新受影响区域。
+      var changedKeys = payload.config ? reconcileDraft(canonicalDraft(payload.config)) : {};
+      var derived = updateServerFields(payload);
+      refreshDerivedViews(changedKeys, derived, {});
       renderValidation(payload);
       showToast(payload.ok ? "校验完成，可单独发布" : "校验未通过，请查看检查项", payload.ok ? "info" : "error");
     } catch (error) {
@@ -2964,7 +3514,10 @@
     clearElement(host);
     var isAdmin = Boolean(state.user && state.user.is_admin === true);
     host.hidden = !isAdmin;
-    if (!isAdmin) return;
+    if (!isAdmin) {
+      blockRendered("admin");
+      return;
+    }
     var card = document.createElement("div");
     card.className = "sp-card";
     var head = document.createElement("div");
@@ -3066,21 +3619,172 @@
       card.appendChild(result);
     }
     host.appendChild(card);
+    blockRendered("admin");
   }
 
-  function renderAll() {
+  // ============ 区块级脏检查 ============
+  // 每个区块有签名（决定它渲染结果的输入）；签名未变则跳过。step 非 0 的区块只在其步骤可见时渲染，
+  // 否则标记待渲染，切换到该步骤或浏览器空闲时再补。containers 内有焦点时延后到焦点离开再重建，
+  // 避免打断输入。各 render 函数结束时调用 blockRendered 记录签名，因此直接调用 render 函数
+  // （用户操作后的局部刷新）也会同步签名。
+  var BLOCKS = {
+    nodes: {
+      step: 2,
+      signature: function () {
+        var proxies = Array.isArray(state.config.proxies) ? state.config.proxies : [];
+        var form = state.nodeForm || {};
+        return [
+          objectId(proxies),
+          proxies.map(objectId).join(","),
+          state.nodeQuery,
+          state.nodeProtocol,
+          form.open ? String(form.index) + objectId(form.ref) : "-",
+          state.loading
+        ].join("|");
+      },
+      render: function () { renderNodes(); }
+    },
+    pills: {
+      step: 2,
+      signature: function () { return protocolList().join(",") + "|" + state.nodeProtocol; },
+      render: function () { renderProtocolPills(); }
+    },
+    rules: {
+      step: 3,
+      signature: function () {
+        var rules = Array.isArray(state.config.custom_rules) ? state.config.custom_rules : [];
+        return rules.join("\u0002") + "|" + targetOptions().key;
+      },
+      render: function () { renderRules(); }
+    },
+    ruleSource: {
+      step: 3,
+      containers: ["providerTargetsPanel", "ruleSource"],
+      signature: function () {
+        var sourceKey = selectedProviderSource();
+        var overrides = sourceKey ? state.config.global_config[sourceKey + "_provider_targets"] : null;
+        return [
+          state.config.selected_rule_type,
+          objectId(state.providerDefaults),
+          JSON.stringify(overrides === undefined ? null : overrides),
+          targetOptions().key
+        ].join("|");
+      },
+      render: function () { renderRuleSource(); }
+    },
+    rulesets: {
+      step: 3,
+      containers: ["rulesetPanel"],
+      signature: function () { return JSON.stringify(state.config.custom_rule_providers || {}) + "|" + state.rulesetMode; },
+      render: function () { renderRulesets(); }
+    },
+    global: {
+      step: 3,
+      // 无签名：schema 不变时 renderGlobalConfig 只就地刷新变化的控件，开销很小。
+      signature: null,
+      render: function (force) { renderGlobalConfig(Boolean(force)); }
+    },
+    admin: {
+      step: 0,
+      containers: ["adminPanelHost"],
+      signature: function () {
+        return [
+          Boolean(state.user && state.user.is_admin === true),
+          objectId(state.adminUsers),
+          state.adminLoading,
+          state.adminLoaded,
+          state.adminConfirmDelete,
+          state.adminResult
+        ].join("|");
+      },
+      render: function () { renderAdminPanel(); }
+    }
+  };
+  var blockMeta = {};
+  Object.keys(BLOCKS).forEach(function (name) { blockMeta[name] = { sig: undefined, dirty: false }; });
+
+  function blockRendered(name) {
+    var block = BLOCKS[name];
+    var meta = blockMeta[name];
+    if (!block || !meta) return;
+    meta.sig = block.signature ? block.signature() : null;
+    meta.dirty = false;
+  }
+
+  // options.force：无视签名/步骤/焦点立即渲染；options.allowHidden：允许渲染非当前步骤（空闲补渲染用）。
+  function renderBlock(name, options) {
+    var opts = options || {};
+    var block = BLOCKS[name];
+    var meta = blockMeta[name];
+    if (!block || !meta) return false;
+    if (!opts.force) {
+      if (block.signature && !meta.dirty && meta.sig === block.signature()) return false;
+      if (!opts.allowHidden && block.step && block.step !== state.activeStep) {
+        meta.dirty = true;
+        scheduleIdleBlocks();
+        return false;
+      }
+      if (block.containers) {
+        var hosts = block.containers.map($).filter(Boolean);
+        if (focusInside(hosts)) {
+          meta.dirty = true;
+          renderWhenFocusLeaves(name, hosts);
+          return false;
+        }
+      }
+    }
+    block.render(Boolean(opts.force));
+    return true;
+  }
+
+  // 补渲染被延后的区块；传入 step 时只处理该步骤（及常驻区块）。
+  function flushDirtyBlocks(step) {
+    Object.keys(BLOCKS).forEach(function (name) {
+      var meta = blockMeta[name];
+      if (!meta || !meta.dirty) return;
+      if (step !== undefined && BLOCKS[name].step && BLOCKS[name].step !== step) return;
+      renderBlock(name, { allowHidden: step === undefined });
+    });
+  }
+
+  var idleBlocksScheduled = false;
+  function scheduleIdleBlocks() {
+    if (idleBlocksScheduled) return;
+    idleBlocksScheduled = true;
+    var run = function () {
+      idleBlocksScheduled = false;
+      flushDirtyBlocks();
+    };
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(run, { timeout: 800 });
+    else window.setTimeout(run, 150);
+  }
+
+  // 容器内有焦点时延后重建：焦点离开所有容器后再渲染一次（监听只挂一次）。
+  var focusWaiters = {};
+  function renderWhenFocusLeaves(name, hosts) {
+    if (focusWaiters[name]) return;
+    focusWaiters[name] = true;
+    var onFocusOut = function () {
+      window.setTimeout(function () {
+        if (!focusWaiters[name] || focusInside(hosts)) return;
+        hosts.forEach(function (host) { host.removeEventListener("focusout", onFocusOut); });
+        focusWaiters[name] = false;
+        if (name === "global") renderGlobalConfig(false);
+        else renderBlock(name, { allowHidden: true });
+      }, 0);
+    };
+    hosts.forEach(function (host) { host.addEventListener("focusout", onFocusOut); });
+  }
+
+  // force 为 true 时立即重绘全部区块（换号/退出/回滚等需要彻底刷新的场景）。
+  function renderAll(force) {
+    var options = force ? { force: true } : undefined;
     renderStats();
     renderSubscription();
     renderImport();
-    renderNodes();
-    renderProtocolPills();
-    renderRules();
-    renderRuleSource();
-    renderRulesets();
-    renderGlobalConfig();
+    Object.keys(BLOCKS).forEach(function (name) { renderBlock(name, options); });
     // 表单打开时不重建（renderNodeForm 只同步定位），保护用户正在输入的内容。
     renderNodeForm(false);
-    renderAdminPanel();
     updateModeView();
     updateGlobalActionButtons();
     updatePublishButton();
@@ -3181,10 +3885,29 @@
         displayApiError(error, "配置文件读取失败");
       }
     });
+    // 节点筛选 120ms 去抖；renderNodes 复用卡片，只切换不匹配卡片的隐藏状态。
     $("nodeSearch") && $("nodeSearch").addEventListener("input", function (event) {
-      state.nodeQuery = event.target.value;
-      renderNodes();
+      var value = event.target.value;
+      if (nodeSearchTimer !== null) window.clearTimeout(nodeSearchTimer);
+      nodeSearchTimer = window.setTimeout(function () {
+        nodeSearchTimer = null;
+        state.nodeQuery = value;
+        renderNodes();
+      }, 120);
     });
+    initNodeDragEvents();
+    // 规则源目标下拉在首次交互时懒填充全部候选（委托在常驻容器上，面板重建后仍有效）。
+    var providerPanel = $("providerTargetsPanel");
+    if (providerPanel) {
+      var fillLazyTarget = function (event) {
+        var select = event.target && event.target.closest ? event.target.closest("select[data-lazy-targets]") : null;
+        if (select) fillProviderTargetSelect(select);
+      };
+      providerPanel.addEventListener("focusin", fillLazyTarget);
+      providerPanel.addEventListener("mousedown", fillLazyTarget);
+      providerPanel.addEventListener("keydown", fillLazyTarget);
+      providerPanel.addEventListener("touchstart", fillLazyTarget, { passive: true });
+    }
     $("protocolPills") && $("protocolPills").addEventListener("click", function (event) {
       var pill = event.target.closest("[data-protocol]");
       if (!pill) return;
@@ -3244,6 +3967,8 @@
   async function init() {
     initializeEvents();
     renderAll();
+    // 上次处于登录状态时与 /api/session 并行预取草稿；未登录则丢弃预取结果。
+    var prefetched = readAuthHint() ? prefetchConfig() : null;
     try {
       var session = await apiRequest("/api/session", { skipSessionRefresh: true });
       if (!session.authenticated) {
@@ -3254,7 +3979,7 @@
       state.user = session.user || null;
       state.csrfToken = session.csrf_token || "";
       renderUserPanel(state.user);
-      await loadBootstrap();
+      await loadBootstrap(prefetched);
     } catch (error) {
       state.loading = false;
       showAuthOverlay({ csrf_token: state.authCsrf });

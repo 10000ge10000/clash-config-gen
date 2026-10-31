@@ -414,6 +414,8 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   const providerTargets = page.locator('#providerTargetsPanel');
   await expect(providerTargets).toBeVisible();
   const dustinTarget = providerTargets.locator('select').first();
+  // 目标下拉为懒填充：获得焦点后才填入全部候选。
+  await dustinTarget.focus();
   const dustinOptions = await dustinTarget.locator('option').evaluateAll((options) => options.map((option) => option.value));
   const dustinDefault = await dustinTarget.inputValue();
   const dustinReplacement = dustinOptions.find((value) => value !== dustinDefault);
@@ -429,6 +431,7 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   await waitForSaved(page);
   await expect(providerTargets).toBeVisible();
   const lhieTarget = providerTargets.locator('select').first();
+  await lhieTarget.focus();
   const lhieOptions = await lhieTarget.locator('option').evaluateAll((options) => options.map((option) => option.value));
   const lhieDefault = await lhieTarget.inputValue();
   const lhieReplacement = lhieOptions.find((value) => value !== lhieDefault);
@@ -1581,4 +1584,170 @@ test('V2 迟到回包回归：/api/validate 挂起期间退出并换号登录，
     validateInFlight: window.v2State.validateInFlight,
   }))).toEqual({ validation: null, proxies: ['Late-B'], validateInFlight: false });
   await expect(page.locator('#validateBtn')).toBeEnabled();
+});
+
+test('V2 渲染性能回归：保存回包复用卡片、筛选只隐藏、全局设置跨组可见性与焦点保留、目标下拉懒填充', async ({ page }) => {
+  test.setTimeout(180_000);
+  const tracker = trackPageFailures(page);
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+
+  // serial 模式下前面用例共用 admin 草稿；先经产品保存链清空节点与规则。
+  await page.evaluate(async () => {
+    window.v2State.config.proxies = [];
+    window.v2State.config.custom_rules = [];
+    window.v2State.config.custom_rule_providers = {};
+    window.saveChain.markDirty();
+    await window.saveChain.flushDraftSave();
+  });
+  await waitForSaved(page);
+
+  await page.locator('#step-tab-1').click();
+  const perfYaml = ['A', 'B', 'C', 'D'].map((suffix) => [
+    `  - name: Perf-${suffix}`,
+    '    type: ss',
+    `    server: perf-${suffix.toLowerCase()}.example.com`,
+    '    port: 8388',
+    '    cipher: aes-128-gcm',
+    '    password: perf-password',
+  ].join('\n'));
+  const perfImport = await importMethod(page, 'yaml', `proxies:\n${perfYaml.join('\n')}\n`);
+  expect(perfImport.status(), await perfImport.text()).toBe(200);
+  await waitForSaved(page);
+  await page.locator('#step-tab-2').click();
+  const cards = page.locator('#nodeGrid .node-card');
+  await expect(cards).toHaveCount(4, { timeout: 15_000 });
+
+  // --- 1. 保存回包不重建节点卡片：同一元素引用保留，且不再重放 popIn 入场动画 ---
+  // 等首次出现的入场动画（含 400ms 兜底）结束。
+  await expect.poll(() => page.evaluate(() => document.querySelectorAll('#nodeGrid .node-card.is-entering').length), { timeout: 5_000 }).toBe(0);
+  await page.evaluate(() => {
+    document.querySelectorAll('#nodeGrid .node-card').forEach((card) => { card.__perfMark = card.textContent.match(/Perf-[A-D]/)[0]; });
+  });
+  const afterSave = await page.evaluate(async () => {
+    window.v2State.config.custom_rules = window.v2State.config.custom_rules.concat(['DOMAIN-SUFFIX,perf.example.test,Proxy']);
+    window.saveChain.markDirty();
+    await window.saveChain.flushDraftSave();
+    const nodeCards = Array.from(document.querySelectorAll('#nodeGrid .node-card'));
+    return {
+      marks: nodeCards.map((card) => card.__perfMark || null),
+      entering: nodeCards.filter((card) => card.classList.contains('is-entering')).length,
+      popIn: document.getAnimations().filter((animation) => animation.animationName === 'popIn'
+        && animation.effect && animation.effect.target && animation.effect.target.closest
+        && animation.effect.target.closest('#nodeGrid')).length,
+    };
+  });
+  expect(afterSave).toEqual({ marks: ['Perf-A', 'Perf-B', 'Perf-C', 'Perf-D'], entering: 0, popIn: 0 });
+  await waitForSaved(page);
+
+  // 排序只移动对应卡片，元素引用不变，也不触发入场动画。
+  await page.locator('#nodeGrid .node-card').filter({ hasText: 'Perf-C' }).getByRole('button', { name: '上移' }).click();
+  await waitForSaved(page);
+  expect(await page.evaluate(() => Array.from(document.querySelectorAll('#nodeGrid .node-card')).map((card) => ({
+    mark: card.__perfMark || null,
+    index: card.dataset.index,
+    entering: card.classList.contains('is-entering'),
+  })))).toEqual([
+    { mark: 'Perf-A', index: '0', entering: false },
+    { mark: 'Perf-C', index: '1', entering: false },
+    { mark: 'Perf-B', index: '2', entering: false },
+    { mark: 'Perf-D', index: '3', entering: false },
+  ]);
+  expect(await state(page, () => window.v2State.config.proxies.map((node) => node.name))).toEqual(['Perf-A', 'Perf-C', 'Perf-B', 'Perf-D']);
+
+  // --- 2. 搜索只隐藏不匹配卡片，匹配卡片元素引用不变 ---
+  await page.locator('#nodeSearch').fill('perf-b');
+  await expect(page.locator('#nodeGrid .node-card:not([data-hidden="true"])')).toHaveCount(1, { timeout: 5_000 });
+  await expect(cards).toHaveCount(4);
+  expect(await page.evaluate(() => Array.from(document.querySelectorAll('#nodeGrid .node-card')).map((card) => ({
+    mark: card.__perfMark || null,
+    hidden: card.dataset.hidden === 'true',
+  })))).toEqual([
+    { mark: 'Perf-A', hidden: true },
+    { mark: 'Perf-C', hidden: true },
+    { mark: 'Perf-B', hidden: false },
+    { mark: 'Perf-D', hidden: true },
+  ]);
+  await expect(page.locator('#nodeGrid .node-card').filter({ hasText: 'Perf-B' })).toBeVisible();
+  await expect(page.locator('#nodeGrid .node-card').filter({ hasText: 'Perf-A' })).toBeHidden();
+  await page.locator('#nodeSearch').fill('');
+  await expect(page.locator('#nodeGrid .node-card:not([data-hidden="true"])')).toHaveCount(4, { timeout: 5_000 });
+  expect(await page.evaluate(() => Array.from(document.querySelectorAll('#nodeGrid .node-card')).map((card) => card.__perfMark || null))).toEqual(['Perf-A', 'Perf-C', 'Perf-B', 'Perf-D']);
+
+  // --- 3. 全局设置：非“基础”组字段输入不会误隐藏依赖 is_desktop / enable_core_options 的字段 ---
+  await page.locator('#step-tab-3').click();
+  await expect(page.locator('#modeDesktopBtn')).toBeEnabled({ timeout: 5_000 });
+  await page.locator('#modeDesktopBtn').click();
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.global_config.is_desktop)).toBe(true);
+  const panel = page.locator('#globalSchemaPanel');
+  const speedGroup = panel.locator('details[data-group="speed"]');
+  const dnsGroup = panel.locator('details[data-group="dns"]');
+  if (!(await speedGroup.evaluate((details) => details.open))) await speedGroup.locator('summary').click();
+  // 手动收起默认展开的 DNS 分组，保存回包后应保持收起。
+  if (await dnsGroup.evaluate((details) => details.open)) await dnsGroup.locator('summary').click();
+  const visibilityMap = () => page.evaluate(() => Object.fromEntries(
+    Array.from(document.querySelectorAll('#globalSchemaPanel [data-field-key]')).map((control) => [
+      control.dataset.fieldKey,
+      !control.closest('.schema-field').classList.contains('schema-field-hidden'),
+    ]),
+  ));
+  const beforeVisibility = await visibilityMap();
+  expect(beforeVisibility.find_process_mode).toBe(true);
+  const tolerance = panel.locator('[data-field-key="url_test_tolerance"]');
+  await tolerance.click();
+  await page.keyboard.type('7');
+  expect(await visibilityMap()).toEqual(beforeVisibility);
+  await expect(panel.locator('[data-field-key="find_process_mode"]')).toBeVisible();
+
+  // A 字段 change 后立即聚焦 B 输入：保存回包不得覆盖 B 的未提交输入、不得抢走焦点或改变分组展开状态。
+  await tolerance.fill('55');
+  const testUrl = panel.locator('[data-field-key="url_test_url"]');
+  const originalTestUrl = await testUrl.inputValue();
+  const toleranceSave = page.waitForResponse((item) => item.url() === `${baseURL}/api/config` && item.request().method() === 'PUT');
+  await testUrl.click();
+  // macOS 下 End 键不移动光标，直接把光标放到末尾再输入。
+  await testUrl.evaluate((input) => input.setSelectionRange(input.value.length, input.value.length));
+  await page.keyboard.type('?perf=1');
+  expect((await toleranceSave).status()).toBe(200);
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.global_config.url_test_tolerance)).toBe(55);
+  await expect(testUrl).toBeFocused();
+  await expect(testUrl).toHaveValue(`${originalTestUrl}?perf=1`);
+  expect(await state(page, () => window.v2State.config.global_config.url_test_url)).toBe(originalTestUrl);
+  expect(await speedGroup.evaluate((details) => details.open)).toBe(true);
+  expect(await dnsGroup.evaluate((details) => details.open)).toBe(false);
+  await testUrl.fill(originalTestUrl);
+  await testUrl.press('Tab');
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.global_config.url_test_url)).toBe(originalTestUrl);
+
+  // --- 4. 规则源目标下拉：初始只含当前值，交互后懒填充，可选择节点并正确写回 ---
+  await page.locator('#ruleSource').selectOption('dustinwin规则');
+  await waitForSaved(page);
+  const providerTargets = page.locator('#providerTargetsPanel');
+  await expect(providerTargets).toBeVisible();
+  const firstTarget = providerTargets.locator('select').first();
+  await expect(firstTarget.locator('option')).toHaveCount(1);
+  const providerName = await firstTarget.evaluate((select) => select.closest('.target-row').querySelector('.target-name').textContent);
+  const initialValue = await firstTarget.inputValue();
+  await firstTarget.focus();
+  const lazyOptions = await firstTarget.locator('option').evaluateAll((options) => options.map((option) => option.value));
+  expect(lazyOptions.length).toBeGreaterThan(1);
+  expect(lazyOptions).toContain('Perf-B');
+  expect(lazyOptions).not.toContain('no-resolve');
+  expect(new Set(lazyOptions).size).toBe(lazyOptions.length);
+  await expect(firstTarget).toHaveValue(initialValue);
+  await firstTarget.evaluate((select) => { select.__perfMark = 'target-select'; });
+  await firstTarget.selectOption('Perf-B');
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.global_config.dustinwin_provider_targets)).toEqual({ [providerName]: 'Perf-B' });
+  await expect(firstTarget).toHaveValue('Perf-B');
+  expect(await firstTarget.evaluate((select) => select.__perfMark || null)).toBe('target-select');
+  await providerTargets.getByRole('button', { name: '恢复当前规则源默认目标' }).click();
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.global_config.dustinwin_provider_targets)).toEqual({});
+  await expect(providerTargets.locator('select').first()).toHaveValue(initialValue);
+
+  tracker.assertClean();
 });
