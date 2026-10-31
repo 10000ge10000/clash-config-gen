@@ -2,7 +2,10 @@ import base64
 import ipaddress
 import json
 import re
+import os
 import socket
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,9 +24,116 @@ from normalizer import normalize_proxy, parse_strict_port
 
 REQUIRED_PROXY_FIELDS = {"name", "type", "server", "port"}
 SUPPORTED_SHARE_SCHEMES = ("ss://", "trojan://", "vmess://", "vless://", "hysteria2://", "hy2://", "tuic://", "anytls://")
+DEFAULT_EXTERNAL_FETCH_DEADLINE_SECONDS = 30
+
+
+def _external_fetch_deadline_seconds() -> float:
+    """远程抓取总耗时上限；timeout 只是单次读超时，挡不住逐块慢速发送。"""
+    try:
+        value = float(os.getenv("EXTERNAL_FETCH_DEADLINE_SECONDS", ""))
+    except ValueError:
+        return float(DEFAULT_EXTERNAL_FETCH_DEADLINE_SECONDS)
+    return value if value > 0 else float(DEFAULT_EXTERNAL_FETCH_DEADLINE_SECONDS)
+
+
 MAX_REMOTE_SUBSCRIPTION_BYTES = 5 * 1024 * 1024
 SAFE_RULESET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_EXTERNAL_REDIRECTS = 5
+
+
+class _FetchDeadlineGuard:
+    """把远程抓取的总耗时上限落到 socket 层。
+
+    requests 的 timeout 只限制单次 recv 的间隔，响应头阶段和 iter_content 凑满
+    一个块之前都可能被慢速发送无限拖住。这里在发起请求前启动定时器，到期后对本次
+    抓取创建的所有 socket 执行 shutdown(SHUT_RDWR)：阻塞中的 recv/handshake 会立即
+    返回（仅 close 打断不了另一线程里阻塞的 recv）。
+
+    登记时保存 socket.dup() 出的副本：shutdown 作用于底层连接本身，TLS 包装会
+    detach 原 socket 对象，但副本 fd 仍指向同一连接；副本由本对象负责关闭，
+    不会误伤被系统复用的 fd 编号。
+    """
+
+    def __init__(self, deadline: float):
+        self.deadline = deadline
+        self._lock = threading.Lock()
+        self._sockets: list[socket.socket] = []
+        self._expired = False
+        self._closed = False
+        self._timer: threading.Timer | None = None
+
+    @property
+    def expired(self) -> bool:
+        return self._expired or time.monotonic() >= self.deadline
+
+    def remaining(self) -> float:
+        return self.deadline - time.monotonic()
+
+    def start(self) -> None:
+        self._timer = threading.Timer(max(0.0, self.remaining()), self._fire)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def register(self, sock: socket.socket) -> None:
+        try:
+            duplicate = sock.dup()
+        except OSError:
+            # 复制失败时无法从外部打断，直接关闭连接，宁可失败也不留无界阻塞。
+            sock.close()
+            raise
+        with self._lock:
+            if not (self._expired or self._closed):
+                self._sockets.append(duplicate)
+                return
+        # 已到期或已结束：立即切断，不让新连接逃过上限。
+        self._shutdown(duplicate)
+        duplicate.close()
+
+    def _fire(self) -> None:
+        with self._lock:
+            self._expired = True
+            sockets = list(self._sockets)
+        for sock in sockets:
+            self._shutdown(sock)
+
+    @staticmethod
+    def _shutdown(sock: socket.socket) -> None:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def close(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+        with self._lock:
+            self._closed = True
+            sockets, self._sockets = self._sockets, []
+        for sock in sockets:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+def _create_pinned_connection(conn, pinned_ip: str, deadline_guard: "_FetchDeadlineGuard | None"):
+    timeout = conn.timeout
+    if deadline_guard is not None:
+        # 连接建立本身也不能超过总上限；剩余时间不足时直接判超时。
+        remaining = deadline_guard.remaining()
+        if remaining <= 0:
+            raise socket.timeout("远程订阅下载超时")
+        if not isinstance(timeout, (int, float)) or timeout > remaining:
+            timeout = remaining
+    sock = urllib3_connection.connection.create_connection(
+        (pinned_ip, conn.port),
+        timeout,
+        source_address=conn.source_address,
+        socket_options=conn.socket_options,
+    )
+    if deadline_guard is not None:
+        deadline_guard.register(sock)
+    return sock
 
 
 class _PinnedHTTPConnection(HTTPConnection):
@@ -35,33 +145,25 @@ class _PinnedHTTPConnection(HTTPConnection):
     connect().
     """
 
-    def __init__(self, *args, pinned_ip: str, **kwargs):
+    def __init__(self, *args, pinned_ip: str, deadline_guard: "_FetchDeadlineGuard | None" = None, **kwargs):
         self._pinned_ip = pinned_ip
+        self._deadline_guard = deadline_guard
         super().__init__(*args, **kwargs)
 
     def _new_conn(self):
-        return urllib3_connection.connection.create_connection(
-            (self._pinned_ip, self.port),
-            self.timeout,
-            source_address=self.source_address,
-            socket_options=self.socket_options,
-        )
+        return _create_pinned_connection(self, self._pinned_ip, self._deadline_guard)
 
 
 class _PinnedHTTPSConnection(HTTPSConnection):
     """HTTPS equivalent retaining original hostname for SNI/cert checks."""
 
-    def __init__(self, *args, pinned_ip: str, **kwargs):
+    def __init__(self, *args, pinned_ip: str, deadline_guard: "_FetchDeadlineGuard | None" = None, **kwargs):
         self._pinned_ip = pinned_ip
+        self._deadline_guard = deadline_guard
         super().__init__(*args, **kwargs)
 
     def _new_conn(self):
-        return urllib3_connection.connection.create_connection(
-            (self._pinned_ip, self.port),
-            self.timeout,
-            source_address=self.source_address,
-            socket_options=self.socket_options,
-        )
+        return _create_pinned_connection(self, self._pinned_ip, self._deadline_guard)
 
 
 class _PinnedHTTPConnectionPool(HTTPConnectionPool):
@@ -75,9 +177,10 @@ class _PinnedHTTPSConnectionPool(HTTPSConnectionPool):
 class _PinnedIPHTTPAdapter(HTTPAdapter):
     """Requests adapter for a single, already-validated destination IP."""
 
-    def __init__(self, hostname: str, pinned_ip: str, **kwargs):
+    def __init__(self, hostname: str, pinned_ip: str, deadline_guard: "_FetchDeadlineGuard | None" = None, **kwargs):
         self.hostname = hostname
         self.pinned_ip = pinned_ip
+        self.deadline_guard = deadline_guard
         super().__init__(**kwargs)
 
     def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
@@ -90,7 +193,7 @@ class _PinnedIPHTTPAdapter(HTTPAdapter):
         if parsed.hostname != self.hostname or scheme not in {"http", "https"}:
             raise ValueError("固定地址请求主机不匹配")
         pool_type = _PinnedHTTPSConnectionPool if scheme == "https" else _PinnedHTTPConnectionPool
-        connection_kwargs = {"pinned_ip": self.pinned_ip}
+        connection_kwargs = {"pinned_ip": self.pinned_ip, "deadline_guard": self.deadline_guard}
         if scheme == "https":
             # Keep SNI and certificate hostname verification bound to the URL
             # host while the socket connects to the pinned public IP.
@@ -719,67 +822,101 @@ def _external_host_header(parsed) -> str:
 
 def fetch_text_from_external_url(url: str, timeout: int = 15) -> tuple[str, str]:
     current_url = (url or "").strip()
+    # 总耗时上限在 socket 层强制生效（见 _FetchDeadlineGuard），覆盖连接、响应头与正文。
+    deadline_guard = _FetchDeadlineGuard(time.monotonic() + _external_fetch_deadline_seconds())
+    deadline_guard.start()
     session = requests.Session()
     # Do not inherit HTTP(S)_PROXY/ALL_PROXY from the host.  The adapter also
     # rejects explicit proxies so the validated IP is the actual destination.
     session.trust_env = False
     session.proxies = {}
     try:
-        for redirect_index in range(MAX_EXTERNAL_REDIRECTS + 1):
-            safe_url, addresses = _resolve_public_external_url(current_url)
-            parsed = urlparse(safe_url)
-            response = None
-            last_error: Exception | None = None
-            for address in addresses:
-                adapter = _PinnedIPHTTPAdapter(parsed.hostname or "", address)
-                session.mount(f"{parsed.scheme.lower()}://", adapter)
-                try:
-                    response = session.get(
-                        safe_url,
-                        headers={"Host": _external_host_header(parsed)},
-                        timeout=timeout,
-                        stream=True,
-                        allow_redirects=False,
-                    )
-                    break
-                except requests.RequestException as exc:
-                    last_error = exc
-                    response = None
-            if response is None:
-                raise ValueError("远程 URL 连接失败") from last_error
+        try:
+            return _fetch_with_deadline(session, current_url, timeout, deadline_guard)
+        except ValueError:
+            if deadline_guard.expired:
+                raise ValueError("远程订阅下载超时") from None
+            raise
+        except Exception:
+            # 定时器切断连接后，底层可能表现为连接重置、IncompleteRead 等任意异常。
+            if deadline_guard.expired:
+                raise ValueError("远程订阅下载超时") from None
+            raise
+    finally:
+        deadline_guard.close()
+        session.close()
 
-            if 300 <= response.status_code < 400:
-                try:
-                    location = response.headers.get("location")
-                finally:
-                    response.close()
-                if not location:
-                    raise ValueError("远程 URL 重定向缺少目标地址")
-                if redirect_index >= MAX_EXTERNAL_REDIRECTS:
-                    raise ValueError("远程 URL 重定向次数过多")
-                # The next loop validates and pins the redirect destination;
-                # no redirect is followed implicitly by requests.
-                current_url = urljoin(safe_url, location)
-                continue
 
+def _fetch_with_deadline(
+    session: requests.Session,
+    current_url: str,
+    timeout: int,
+    deadline_guard: _FetchDeadlineGuard,
+) -> tuple[str, str]:
+    for redirect_index in range(MAX_EXTERNAL_REDIRECTS + 1):
+        if deadline_guard.expired:
+            raise ValueError("远程订阅下载超时")
+        safe_url, addresses = _resolve_public_external_url(current_url)
+        parsed = urlparse(safe_url)
+        response = None
+        last_error: Exception | None = None
+        for address in addresses:
+            if deadline_guard.expired:
+                raise ValueError("远程订阅下载超时")
+            adapter = _PinnedIPHTTPAdapter(parsed.hostname or "", address, deadline_guard=deadline_guard)
+            session.mount(f"{parsed.scheme.lower()}://", adapter)
             try:
-                response.raise_for_status()
-                content_type = response.headers.get("content-type", "")
-                chunks: list[bytes] = []
-                total = 0
-                for chunk in response.iter_content(chunk_size=65536):
-                    if not chunk:
-                        continue
-                    total += len(chunk)
-                    if total > MAX_REMOTE_SUBSCRIPTION_BYTES:
-                        raise ValueError("远程订阅内容超过 5MB，已停止下载")
-                    chunks.append(chunk)
-                return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace"), content_type
+                response = session.get(
+                    safe_url,
+                    headers={"Host": _external_host_header(parsed)},
+                    timeout=timeout,
+                    stream=True,
+                    allow_redirects=False,
+                )
+                break
+            except requests.RequestException as exc:
+                last_error = exc
+                response = None
+        if response is None:
+            if deadline_guard.expired:
+                raise ValueError("远程订阅下载超时") from last_error
+            raise ValueError("远程 URL 连接失败") from last_error
+
+        if 300 <= response.status_code < 400:
+            try:
+                location = response.headers.get("location")
             finally:
                 response.close()
-        raise ValueError("远程 URL 重定向次数过多")
-    finally:
-        session.close()
+            if not location:
+                raise ValueError("远程 URL 重定向缺少目标地址")
+            if redirect_index >= MAX_EXTERNAL_REDIRECTS:
+                raise ValueError("远程 URL 重定向次数过多")
+            # The next loop validates and pins the redirect destination;
+            # no redirect is followed implicitly by requests.
+            current_url = urljoin(safe_url, location)
+            continue
+
+        try:
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "")
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in response.iter_content(chunk_size=65536):
+                if deadline_guard.expired:
+                    raise ValueError("远程订阅下载超时")
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > MAX_REMOTE_SUBSCRIPTION_BYTES:
+                    raise ValueError("远程订阅内容超过 5MB，已停止下载")
+                chunks.append(chunk)
+            # 被定时器切断的连接在“读到 EOF 才结束”的响应里看起来像正常结束，必须再判一次。
+            if deadline_guard.expired:
+                raise ValueError("远程订阅下载超时")
+            return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace"), content_type
+        finally:
+            response.close()
+    raise ValueError("远程 URL 重定向次数过多")
 
 
 def tag_import_source(source_name: str, source_type: str, proxies: list[dict]) -> tuple[list[dict], dict]:

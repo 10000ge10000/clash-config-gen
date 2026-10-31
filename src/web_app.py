@@ -42,9 +42,10 @@ from importers import (
 )
 from mihomo_validator import validate_with_mihomo
 from node_builder import build_manual_node
-from security import create_csrf_token
+from security import create_csrf_token, ensure_csrf_secret
 from storage import (
     ensure_admin_from_env,
+    get_db_path,
     get_public_base_url,
     get_user_by_auth_session,
     get_user_by_id,
@@ -55,7 +56,7 @@ from storage import (
     save_user_config,
     save_user_draft,
 )
-from ui.auth_view import render_auth_gate
+from ui.auth_view import refresh_auth_user, render_auth_gate
 from ui.node_view import render_node_management
 from ui.publish_view import PUBLISH_DIFF_LABELS, render_publish_summary
 from ui.rule_view import collect_rule_targets, render_rule_provider_list, render_single_rule_editor
@@ -2101,27 +2102,32 @@ if ui_theme_path.is_file():
 # ==========================================
 # 0.1 数据库初始化 + 登录注册门禁
 # ==========================================
-init_db()
-ensure_admin_from_env()
+@st.cache_resource(show_spinner=False)
+def _init_storage_once(db_path: str) -> bool:
+    """建表迁移与环境变量管理员只需每个进程、每个数据库路径执行一次。
+
+    Streamlit 每次 rerun 都会重新执行模块顶层；放进 cache_resource 后不再重复建表和写库。
+    db_path 只作为缓存键区分数据库路径（APP_DB_PATH 变化时重新初始化），不能加下划线前缀，否则不参与哈希。
+    """
+    init_db()
+    ensure_admin_from_env()
+    return True
+
+
+# CSRF_SECRET 不合规时直接报错停止渲染；只读环境变量，每次 rerun 调用开销可忽略。
+ensure_csrf_secret()
+_init_storage_once(get_db_path())
 
 if "auth_user" not in st.session_state:
     st.session_state.auth_user = None
 
 
-def set_auth_user(user) -> None:
-    st.session_state.auth_user = {
-        "id": int(user["id"]),
-        "username": user["username"],
-        "is_admin": bool(user["is_admin"]),
-    }
-    st.session_state.pop("session_loaded_user_id", None)
-
-
-if not st.session_state.auth_user:
-    session_token = st.context.cookies.get("clash_config_gen_session", "")
-    session_user = get_user_by_auth_session(session_token)
-    if session_user:
-        set_auth_user(session_user)
+# 每次 rerun 都重新校验会话：退出登录、吊销、禁用或降权后，已打开的标签页也立即失效。
+refresh_auth_user(
+    st.session_state,
+    st.context.cookies.get("clash_config_gen_session", ""),
+    get_user_by_auth_session,
+)
 
 
 if not st.session_state.auth_user:
@@ -2149,28 +2155,6 @@ def apply_openclash_router_safe_preset() -> None:
     st.session_state.global_config.update(OPENCLASH_ROUTER_SAFE_PRESET)
     reset_global_widget_keys()
     st.session_state["target_mode"] = "OpenClash / 软路由"
-
-# 2. Fake-IP 过滤列表 (防止国内应用卡顿)
-FAKE_IP_FILTER_LIST = [
-    "+.services.googleapis.cn", "+.googleapis.cn", "*.lan", "*.localdomain", "*.example", "*.invalid",
-    "*.localhost", "*.test", "*.local", "*.home.arpa", "*.direct", "cable.auth.com",
-    "network-test.debian.org", "detectportal.firefox.com", "msftconnecttest.com", "msftncsi.com",
-    "localhost.*.weixin.qq.com", "*.blzstatic.cn", "*.126.net", "*.163.com", "*.music.163.com",
-    "*.kuwo.cn", "*.kugou.com", "*.y.qq.com", "*.music.migu.cn", "music.migu.cn",
-    "+.qq.com", "+.tencent.com", "+.srv.nintendo.net", "*.xboxlive.com", "+.battle.net",
-    "proxy.golang.org", "stun.*.*", "heartbeat.belkin.com", "*.linksys.com", "*.router.asus.com",
-    "mesu.apple.com", "swscan.apple.com", "swquery.apple.com", "swdownload.apple.com",
-    "Mijia Cloud", "+.cmbchina.com", "local.adguard.org", "geosite:cn"
-]
-
-# 3. 嗅探配置 (强制嗅探 Netflix 等)
-SNIFFER_FORCE_DOMAIN = [
-    "+.netflix.com", "+.nflxvideo.net", "+.amazonaws.com", "+.media.dssott.com"
-]
-SNIFFER_SKIP_DOMAIN = [
-    "Mijia Cloud", "dlg.io.mi.com", "+.oray.com", "+.sunlogin.net", "+.push.apple.com"
-]
-
 
 def int_global_config(name: str, default: int, minimum: int = 0) -> int:
     try:
@@ -2257,7 +2241,7 @@ def persist_current_draft(
     validation_message: str = "",
 ) -> None:
     """Persist a Streamlit draft under the same cross-process user guard as V2."""
-    from api import _ruleset_user_lock
+    from ruleset_store import _ruleset_user_lock
 
     with _ruleset_user_lock(int(current_user["id"])):
         if not _streamlit_user_is_active():
@@ -2429,7 +2413,7 @@ with st.sidebar:
             st.toast("订阅链接已复制到剪贴板", icon="✅")
 
     if st.button("重置订阅 Token", help="旧订阅链接会立即失效，适合链接泄露后的应急处理"):
-        from api import _ruleset_user_lock
+        from ruleset_store import _ruleset_user_lock
 
         with _ruleset_user_lock(int(current_user["id"])):
             refreshed_user = get_user_by_id(int(current_user["id"]))
@@ -2463,7 +2447,7 @@ with st.sidebar:
                         label = "启用" if target_enabled else "禁用"
                         if st.button(label, key=f"toggle_user_{user['id']}"):
                             try:
-                                from api import _toggle_user_with_admin
+                                from ruleset_store import _toggle_user_with_admin
 
                                 actual_enabled = _toggle_user_with_admin(
                                     int(user["id"]),
@@ -2476,7 +2460,7 @@ with st.sidebar:
                                 st.error(f"用户状态更新失败: {exc}")
                 with cols[2]:
                     if st.button("重置Token", key=f"reset_token_{user['id']}"):
-                        from api import _ruleset_user_lock
+                        from ruleset_store import _ruleset_user_lock
 
                         with _ruleset_user_lock(int(user["id"])):
                             refreshed_admin = get_user_by_id(int(current_user["id"]))
@@ -2498,7 +2482,7 @@ with st.sidebar:
                             try:
                                 # V2 与回滚入口共用同一套规则集 tombstone 生命周期：
                                 # 先在用户锁内删除 DB，再移出 namespace；失败时由启动/管理员重试。
-                                from api import _delete_user_with_rulesets, _retry_ruleset_tombstones
+                                from ruleset_store import _delete_user_with_rulesets, _retry_ruleset_tombstones
 
                                 _retry_ruleset_tombstones()
                                 cleanup_pending = _delete_user_with_rulesets(
@@ -4006,7 +3990,7 @@ with tab4:
         )
 
     if check_clicked:
-        from api import _ruleset_user_lock
+        from ruleset_store import _ruleset_user_lock
 
         with _ruleset_user_lock(int(current_user["id"])):
             if not _streamlit_user_is_active():
@@ -4042,7 +4026,7 @@ with tab4:
                     st.rerun()
 
     if publish_clicked:
-        from api import _cleanup_unreferenced_user_rulesets, _ruleset_user_lock
+        from ruleset_store import _cleanup_unreferenced_user_rulesets, _ruleset_user_lock
 
         with _ruleset_user_lock(int(current_user["id"])):
             # Refresh the token/config after waiting for concurrent API

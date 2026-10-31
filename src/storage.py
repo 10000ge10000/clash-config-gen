@@ -1,7 +1,11 @@
 import json
+import logging
 import os
 import secrets
 import sqlite3
+import threading
+import time
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -10,9 +14,26 @@ from typing import Any
 
 import yaml
 
-from auth import generate_token, hash_password, is_valid_username, verify_password
-from config_builder import DEFAULT_RULE_TYPE, build_yaml
+from auth import (
+    generate_token,
+    hash_password,
+    is_valid_username,
+    verify_dummy_password,
+    verify_password,
+)
+from config_builder import DEFAULT_RULE_TYPE, build_yaml, get_public_base_url  # noqa: F401  (对外再导出)
 from normalizer import normalize_proxies_for_mihomo
+
+LOGGER = logging.getLogger(__name__)
+
+# 会话相关写入节流：避免每个已登录请求都触发 DELETE/UPDATE 写事务。
+SESSION_LAST_USED_THROTTLE_SECONDS = 300
+SESSION_CLEANUP_INTERVAL_SECONDS = 600
+_session_cleanup_lock = threading.Lock()
+_session_cleanup_last_run: dict[str, float] = {}
+# 已提示过“已有管理员、忽略 ADMIN_PASSWORD”的 (数据库路径, 用户名)；同一进程只提示一次。
+_admin_env_notice_logged: set[tuple[str, str]] = set()
+_admin_env_notice_lock = threading.Lock()
 
 
 def get_db_path() -> str:
@@ -23,11 +44,6 @@ def get_db_path() -> str:
     if os.name == "nt":
         return str(Path("data") / "app.db")
     return "/app/data/app.db"
-
-
-def get_public_base_url() -> str:
-    """统一生成对外订阅地址，反代场景必须使用公网域名而不是容器内端口。"""
-    return os.getenv("PUBLIC_BASE_URL", "https://clash.910501.xyz").rstrip("/")
 
 
 def utc_now() -> str:
@@ -41,7 +57,12 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    try:
+        # WAL 让读写互不阻塞；该模式持久化在 DB 文件里，Streamlit 与 FastAPI 同机共享安全。
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.OperationalError as exc:
+        LOGGER.warning("无法启用 SQLite WAL，沿用默认日志模式: %s", exc)
     return conn
 
 
@@ -70,6 +91,12 @@ def init_db() -> None:
     try:
         conn.executescript(
             """
+            -- 应用级键值元数据（如数据库实例标识）；IF NOT EXISTS 兼容已有生产库。
+            CREATE TABLE IF NOT EXISTS app_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -145,6 +172,30 @@ def init_db() -> None:
         conn.close()
 
 
+DB_INSTANCE_ID_META_KEY = "db_instance_id"
+
+
+def get_db_instance_id() -> str:
+    """返回数据库实例标识（首次调用时生成并持久化的 UUID）。
+
+    规则集目录用它识别“当前挂载的数据库是否就是写出这些规则集的那个库”，
+    防止数据卷挂错时把其他用户的规则集当成孤儿删除。
+    """
+    with _db() as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, ?)",
+            (DB_INSTANCE_ID_META_KEY, uuid.uuid4().hex),
+        )
+        row = conn.execute(
+            "SELECT value FROM app_meta WHERE key = ?",
+            (DB_INSTANCE_ID_META_KEY,),
+        ).fetchone()
+    return str(row[0])
+
+
 def ensure_admin_from_env() -> None:
     """根据 Docker 环境变量创建管理员，避免把初始账号硬编码进镜像。"""
     username = os.getenv("ADMIN_USERNAME", "").strip()
@@ -156,6 +207,17 @@ def ensure_admin_from_env() -> None:
 
     existing = get_user_by_username(username)
     if existing:
+        if not int(existing["is_admin"]):
+            # 绝不能因为环境变量同名就把已有普通用户提权为管理员。
+            LOGGER.error("ADMIN_USERNAME 与已存在的普通用户同名，已拒绝提权: %s", existing["username"])
+            return
+        # 不再做 PBKDF2 比对（每次约 26 万轮），只说明环境变量密码不会覆盖现有密码。
+        notice_key = (get_db_path(), str(existing["username"]).lower())
+        with _admin_env_notice_lock:
+            first_notice = notice_key not in _admin_env_notice_logged
+            _admin_env_notice_logged.add(notice_key)
+        if first_notice:
+            LOGGER.info("已有管理员 %s，忽略 ADMIN_PASSWORD（不会覆盖现有密码）", existing["username"])
         with _db() as conn:
             conn.execute(
                 "UPDATE users SET is_admin = 1, is_enabled = 1, updated_at = ? WHERE id = ?",
@@ -224,6 +286,8 @@ def create_user(username: str, password: str, is_admin: bool = False) -> sqlite3
 def authenticate_user(username: str, password: str) -> sqlite3.Row | None:
     user = get_user_by_username(username)
     if not user or not int(user["is_enabled"]):
+        # 不存在/被禁用也跑一次等成本哈希，避免按响应时间枚举用户名。
+        verify_dummy_password(password)
         return None
     if not verify_password(password, user["password_hash"]):
         return None
@@ -309,7 +373,7 @@ def create_auth_session(user_id: int, days: int = 30) -> str:
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=max(1, min(days, 90)))
     with _db() as conn:
-        _delete_expired_auth_sessions(conn, now)
+        _delete_expired_auth_sessions(conn, now, force=True)
         conn.execute(
             """
             INSERT INTO auth_sessions
@@ -337,7 +401,7 @@ def get_user_by_auth_session(token: str) -> sqlite3.Row | None:
         _delete_expired_auth_sessions(conn, now)
         row = conn.execute(
             """
-            SELECT u.*
+            SELECT u.*, s.last_used_at AS _session_last_used_at
             FROM auth_sessions s
             JOIN users u ON u.id = s.user_id
             WHERE s.token_hash = ?
@@ -347,7 +411,7 @@ def get_user_by_auth_session(token: str) -> sqlite3.Row | None:
             """,
             (token_hash, now.isoformat(timespec="seconds")),
         ).fetchone()
-        if row:
+        if row and _session_touch_due(row["_session_last_used_at"], now):
             conn.execute(
                 "UPDATE auth_sessions SET last_used_at = ? WHERE token_hash = ?",
                 (now.isoformat(timespec="seconds"), token_hash),
@@ -699,7 +763,9 @@ def _migrate_mihomo_proxy_fields(conn: sqlite3.Connection) -> None:
         try:
             proxies = json.loads(next_proxies_json)
         except Exception:
-            proxies = []
+            # 解析失败不能当作空列表写回，否则原数据会永久丢失：保留原值并跳过该行。
+            LOGGER.warning("subscription_configs.id=%s 的 proxies_json 解析失败，已跳过迁移并保留原值", row["id"])
+            continue
         if isinstance(proxies, list):
             normalized_proxies = normalize_proxies_for_mihomo(
                 [proxy for proxy in proxies if isinstance(proxy, dict)]
@@ -781,11 +847,32 @@ def _hash_auth_token(token: str) -> str:
     return sha256(token.encode("utf-8")).hexdigest()
 
 
+def _session_touch_due(last_used_at: str, now: datetime) -> bool:
+    """距上次记录超过节流窗口（或时间戳无法解析）才需要写 last_used_at。"""
+    try:
+        last = datetime.fromisoformat(last_used_at)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    return (now - last).total_seconds() >= SESSION_LAST_USED_THROTTLE_SECONDS
+
+
 def _delete_expired_auth_sessions(
     conn: sqlite3.Connection,
     now: datetime | None = None,
+    force: bool = False,
 ) -> None:
     current = now or datetime.now(timezone.utc)
+    if not force:
+        # 按 DB 路径节流：过期会话本就被查询条件排除，清理只是回收空间。
+        key = get_db_path()
+        monotonic_now = time.monotonic()
+        with _session_cleanup_lock:
+            last_run = _session_cleanup_last_run.get(key)
+            if last_run is not None and monotonic_now - last_run < SESSION_CLEANUP_INTERVAL_SECONDS:
+                return
+            _session_cleanup_last_run[key] = monotonic_now
     conn.execute(
         "DELETE FROM auth_sessions WHERE expires_at <= ?",
         (current.isoformat(timespec="seconds"),),

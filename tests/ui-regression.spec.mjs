@@ -3,6 +3,32 @@ import { expect, test } from '@playwright/test';
 const baseURL = process.env.UI_BASE_URL || 'http://127.0.0.1:18501';
 const apiBaseURL = process.env.UI_API_BASE_URL;
 
+// 重试超过 1 次说明 Streamlit 出现时序抖动；只记录告警不让测试失败，避免 toPass 掩盖真实回归。
+function warnIfRetried(label, attempts) {
+  if (attempts > 1) {
+    test.info().annotations.push({ type: 'warning', description: `${label} 重试了 ${attempts} 次` });
+  }
+}
+
+// 切换工作区 tab：Streamlit 在 rerun 期间可能丢弃点击或把 tab 状态回退，
+// 因此重复点击直到 aria-selected 为 true，再等 rerun 结束并确认选中态稳定。
+async function openWorkspaceTab(page, name) {
+  const tab = page.getByRole('tab', { name, exact: true });
+  const running = page.locator('[data-testid="stStatusWidget"]');
+  let attempts = 0;
+  await expect(async () => {
+    attempts += 1;
+    await expect(running).toHaveCount(0, { timeout: 5_000 });
+    if ((await tab.getAttribute('aria-selected')) !== 'true') {
+      await tab.click();
+    }
+    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 5_000 });
+    await expect(running).toHaveCount(0, { timeout: 10_000 });
+    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
+  }).toPass({ timeout: 60_000 });
+  warnIfRetried(`切换 tab「${name}」`, attempts);
+}
+
 test('节点工作流和响应式契约保持可用', async ({ page }) => {
   test.setTimeout(360_000);
   const username = `ui-${Date.now()}`;
@@ -54,20 +80,35 @@ test('节点工作流和响应式契约保持可用', async ({ page }) => {
   }
   await expect(page.getByRole('heading', { name: '配置工作台' })).toBeVisible();
 
-  await page.getByRole('tab', { name: '导入节点' }).click();
+  await openWorkspaceTab(page, '导入节点');
   await expect(page.getByText('来源名称')).toHaveCount(0);
   await expect(page.getByText(/导入来源（/)).toHaveCount(0);
   const yamlInput = page.locator('textarea').first();
   await expect(yamlInput).toBeVisible({ timeout: 45_000 });
-  await yamlInput.fill(
+  const importYaml =
     '[{name: Alpha, type: ss, server: 1.1.1.1, port: 1001, cipher: aes-128-gcm, password: test-a},' +
     '{name: Beta, type: ss, server: 2.2.2.2, port: 1002, cipher: aes-128-gcm, password: test-b},' +
-    '{name: Gamma, type: ss, server: 3.3.3.3, port: 1003, cipher: aes-128-gcm, password: test-c}]',
-  );
+    '{name: Gamma, type: ss, server: 3.3.3.3, port: 1003, cipher: aes-128-gcm, password: test-c}]';
+  // 等 rerun 空闲后再填值并失焦提交；若 rerun 把 textarea 重置回默认示例，则重试填写，直到值被 Streamlit 接受。
+  let fillAttempts = 0;
+  await expect(async () => {
+    fillAttempts += 1;
+    await expect(page.locator('[data-testid="stStatusWidget"]')).toHaveCount(0, { timeout: 10_000 });
+    await yamlInput.fill(importYaml);
+    // 记录性检查（不断言）：fill 后立即的值，用于区分“偶发时序”与“每次被 rerun 重置”。
+    const valueAfterFill = await yamlInput.inputValue();
+    if (valueAfterFill !== importYaml) {
+      test.info().annotations.push({ type: 'warning', description: `YAML 第 ${fillAttempts} 次 fill 后值未保持` });
+    }
+    await yamlInput.blur();
+    await expect(page.locator('[data-testid="stStatusWidget"]')).toHaveCount(0, { timeout: 10_000 });
+    await expect(yamlInput).toHaveValue(importYaml, { timeout: 2_000 });
+  }).toPass({ timeout: 60_000 });
+  warnIfRetried('YAML 填写', fillAttempts);
   await page.getByRole('button', { name: '解析并加入草稿' }).click();
-  await expect(page.getByText('已加入草稿：3 个新节点。')).toBeVisible();
+  await expect(page.getByText('已加入草稿：3 个新节点。')).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole('tab', { name: '节点管理' }).click();
+  await openWorkspaceTab(page, '节点管理');
   const components = page.locator('[data-testid="stCustomComponentV1"]');
   await expect(components).toHaveCount(3, { timeout: 30_000 });
   const firstHandle = components.nth(0).contentFrame().getByRole('button');
@@ -94,13 +135,13 @@ test('节点工作流和响应式契约保持可用', async ({ page }) => {
   }
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: '配置工作台' })).toBeVisible({ timeout: 45_000 });
-  await page.getByRole('tab', { name: '节点管理' }).click();
+  await openWorkspaceTab(page, '节点管理');
   await expect(page.locator('[data-testid="stCustomComponentV1"]')).toHaveCount(3, { timeout: 30_000 });
   await expect(page.locator('.node-card-summary').filter({ hasText: 'Beta' })).toContainText('2.2.2.2:1002');
 
   // Exercise the real Streamlit manual form: the checkbox must reach the
   // shared builder so the generated YAML contains the selected dialer-proxy.
-  await page.getByRole('tab', { name: '导入节点' }).click();
+  await openWorkspaceTab(page, '导入节点');
   const manualModeRadio = page.getByRole('radio', { name: '手动添加' });
   await manualModeRadio.check({ force: true });
   await expect(manualModeRadio).toBeChecked();
@@ -121,14 +162,14 @@ test('节点工作流和响应式契约保持可用', async ({ page }) => {
   await page.getByRole('button', { name: '校验并添加节点' }).click();
   await expect(page.getByText("节点 'Chain-Node' 已添加。", { exact: true })).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole('tab', { name: '分流规则' }).click();
+  await openWorkspaceTab(page, '分流规则');
   for (const title of ['DustinWin 预设规则目标', '单条规则（0）', '添加新规则集']) {
     const details = page.locator('details').filter({ hasText: title }).first();
     await expect(details).toBeVisible({ timeout: 30_000 });
     expect(await details.evaluate((element) => element.open)).toBe(false);
   }
 
-  await page.getByRole('tab', { name: '生成与检查' }).click();
+  await openWorkspaceTab(page, '生成与检查');
   await page.getByRole('button', { name: '检查草稿' }).click();
   await expect(page.getByText('草稿已通过结构检查和 mihomo 内核校验，可以发布。')).toBeVisible({ timeout: 45_000 });
   await expect(page.getByRole('tabpanel', { name: '生成与检查' }).getByText('发布差异')).toBeVisible();

@@ -30,51 +30,65 @@
 
 ## 一键部署
 
-在服务器中新建一个目录，例如 `clash-config-gen`，先生成仅保存在本机的 CSRF 密钥，再创建 `docker-compose.yml`。密钥至少需要 32 个字符；下面的命令会生成 64 个十六进制字符：
+在服务器中新建一个目录，例如 `clash-config-gen`，先生成仅保存在本机的 CSRF 密钥，再创建 `.env` 和 `docker-compose.yml`。密钥至少需要 32 个字符；下面的命令会生成 64 个十六进制字符：
 
 ```bash
 mkdir -p clash-config-gen
 cd clash-config-gen
 umask 077
-printf 'CSRF_SECRET=%s\n' "$(openssl rand -hex 32)" > .env
+cat > .env <<ENVEOF
+PUBLIC_BASE_URL=https://sub.example.com
+CSRF_SECRET=$(openssl rand -hex 32)
+# 可选：留空则不创建管理员
+ADMIN_PASSWORD=
+ENVEOF
 chmod 600 .env
 ```
 
-`.env` 只用于当前服务器，不要提交到 Git，也不要在多套部署之间复用或把下面的示例密钥写死到 Compose 文件中。
+`.env` 只用于当前服务器，不要提交到 Git，也不要在多套部署之间复用。
+
+必填变量：
+
+- `PUBLIC_BASE_URL`：对外访问地址，订阅链接基于它生成；未设置时应用拒绝启动。
+- `CSRF_SECRET`：至少 32 个随机字符；不能使用 `.env.example` 里的占位值，否则应用启动失败（进程直接退出）。
+
+可选变量：`ADMIN_USERNAME` / `ADMIN_PASSWORD`（留空则不创建管理员，见下文）、`ALLOW_REGISTRATION`、`TRUSTED_PROXY_CIDRS`、`MIHOMO_HOME`、`MIHOMO_FIRST_RUN_TIMEOUT`、注册频率限制 `REGISTER_RATE_LIMIT_PER_WINDOW` / `REGISTER_RATE_LIMIT_WINDOW_SECONDS`、远程抓取总耗时上限 `EXTERNAL_FETCH_DEADLINE_SECONDS` 等，完整列表见 `.env.example`。
 
 然后创建 `docker-compose.yml`：
 
 ```yaml
 services:
   clash-gen:
+    # 生产建议把 main 换成 sha-<提交短哈希>，避免浮动标签带来不可控升级
     image: ghcr.io/10000ge10000/clash-config-gen:main
     container_name: clash-gen
     restart: always
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
-      # Web 管理页面端口。反代 Web UI 时指向这个端口。
+      # 两个端口都只绑本机，公网入口统一由 Nginx/OpenResty 反代。
+      # 8501 为 Streamlit 回滚入口，8000 为 FastAPI 主入口。
       - "127.0.0.1:8501:8501"
-      # 订阅 API 端口。反代 /sub/ 和 /health 时指向这个端口。
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
-      # 改成你的公网访问地址。订阅链接会基于这个地址生成。
-      - PUBLIC_BASE_URL=https://clash.910501.xyz
-      # 是否允许普通用户自行注册。公网部署建议保持 false，需要多人自助注册时再改 true。
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:?请在 .env 中设置 PUBLIC_BASE_URL}
+      - CSRF_SECRET=${CSRF_SECRET:?请在 .env 中设置 CSRF_SECRET}
+      # 是否允许普通用户自行注册。公网部署建议保持 false。
       - ALLOW_REGISTRATION=false
       # HTTPS 部署保持 true；仅本地 HTTP 调试时临时设为 false。
       - AUTH_COOKIE_SECURE=true
-      # 必须在本机 .env 中提供至少 32 字符的随机值；缺失时 Compose 直接失败。
-      - CSRF_SECRET=${CSRF_SECRET:?CSRF_SECRET must be set}
-      # 初始化管理员账号。首次启动时自动创建。
-      - ADMIN_USERNAME=admin
-      # 必须改成强密码，不要使用示例值。
-      - ADMIN_PASSWORD=please-change-this-password
-      # SQLite 数据库存储位置，保持默认即可。
+      # 可信反代网段，详见下文“可信代理与客户端 IP”。
+      - TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128,172.16.0.0/12
+      # 初始化管理员账号；ADMIN_PASSWORD 留空则不创建。
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - APP_DB_PATH=/app/data/app.db
-      # 是否启用 DustinWin 规则集服务端缓存。默认开启。
       - RULESET_CACHE_ENABLED=true
-      # 规则集服务端缓存更新间隔，604800 秒 = 7 天。
       - RULESET_UPDATE_INTERVAL=604800
-      # 规则集缓存目录。保持默认即可，会落到下方 ./ruleset 挂载中。
       - RULESET_CACHE_DIR=/app/ruleset/dustinwin
     volumes:
       # 保存用户、节点、订阅 Token 和最终配置。不要删除这个目录。
@@ -96,7 +110,23 @@ docker compose pull
 docker compose up -d
 ```
 
-部署后访问 Web 管理页面，使用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录。勾选“保持登录 30 天”后，浏览器会保存 `HttpOnly` 会话 Cookie，服务端仅保存令牌摘要；退出登录或禁用用户会立即撤销对应会话。
+容器以非 root 用户（`app`，uid 10001）运行：入口脚本先以 root 修正 `/app/data`、`/app/ruleset` 的归属，再用 `setpriv` 降权，所以宿主机上属 root 的挂载目录无需手动改权限。
+
+### 数据库备份与宿主机操作
+
+SQLite 已启用 WAL 模式，容器内进程以 uid 10001 运行，`data/` 下除 `app.db` 外还会出现 `app.db-wal`、`app.db-shm`：
+
+- 备份不要只拷贝 `app.db`，WAL 中尚未合并的数据会丢失。请使用 `sqlite3 app.db ".backup '/path/backup.db'"` 或 Python `sqlite3` 的 backup API（`deploy/oracle-1` 上的 `backup-db.sh` 用的就是 backup API，是安全的）。
+- 在宿主机上直接操作数据库，请用 `docker exec clash-gen ...` 或以 uid 10001 身份执行（如 `sudo -u '#10001' sqlite3 ...`），避免以 root 打开后生成属 root 的 `-wal` / `-shm` 文件，导致容器内进程之后只读失败。
+- 入口脚本无法修正数据目录归属时会直接退出容器（而不是带着只读数据库继续运行），请按日志提示检查挂载目录权限。
+
+### 可信代理与客户端 IP
+
+应用只信任来自 `TRUSTED_PROXY_CIDRS` 内地址的 `X-Forwarded-For`，用于登录限流和日志。默认值只含本机回环地址。端口绑定到 `127.0.0.1` 后，经 Docker 端口映射进入容器的连接，对端地址是 docker bridge 网关（如 `172.24.0.1`），不在默认范围内，因此上面的示例追加了 `172.16.0.0/12`。该范围只在端口仅绑本机、反代与容器同机时可以放行；如果端口对外暴露，不要信任这个网段。
+
+应用会从右往左跳过 `X-Forwarded-For` 中属于可信网段的地址，取第一个不可信地址作为客户端 IP，左侧可能被伪造的条目不予采用。站点套了 Cloudflare 而反代没有还原真实 IP 时，最右侧是 Cloudflare 边缘地址，需要把 [Cloudflare 官方网段](https://www.cloudflare.com/ips/) 也加进 `TRUSTED_PROXY_CIDRS`，`deploy/oracle-1/docker-compose.yml` 就是这样配置的。
+
+`ADMIN_PASSWORD` 为可选项：留空时不会创建管理员账号（已有数据库里的账号不受影响）；设置后首次启动会创建 `ADMIN_USERNAME` 对应账号。如果该用户名已被普通用户占用，不会自动提权；管理员已存在时也不会用它覆盖密码。创建完成后可以从 `.env` 中移除。部署后访问 Web 管理页面，使用该账号登录。勾选“保持登录 30 天”后，浏览器会保存 `HttpOnly` 会话 Cookie，服务端仅保存令牌摘要；退出登录或禁用用户会立即撤销对应会话。
 
 生成配置后，侧边栏会显示当前用户的订阅链接，格式如下：
 
@@ -236,7 +266,7 @@ MIHOMO_VALIDATE_ENABLED=false streamlit run src/web_app.py
 
 新账号在首次发布有效节点前，订阅接口返回 HTTP 409。导入、手动保存和发布配置都会拒绝大小写不敏感的 `type: masque` 节点。
 
-如果修改了 docker-compose.yml 中的端口映射（例如将 8000 映射到 8502），需要同步修改 Nginx 配置中的 `proxy_pass` 地址。
+如果修改了 docker-compose.yml 中的端口映射（例如将 8000 映射到 8502），需要同步修改 Nginx 配置中的 `proxy_pass` 地址，并继续保持 `127.0.0.1` 绑定。
 
 ## 分流规则与自动更新
 
@@ -349,14 +379,17 @@ src/
   clash_meta_gen.py   # 策略组生成逻辑
   node_builder.py     # **新增** 节点构建逻辑（build_manual_node + NODE_FORM_SCHEMA），供前端表单渲染 + 后端校验共用单一事实来源
 
-docker-compose.yml           # 本仓库开发/自建部署模板
+docker-compose.yml           # 开发/自建模板（本地 build，非生产部署文件）
+docker-compose.prod.yml      # 使用 GHCR 镜像的部署示例，镜像标签由 IMAGE_TAG 指定
+deploy/oracle-1/             # 作者生产环境（Oracle1）的 compose，仅供参考
 design/                      # V2 界面静态原型（/v2 路径在线预览）
 .github/workflows/           # GitHub Actions 构建发布流程
 ```
 
 ## 安全注意
 
-- 生产环境必须修改 `ADMIN_PASSWORD`。
+- `ADMIN_PASSWORD` 不要使用示例值；不需要预置管理员时保持为空。
+- 生产环境建议把镜像标签固定为 `sha-<提交短哈希>`（`docker-compose.prod.yml` 通过 `IMAGE_TAG` 指定），确认新版本正常后再升级。
 - `data/` 目录包含 SQLite 数据库，不要提交到 Git。
-- `.env` 包含管理员密码，不要提交到 Git。
+- `.env` 包含管理员密码和 CSRF 密钥，不要提交到 Git。
 - `.vscode/` 属于本地编辑器配置，不纳入版本库。

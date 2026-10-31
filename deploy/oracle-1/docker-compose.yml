@@ -3,6 +3,12 @@ services:
     build: ../..
     container_name: clash-gen
     restart: always
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "127.0.0.1:8501:8501"
       - "127.0.0.1:8000:8000"
@@ -11,10 +17,20 @@ services:
       - APP_DB_PATH=/app/data/app.db
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-false}
       - AUTH_COOKIE_SECURE=true
+      # 端口只绑本机，经 docker-proxy 进入的连接对端是 docker 网关(172.x)，属可信反代；
+      # 站点经 Cloudflare 代理且 OpenResty 未还原真实 IP，XFF 最右是 Cloudflare 边缘地址，
+      # 因此一并信任 Cloudflare 官方网段（https://www.cloudflare.com/ips/，2026-10-31 获取），
+      # 应用从右往左跳过这些可信地址取真实客户端 IP。
+      - TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128,172.16.0.0/12,173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32
       - CSRF_SECRET=${CSRF_SECRET:?CSRF_SECRET must be set}
       - AUTH_RATE_LIMIT_WINDOW_SECONDS=${AUTH_RATE_LIMIT_WINDOW_SECONDS:-900}
       - AUTH_RATE_LIMIT_ACCOUNT_FAILURES=${AUTH_RATE_LIMIT_ACCOUNT_FAILURES:-5}
       - AUTH_RATE_LIMIT_IP_FAILURES=${AUTH_RATE_LIMIT_IP_FAILURES:-20}
+      - REGISTER_RATE_LIMIT_PER_WINDOW=${REGISTER_RATE_LIMIT_PER_WINDOW:-10}
+      - REGISTER_RATE_LIMIT_WINDOW_SECONDS=${REGISTER_RATE_LIMIT_WINDOW_SECONDS:-3600}
+      - EXTERNAL_FETCH_DEADLINE_SECONDS=${EXTERNAL_FETCH_DEADLINE_SECONDS:-30}
+      - MIHOMO_HOME=${MIHOMO_HOME:-/app/data/mihomo-home}
+      - MIHOMO_FIRST_RUN_TIMEOUT=${MIHOMO_FIRST_RUN_TIMEOUT:-60}
       - RULESET_CACHE_ENABLED=true
       - RULESET_UPDATE_INTERVAL=604800
       - RULESET_CACHE_DIR=/app/ruleset/dustinwin

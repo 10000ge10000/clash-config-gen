@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clash Config Gen · V2</title>
+<link rel="stylesheet" href="/ui/app.css">
+</head>
+
+<body>
+  <div class="bg-layer">
+    <div class="bg-grid"></div>
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
+    <div class="scanline"></div>
+    <div class="noise"></div>
+  </div>
+
+  <header class="topbar">
+    <div class="logo">
+      <div class="logo-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L21 7v10l-9 5-9-5V7l9-5z" stroke="#051018" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M12 22V12M12 12L3 7M12 12l9-5" stroke="#051018" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="logo-text">Clash Config Gen<em>V2</em></div>
+    </div>
+    <nav class="workspace-nav" id="workspaceNav" role="tablist" aria-label="配置工作流">
+      <button class="wnav-item active" id="step-tab-1" type="button" role="tab" data-step="1" aria-controls="step1" aria-selected="true" tabindex="0" aria-label="步骤 1：导入节点"><span class="wnum">01</span><span class="wlabel">导入节点</span></button>
+      <button class="wnav-item" id="step-tab-2" type="button" role="tab" data-step="2" aria-controls="step2" aria-selected="false" tabindex="-1" aria-label="步骤 2：节点管理"><span class="wnum">02</span><span class="wlabel">节点管理</span></button>
+      <button class="wnav-item" id="step-tab-3" type="button" role="tab" data-step="3" aria-controls="step3" aria-selected="false" tabindex="-1" aria-label="步骤 3：规则与全局"><span class="wnum">03</span><span class="wlabel">规则与全局</span></button>
+      <button class="wnav-item" id="step-tab-4" type="button" role="tab" data-step="4" aria-controls="step4" aria-selected="false" tabindex="-1" aria-label="步骤 4：校验与发布"><span class="wnum">04</span><span class="wlabel">校验与发布</span></button>
+    </nav>
+    <div class="topbar-right">
+      <div class="sub-status" aria-live="polite"><span class="dot"></span><span class="st-text" id="serviceStatus">正在加载</span></div>
+      <button class="btn-icon" id="themeToggle" type="button" title="切换浅色 / 暗色主题" aria-label="切换浅色 / 暗色主题">
+        <svg class="ico-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="ico-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      </button>
+      <button class="btn-icon" id="sidebarToggle" type="button" title="折叠设置面板" aria-label="折叠设置面板">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h16"/></svg>
+      </button>
+      <div class="user-wrap" id="userMenu">
+        <button class="avatar" id="userAvatar" type="button" title="未登录" aria-label="用户菜单" aria-haspopup="true" aria-expanded="false" aria-controls="userDropdown">U</button>
+        <div class="user-dropdown" id="userDropdown"></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout" id="layout">
+    <main class="main-col">
+      <section class="hero">
+        <div class="hero-eyebrow">Subscription Workspace</div>
+        <h1>从节点导入到订阅生效，<span class="grad">一套流程直接闭环</span></h1>
+        <p>面向 Docker 自部署、OpenClash 软路由与 mihomo 客户端的订阅生成工具。导入节点、编辑规则、生成订阅、校验 YAML —— 全程用户隔离，Token 订阅即时生效。</p>
+        <div class="stats">
+          <div class="stat-card" style="--edge-c:rgba(34,211,238,.6)"><div class="stat-label">节点</div><div class="stat-value"><span id="nodeCount">—</span></div><div class="stat-trend" id="nodeTrend">后端草稿数据</div></div>
+          <div class="stat-card" style="--edge-c:rgba(99,102,241,.6)"><div class="stat-label">规则</div><div class="stat-value"><span id="ruleCountStat">—</span></div><div class="stat-trend" id="ruleTrend">等待后端统计</div></div>
+          <div class="stat-card" style="--edge-c:rgba(167,139,250,.6)"><div class="stat-label">策略组</div><div class="stat-value"><span id="groupCount">—</span></div><div class="stat-trend" id="groupTrend">等待后端统计</div></div>
+          <div class="stat-card" style="--edge-c:rgba(52,211,153,.6)"><div class="stat-label">订阅状态</div><div class="stat-value" style="font-size:20px;padding-top:5px" id="subscriptionStatus">—</div><div class="stat-trend" id="subscriptionMeta">等待后端状态</div></div>
+        </div>
+      </section>
+
+      <section class="step-section active" id="step1" role="tabpanel" aria-labelledby="step-tab-1" tabindex="0">
+        <div class="step-banner" style="--bc:34,211,238"><div class="sb-ico">↓</div><div class="sb-body"><div class="sb-eyebrow">Step 01 · Import</div><h2 class="sb-title">导入节点</h2><p class="sb-desc">YAML、订阅链接和多行分享链接统一进入后端解析管线。</p></div><div class="sb-num">01</div></div>
+        <div class="panel stagger">
+          <div class="panel-head"><div class="panel-title">智能导入</div><span class="panel-hint">内容只在提交时发送</span></div>
+          <div class="method-cards" role="tablist" aria-label="导入方式">
+            <button class="method-card active" type="button" data-method="yaml" role="tab" aria-selected="true"><div class="m-icon">YAML</div><h4>智能 YAML 导入</h4><p>完整配置、proxies 片段或节点列表。</p></button>
+            <button class="method-card" type="button" data-method="url" role="tab" aria-selected="false"><div class="m-icon">URL</div><h4>订阅链接</h4><p>由服务端拉取并解码远程订阅。</p></button>
+            <button class="method-card" type="button" data-method="share" role="tab" aria-selected="false"><div class="m-icon">URI</div><h4>分享链接</h4><p>每行一条协议 URI，支持批量解析。</p></button>
+          </div>
+          <div class="paste-zone"><textarea id="importInput" spellcheck="false" autocomplete="off" placeholder="粘贴完整 config.yaml、proxies 片段或节点列表" aria-label="导入内容"></textarea></div>
+          <div style="display:flex;gap:10px;margin-top:16px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary btn-lg" id="importBtn" type="button"><span>↓</span> 导入节点</button>
+            <button class="btn btn-ghost" id="clearImportBtn" type="button">清空</button>
+            <button class="btn btn-ghost" id="uploadConfigBtn" type="button" title="读取本工具导出的旧配置文件并恢复其中的节点">上传配置文件恢复</button>
+            <input type="file" id="uploadConfigInput" accept=".yaml,.yml,.json" hidden>
+            <span class="status-note" id="importSummary">尚未导入节点</span>
+          </div>
+          <div id="importMessages" class="phase2-empty" hidden></div>
+        </div>
+      </section>
+
+      <section class="step-section" id="step2" role="tabpanel" aria-labelledby="step-tab-2" tabindex="0">
+        <div class="step-banner" style="--bc:99,102,241"><div class="sb-ico">⌘</div><div class="sb-body"><div class="sb-eyebrow">Step 02 · Nodes</div><h2 class="sb-title">节点管理</h2><p class="sb-desc">列表、筛选、排序、字段表单和原始 YAML 编辑都直接作用于当前草稿。</p></div><div class="sb-num">02</div></div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">节点管理</div><span class="panel-hint" id="nodeSummary">正在加载</span></div>
+          <div class="add-node-bar"><div class="protocol-pills" id="protocolPills"></div><div class="node-toolbar"><input id="nodeSearch" class="node-search" type="search" placeholder="筛选节点 / 协议 / 服务器" aria-label="筛选节点"><button class="btn btn-primary" id="addNodeBtn" type="button">+ 手动添加节点</button></div></div>
+          <div class="panel node-form-panel" id="nodeFormPanel" hidden>
+            <div class="node-form-head"><h3 id="nodeFormTitle">节点编辑</h3><button class="btn btn-ghost" id="toggleRawNodeBtn" type="button">编辑原始 YAML</button></div>
+            <div class="status-note node-form-conflict" id="nodeFormConflict" role="alert" hidden></div>
+            <div id="nodeSchemaMode"><div class="schema-grid" id="nodeSchemaFields"></div></div>
+            <div id="nodeRawMode" hidden><textarea id="nodeRawEditor" class="raw-editor" spellcheck="false" aria-label="节点原始 YAML"></textarea><div class="raw-help">服务端负责 YAML 解析；保存时会把解析映射合并到原节点，保留原节点中未触碰的未知字段。</div></div>
+            <div class="node-form-actions"><button class="btn btn-primary" id="saveNodeBtn" type="button">保存节点草稿</button><button class="btn btn-ghost" id="cancelNodeBtn" type="button">取消</button></div>
+          </div>
+          <div class="node-grid" id="nodeGrid"><div class="loading-state">正在加载节点…</div></div>
+        </div>
+      </section>
+
+      <section class="step-section" id="step3" role="tabpanel" aria-labelledby="step-tab-3" tabindex="0">
+        <div class="step-banner" style="--bc:167,139,250"><div class="sb-ico">≋</div><div class="sb-body"><div class="sb-eyebrow">Step 03 · Rules & Global</div><h2 class="sb-title">规则与全局设置</h2><p class="sb-desc">在这里维护自定义规则、规则集和全局设置；全局设置项由服务端字段定义生成，服务端未提供的设置不会显示。</p></div><div class="sb-num">03</div></div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">基础规则源</div><span class="panel-hint" id="ruleSourceStatus">等待后端配置</span></div>
+          <div class="field"><label for="ruleSource">规则源</label><select id="ruleSource" aria-label="规则源"></select></div>
+          <div class="rules-layout">
+            <div class="panel stagger">
+              <div class="panel-head"><div class="panel-title">单条规则</div></div>
+              <div class="field"><label for="ruleType">规则类型</label><select id="ruleType"><option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX</option><option value="DOMAIN">DOMAIN</option><option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD</option><option value="IP-CIDR">IP-CIDR</option><option value="GEOIP">GEOIP</option><option value="PROCESS-NAME">PROCESS-NAME</option><option value="MATCH">MATCH</option></select></div>
+              <div class="field"><label for="ruleValue">规则值</label><input id="ruleValue" type="text" placeholder="输入域名、IP 或进程名"></div>
+              <div class="field"><label for="ruleTarget">目标策略</label><input id="ruleTarget" type="text" list="ruleTargetOptions" placeholder="选择或输入策略组名称" autocomplete="off"><datalist id="ruleTargetOptions"></datalist></div>
+              <button class="btn btn-primary btn-block" id="addRuleBtn" type="button">添加规则</button>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><div class="panel-title">已添加规则 <span style="color:var(--accent);font-family:var(--mono)" id="ruleCount">—</span></div><span class="panel-hint">按草稿中的顺序</span></div>
+              <div id="ruleList"><div class="check-empty">正在加载规则</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel" id="providerTargetsPanel" hidden></div>
+        <div class="panel" id="rulesetPanel"></div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">全局设置</div><span class="panel-hint">由服务端字段定义生成</span></div>
+          <div id="globalSchemaPanel"><div class="phase2-empty">正在加载全局设置…</div></div>
+        </div>
+      </section>
+
+      <section class="step-section" id="step4" role="tabpanel" aria-labelledby="step-tab-4" tabindex="0">
+        <div class="step-banner" style="--bc:52,211,153"><div class="sb-ico">✓</div><div class="sb-body"><div class="sb-eyebrow">Step 04 · Validate & Publish</div><h2 class="sb-title">校验与发布</h2><p class="sb-desc">校验和发布是两个独立动作；只有当前草稿通过服务端校验且之后未再修改时，发布按钮才会启用。</p></div><div class="sb-num">04</div></div>
+        <div class="panel">
+          <div class="generate-hero"><h3>校验当前草稿</h3><p>服务端返回检查项、提示、统计、mihomo 内核校验结果、完整 YAML 与发布差异。</p><button class="btn btn-primary btn-lg" id="validateBtn" type="button"><span class="btn-scan"></span>校验草稿</button><div class="status-note" id="validationStatus">尚未校验</div></div>
+          <div class="check-results show" id="checkResults"><div class="check-empty">尚未校验，点击“校验草稿”开始</div></div>
+          <div class="validation-meta" id="validationStats"></div>
+          <div id="validationWarnings" class="phase2-empty" hidden></div>
+          <div class="yaml-wrap" id="yamlWrap">
+            <div class="yaml-head"><div class="yaml-dots"><i></i><i></i><i></i></div><span>config.yaml — 已校验预览</span><span style="margin-left:auto;color:var(--text-faint)" id="yamlMeta"></span></div>
+            <div class="yaml-code" id="yamlCode"></div>
+            <div class="gen-actions"><button class="btn btn-primary" id="downloadYamlBtn" type="button">下载 config.yaml</button><button class="btn" id="copySubBtn" type="button">复制订阅链接</button><button class="btn btn-ghost" id="saveDraftBtn" type="button">保存草稿</button></div>
+            <div class="publish-block"><div class="status-note" id="publishGuard">发布需要先校验当前未修改草稿。</div><button class="btn btn-primary" id="publishBtn" type="button" disabled>发布当前草稿</button><pre id="publishDiff" class="publish-diff"></pre></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="settings-panel">
+      <div class="sp-card">
+        <div class="sp-title">订阅链接<span id="subscriptionCardStatus" style="font-size:10px;letter-spacing:.5px;color:var(--text-faint)">● 未发布</span></div>
+        <div class="sub-link-card"><code id="subUrl">尚未发布订阅</code><button class="copy-btn" id="subCopyBtn" type="button" title="复制订阅链接" aria-label="复制订阅链接">⧉</button></div>
+        <button class="btn btn-ghost btn-block" id="resetTokenBtn" type="button" style="font-size:12px;padding:8px">重置订阅 Token</button>
+      </div>
+      <div class="sp-card">
+        <div class="sp-title">生成模式</div>
+        <div class="mode-switch" id="modeSwitch"><div class="indicator"></div><button id="modeDesktopBtn" type="button">全平台客户端</button><button id="modeRouterBtn" type="button">OpenClash / 软路由</button></div>
+        <div class="status-note" id="modeDesc">等待后端全局配置</div>
+      </div>
+      <div class="sp-card">
+        <div class="sp-title">DNS 预设</div>
+        <button class="preset-btn" id="presetDesktopBtn" type="button"><span class="p-ico">◈</span><span>完整客户端预设<small>由服务端预设提供</small></span></button>
+        <button class="preset-btn" id="presetRouterBtn" type="button"><span class="p-ico">□</span><span>OpenClash 预设<small>由服务端预设提供</small></span></button>
+      </div>
+      <div class="sp-card">
+        <div class="sp-title">全局设置状态</div>
+        <div class="phase2-empty">字段编辑位于“规则与全局”步骤，设置项由服务端字段定义生成。</div>
+      </div>
+      <div id="adminPanelHost"></div>
+    </aside>
+  </div>
+
+  <footer class="statusbar">
+    <div class="sb-item sb-live"><span class="dot" style="width:6px;height:6px"></span><span id="footerServiceStatus">等待后端</span></div>
+    <div class="sb-item" id="runtimeMihomo">mihomo 状态：未暴露</div>
+    <div class="sb-item">当前页面不推断运行时延迟</div>
+    <div class="sb-spacer"></div>
+    <div class="sb-item">节点 <b id="footerNodeCount" style="color:var(--text-dim)">—</b></div>
+    <div class="sb-item">规则 <b id="footerRuleCount" style="color:var(--text-dim)">—</b></div>
+    <div class="sb-item latency-live" id="draftStatus">正在加载</div>
+  </footer>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+  <div class="login-overlay-wrap" id="loginOverlay">
+    <div class="login-card" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+      <div class="login-brand"><h2 id="loginTitle">Clash Config Gen<span class="grad"> · V2</span></h2><p>登录后管理你的节点、规则与订阅</p></div>
+      <div class="login-tabs" role="tablist"><button class="login-tab active" id="loginTabBtn" type="button" role="tab" aria-selected="true">登录</button><button class="login-tab" id="registerTabBtn" type="button" role="tab" aria-selected="false">注册</button></div>
+      <div class="login-pane active" id="loginPane"><form id="loginForm"><label class="f-label" for="loginUsername">用户名</label><input class="f-input" id="loginUsername" name="username" type="text" autocomplete="username" required><label class="f-label" for="loginPassword">密码</label><input class="f-input" id="loginPassword" name="password" type="password" autocomplete="current-password" required><label class="f-check"><input type="checkbox" name="remember"> 保持登录 30 天</label><button class="f-btn" type="submit">登录</button></form></div>
+      <div class="login-pane" id="registerPane"><form id="registerForm"><label class="f-label" for="registerUsername">用户名</label><input class="f-input" id="registerUsername" name="username" type="text" autocomplete="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.-]{3,32}" title="3-32 位字母、数字、下划线、点或短横线" placeholder="3-32 位字母、数字、_ . -"><label class="f-label" for="registerPassword">密码</label><input class="f-input" id="registerPassword" name="password" type="password" autocomplete="new-password" required minlength="8" title="至少 8 位字符" placeholder="至少 8 位字符"><label class="f-label" for="registerPasswordConfirm">确认密码</label><input class="f-input" id="registerPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" required minlength="8" title="再次输入密码" placeholder="再次输入密码"><button class="f-btn" type="submit">注册</button></form></div>
+    </div>
+  </div>
+
+<script src="/ui/app.js" defer></script>
+</body>
+</html>

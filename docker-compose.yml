@@ -1,22 +1,37 @@
+# 开发 / 自建模板：本地 build 镜像。生产部署请使用 deploy/oracle-1/ 或 docker-compose.prod.yml。
 services:
   clash-gen:
     build: .
     container_name: clash-gen
     restart: always
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "127.0.0.1:8501:8501" # Streamlit Web UI（仅本机回滚）
-      - "8000:8000" # Subscription API
+      - "127.0.0.1:8000:8000" # FastAPI 主入口，经反向代理对外
     environment:
-      - PUBLIC_BASE_URL=https://clash.910501.xyz
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:?请在 .env 中设置 PUBLIC_BASE_URL，例如 https://sub.example.com}
       - APP_DB_PATH=/app/data/app.db
-      - ALLOW_REGISTRATION=false
-      - AUTH_COOKIE_SECURE=true
-      - CSRF_SECRET=${CSRF_SECRET:?CSRF_SECRET must be set}
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=change-this-admin-password
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-false}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-true}
+      - CSRF_SECRET=${CSRF_SECRET:?请在 .env 中设置 CSRF_SECRET，可用 openssl rand -hex 32 生成}
+      # 端口只绑本机，经 docker-proxy 进入的连接对端是 docker 网关，需要信任该网段才能取到真实客户端 IP
+      - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      # 留空则不创建管理员
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - REGISTER_RATE_LIMIT_PER_WINDOW=${REGISTER_RATE_LIMIT_PER_WINDOW:-10}
+      - REGISTER_RATE_LIMIT_WINDOW_SECONDS=${REGISTER_RATE_LIMIT_WINDOW_SECONDS:-3600}
+      - EXTERNAL_FETCH_DEADLINE_SECONDS=${EXTERNAL_FETCH_DEADLINE_SECONDS:-30}
+      - MIHOMO_HOME=${MIHOMO_HOME:-/app/data/mihomo-home}
+      - MIHOMO_FIRST_RUN_TIMEOUT=${MIHOMO_FIRST_RUN_TIMEOUT:-60}
       - RULESET_CACHE_ENABLED=true
       - RULESET_UPDATE_INTERVAL=604800
       - RULESET_CACHE_DIR=/app/ruleset/dustinwin
     volumes:
-      - /opt/1panel/docker/compose/clash-config-gen/data:/app/data # 持久化用户、节点与订阅 Token
+      - ./data:/app/data # 持久化用户、节点与订阅 Token
       - ./ruleset:/app/ruleset # 持久化自定义规则集（可选）

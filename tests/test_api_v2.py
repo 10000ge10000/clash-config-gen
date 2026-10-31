@@ -12,6 +12,8 @@ import yaml
 from fastapi.testclient import TestClient
 
 import api
+import draft_service
+import ruleset_store
 import storage
 
 
@@ -45,11 +47,14 @@ class APITest(unittest.TestCase):
                 "AUTH_RATE_LIMIT_IP_FAILURES",
                 "AUTH_RATE_LIMIT_WINDOW_SECONDS",
                 "MIHOMO_VALIDATE_ENABLED",
+                "RULESET_DIR",
             )
         }
         os.environ.update(
             {
                 "APP_DB_PATH": os.path.join(self.tmpdir.name, "app.db"),
+                # 默认 /app/ruleset 在本机不可写；个别用例会再覆盖为自己的临时目录。
+                "RULESET_DIR": os.path.join(self.tmpdir.name, "ruleset"),
                 "PUBLIC_BASE_URL": "https://test.local",
                 "CSRF_SECRET": "test-secret-that-is-longer-than-thirty-two-characters",
                 "ALLOW_REGISTRATION": "false",
@@ -88,8 +93,12 @@ class APITest(unittest.TestCase):
             follow_redirects=False,
         )
 
-    def _csrf(self, action="api"):
-        return api.create_csrf_token(action)
+    def _csrf(self, action="api", client=None):
+        # api 用途 token 绑定会话：按目标客户端当前 Cookie 计算摘要。
+        if action != "api":
+            return api.create_csrf_token(action)
+        session_token = (client or self.client).cookies.get(api.AUTH_COOKIE_NAME, "")
+        return api.create_csrf_token(action, binding=api.csrf_session_binding(session_token))
 
     def _headers(self, action="api", origin="https://test.local"):
         return {"Origin": origin, "X-CSRF-Token": self._csrf(action)}
@@ -710,7 +719,7 @@ class APITest(unittest.TestCase):
                 "/api/ruleset/upload",
                 headers={
                     "Origin": "https://test.local",
-                    "X-CSRF-Token": api.create_csrf_token("api"),
+                    "X-CSRF-Token": self._csrf("api", client=target_client),
                 },
                 files={"file": ("disabled.yaml", b"payload", "text/yaml")},
                 data={"alias": "disabled", "format": "yaml"},
@@ -1420,8 +1429,8 @@ class APITest(unittest.TestCase):
         second_client = TestClient(api.app)
         ruleset_dir = tempfile.TemporaryDirectory()
         previous_ruleset_dir = os.environ.get("RULESET_DIR")
-        previous_file_limit = api.MAX_RULESET_USER_FILES
-        previous_byte_limit = api.MAX_RULESET_USER_BYTES
+        previous_file_limit = ruleset_store.MAX_RULESET_USER_FILES
+        previous_byte_limit = ruleset_store.MAX_RULESET_USER_BYTES
         os.environ["RULESET_DIR"] = ruleset_dir.name
 
         def login_second():
@@ -1440,7 +1449,7 @@ class APITest(unittest.TestCase):
         def upload(client, content, alias="same-alias"):
             return client.post(
                 "/api/ruleset/upload",
-                headers=self._headers(),
+                headers={"Origin": "https://test.local", "X-CSRF-Token": self._csrf("api", client=client)},
                 files={"file": (f"{alias}.yaml", content, "text/yaml")},
                 data={"alias": alias, "behavior": "classical", "format": "yaml", "target": "Proxy"},
             )
@@ -1523,18 +1532,18 @@ class APITest(unittest.TestCase):
             )
             self.assertEqual(403, protected_delete.status_code)
 
-            api.MAX_RULESET_USER_FILES = 1
+            ruleset_store.MAX_RULESET_USER_FILES = 1
             over_file_limit = upload(self.client, b"second-file", alias="another-alias")
             self.assertEqual(413, over_file_limit.status_code)
             self.assertTrue(replacement_path.is_file())
 
-            api.MAX_RULESET_USER_BYTES = 4
+            ruleset_store.MAX_RULESET_USER_BYTES = 4
             over_byte_limit = upload(self.client, b"too-large", alias="same-alias")
             self.assertEqual(413, over_byte_limit.status_code)
             self.assertEqual(b"replacement", replacement_path.read_bytes())
         finally:
-            api.MAX_RULESET_USER_FILES = previous_file_limit
-            api.MAX_RULESET_USER_BYTES = previous_byte_limit
+            ruleset_store.MAX_RULESET_USER_FILES = previous_file_limit
+            ruleset_store.MAX_RULESET_USER_BYTES = previous_byte_limit
             if previous_ruleset_dir is None:
                 os.environ.pop("RULESET_DIR", None)
             else:
@@ -1764,6 +1773,8 @@ class APITest(unittest.TestCase):
             orphan = Path(ruleset_dir.name, "users", "987655")
             orphan.mkdir(parents=True)
             (orphan / "orphan.yaml").write_bytes(b"orphan")
+            # 先由当前数据库认领规则集目录，孤儿清理才会执行。
+            self.assertFalse(ruleset_store._ruleset_db_instance_matches())
             pending = api._retry_ruleset_tombstones()
             self.assertEqual([], pending)
             self.assertFalse(tombstone.exists())
@@ -1784,7 +1795,9 @@ class APITest(unittest.TestCase):
             target_dir = Path(ruleset_dir.name, "users", str(target["id"]))
             target_dir.mkdir(parents=True)
             (target_dir / "orphan.yaml").write_bytes(b"orphan")
-            with patch.object(api, "_move_user_ruleset_to_tombstone", side_effect=OSError("rename failed")):
+            # 先由当前数据库认领规则集目录，孤儿清理才会执行。
+            self.assertFalse(ruleset_store._ruleset_db_instance_matches())
+            with patch.object(ruleset_store, "_move_user_ruleset_to_tombstone", side_effect=OSError("rename failed")):
                 cleanup_pending = api._delete_user_with_rulesets(int(target["id"]))
             self.assertTrue(cleanup_pending)
             self.assertIsNone(storage.get_user_by_id(int(target["id"])))
@@ -2131,7 +2144,7 @@ class APITest(unittest.TestCase):
             target_dir.mkdir(parents=True)
             target_file = target_dir / ("rollback--" + "c" * 64 + ".yaml")
             target_file.write_bytes(b"rollback")
-            with patch.object(api, "delete_regular_user", side_effect=RuntimeError("db unavailable")):
+            with patch.object(ruleset_store, "delete_regular_user", side_effect=RuntimeError("db unavailable")):
                 response = self.client.post(
                     f"/api/users/{target['id']}/delete",
                     headers=self._headers(),
@@ -2522,7 +2535,7 @@ class APITest(unittest.TestCase):
         published_lines = ["proxies:", "  - name: keep-node", "    type: ss", "  - name: old-node", "    type: ss"]
         draft_yaml = "\n".join(draft_lines) + "\n"
         published_yaml = "\n".join(published_lines) + "\n"
-        diff = api._yaml_diff(draft_yaml, published_yaml)
+        diff = draft_service._yaml_diff(draft_yaml, published_yaml)
         self.assertEqual(["brand-new"], diff["added_proxies"])
         self.assertEqual(["old-node"], diff["removed_proxies"])
         self.assertTrue(diff["has_changes"])

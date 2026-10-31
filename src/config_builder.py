@@ -20,7 +20,7 @@ SUBSCRIPTION_GENERATOR = "Clash-Config-Gen"
 SUBSCRIPTION_PROJECT = "一万AI分享 Clash/OpenClash 订阅生成器"
 SUBSCRIPTION_USAGE = "可直接导入 OpenClash、Nikki、Clash Verge Rev、FlClash 或其他 mihomo 兼容客户端"
 SUBSCRIPTION_GITHUB_URL = "https://github.com/10000ge10000/clash-config-gen"
-SUBSCRIPTION_PROJECT_URL = "https://clash.910501.xyz"
+SUBSCRIPTION_PROJECT_URL = SUBSCRIPTION_GITHUB_URL  # 客户端展示的项目主页：使用开源仓库地址
 SUBSCRIPTION_ANNOUNCE = "\n".join(
     [
         f"Generator: {SUBSCRIPTION_GENERATOR}",
@@ -242,9 +242,15 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def get_public_base_url() -> str:
+    """统一读取对外地址；未设置时返回空串，调用方需自行处理。"""
+    return os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+
+
 def get_dustinwin_provider_url(file_name: str, source_url: str | None = None) -> str:
-    if _bool_env("RULESET_CACHE_ENABLED", True):
-        public_base_url = os.getenv("PUBLIC_BASE_URL", "https://clash.910501.xyz").rstrip("/")
+    public_base_url = get_public_base_url()
+    # 未配置公网地址时无法生成本站缓存链接，回退为上游直链而不是生成相对地址。
+    if public_base_url and _bool_env("RULESET_CACHE_ENABLED", True):
         return f"{public_base_url}/ruleset/dustinwin/{file_name}"
     return source_url or f"{DUSTINWIN_RULESET_BASE_URL}/{file_name}"
 

@@ -47,6 +47,17 @@ def verify_password(password: str, stored_hash: str) -> bool:
         return False
 
 
+_DUMMY_PASSWORD_HASH: str | None = None
+
+
+def verify_dummy_password(password: str) -> None:
+    """对不存在/禁用账号做一次与真实校验等成本的 PBKDF2，抹平登录响应时间差。"""
+    global _DUMMY_PASSWORD_HASH
+    if _DUMMY_PASSWORD_HASH is None:
+        _DUMMY_PASSWORD_HASH = hash_password("dummy-password-for-timing")
+    verify_password(password or "x", _DUMMY_PASSWORD_HASH)
+
+
 def generate_token() -> str:
     """生成订阅 Token。Token 足够长，订阅接口无需登录态也能安全鉴权。"""
     return secrets.token_urlsafe(32)

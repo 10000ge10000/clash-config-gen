@@ -1,4 +1,21 @@
-__pycache__
+# 版本控制与 CI
+.git/
+.github/
+.vscode/
+
+# 本地数据与运行产物（任意层级的 data 目录都不得进入镜像）
+**/data/
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite3
+ruleset/
+*.log
+.env
+.env.*
+
+# Python
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -6,9 +23,19 @@ __pycache__
 env/
 venv/
 .venv/
-.git/
-.github/
-.vscode/
-ruleset/
-data/
-*.log
+
+# 前端测试与本地工具产物（镜像只需要 src/ 与 design/）
+node_modules/
+test-results/
+playwright-report/
+.codex*/
+tests/
+playwright.config.mjs
+package.json
+package-lock.json
+design-system/
+dev_preview.py
+_dev.db
+
+# 文档（保留 README 以外无运行时用途的说明）
+*.md

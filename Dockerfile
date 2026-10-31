@@ -1,5 +1,5 @@
-# 使用官方 Python Slim 镜像减少体积
-FROM python:3.11-slim
+# 使用官方 Python Slim 镜像减少体积，固定到具体补丁版本保证可复现构建
+FROM python:3.11.13-slim-bookworm
 
 ARG MIHOMO_VERSION=v1.19.29
 ARG MIHOMO_SHA256_AMD64=60de76a35a6cbf7b4fa4a20f5c257c24345d1d635ab1aa3877022a1997ef413c
@@ -36,24 +36,27 @@ RUN set -eux; \
     mihomo -v; \
     rm -f /tmp/mihomo
 
+# 创建非 root 运行用户。容器以 root 启动 start.sh，修正数据卷归属后用 setpriv 降权，
+# 这样生产宿主机上属 root 的挂载目录无需手动改权限。setpriv 来自 util-linux，构建时先确认可用。
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid 10001 --create-home --home-dir /home/app --shell /usr/sbin/nologin app \
+    && setpriv --version
+
 # 复制源码到容器
 COPY src/ .
 COPY design/ design/
 
-# 修复启动脚本换行符并赋予执行权限
-RUN dos2unix start.sh && chmod +x start.sh
-
-# 创建规则集目录 (持久化准备)
-RUN mkdir -p data ruleset
+# 修复启动脚本换行符并赋予执行权限；创建数据与规则集目录 (持久化准备) 并交给 app 用户
+RUN dos2unix start.sh && chmod +x start.sh \
+    && mkdir -p data ruleset \
+    && chown app:app data ruleset
 
 # 暴露 Streamlit 和 FastAPI 端口
 EXPOSE 8501 8000
 
-# 赋予启动脚本执行权限
-RUN chmod +x start.sh
-
 # 健康检查同时覆盖 Web UI 和订阅 API，任一服务异常都让容器进入 unhealthy。
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health && curl --fail http://localhost:8000/health
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl --fail http://localhost:8501/_stcore/health && curl --fail http://localhost:8000/health
 
-# 启动命令
+# 启动命令（root 启动 → 修正归属 → 降权为 app 用户）
 CMD ["./start.sh"]

@@ -239,6 +239,16 @@ test.afterAll(async () => {
   await stopIsolatedServer();
 });
 
+// 生产页面默认不暴露内部状态；测试在页面脚本执行前打开调试开关，
+// 让 window.v2State / window.saveChain 可用于断言与驱动保存链。
+// 标题含“生产路径”的用例不注入，验证生产环境下调试对象不会暴露。
+test.beforeEach(async ({ page }, testInfo) => {
+  if (testInfo.title.includes('生产路径')) return;
+  await page.addInitScript(() => {
+    window.__CCG_DEBUG__ = true;
+  });
+});
+
 test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式契约', async ({ page }) => {
   test.setTimeout(240_000);
   const tracker = trackPageFailures(page);
@@ -1177,4 +1187,398 @@ test('V2 后续增强回归：拖拽排序、上传恢复、ALPN 多值、TUIC S
   );
 
   tracker.assertClean();
+});
+
+test('V2 会话与可访问性回归：375px 视口、节点表单竞态、退出清空与会话过期重登', async ({ page }) => {
+  test.setTimeout(180_000);
+  const tracker = trackPageFailures(page);
+  const noHorizontalScroll = async () => {
+    const size = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(size.scrollWidth).toBeLessThanOrEqual(size.clientWidth);
+  };
+  async function loginAs(username, password) {
+    await page.locator('#loginTabBtn').click();
+    await page.locator('#loginForm input[name="username"]').fill(username);
+    await page.locator('#loginForm input[name="password"]').fill(password);
+    // 只取第一次登录响应：退出后再登录必须首个请求即成功，不能先 403 再重试。
+    const loginResponsePromise = page.waitForResponse((loginResponse) => loginResponse.url() === `${baseURL}/api/auth/login`);
+    await page.locator('#loginForm button[type="submit"]').click();
+    const loginResponse = await loginResponsePromise;
+    expect(loginResponse.status(), await loginResponse.text()).toBe(200);
+    await expect(page.locator('#loginOverlay')).not.toHaveClass(/active/, { timeout: 15_000 });
+    await page.waitForFunction(
+      () => window.v2State && window.v2State.authenticated && !window.v2State.loading,
+      null,
+      { timeout: 15_000 },
+    );
+  }
+
+  // --- 1. 375px 视口下的登录层：产品名统一、label 关联、首个输入框聚焦、焦点陷阱、Esc 不关闭 ---
+  await page.setViewportSize({ width: 375, height: 812 });
+  const response = await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  expect(response?.status()).toBe(200);
+  await expect(page).toHaveTitle(/^Clash Config Gen/);
+  await expect(page.locator('.logo-text')).toContainText('Clash Config Gen');
+  await expect(page.locator('.logo-text')).not.toContainText('OpenClash');
+  await expect(page.locator('#loginOverlay')).toHaveClass(/active/);
+  await expect(page.locator('#loginForm').getByLabel('用户名')).toHaveAttribute('id', 'loginUsername');
+  await expect(page.locator('#loginForm').getByLabel('密码')).toHaveAttribute('id', 'loginPassword');
+  await expect(page.locator('#registerForm').getByLabel('确认密码')).toHaveAttribute('id', 'registerPasswordConfirm');
+  await expect(page.locator('#loginUsername')).toBeFocused();
+  for (let index = 0; index < 8; index += 1) {
+    await page.keyboard.press(index % 3 === 2 ? 'Shift+Tab' : 'Tab');
+    expect(await page.evaluate(() => Boolean(document.activeElement && document.activeElement.closest('#loginOverlay .login-card')))).toBe(true);
+  }
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#loginOverlay')).toHaveClass(/active/);
+  await noHorizontalScroll();
+
+  await loginAs(adminUsername, adminPassword);
+  for (const tabId of ['#step-tab-1', '#step-tab-2', '#step-tab-3', '#step-tab-4']) {
+    const tab = page.locator(tabId);
+    // ≤1180px 时导航只显示数字，必须有可读的 aria-label。
+    await expect(tab).toHaveAttribute('aria-label', /^步骤 \d：/);
+    await tab.click();
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await noHorizontalScroll();
+  }
+  await expect(page.locator('#workspaceNav')).toBeVisible();
+
+  // 用户菜单按钮的 aria-expanded 随开合更新。
+  const avatar = page.locator('#userAvatar');
+  await expect(avatar).toHaveAttribute('aria-haspopup', 'true');
+  await expect(avatar).toHaveAttribute('aria-expanded', 'false');
+  await avatar.click();
+  await expect(avatar).toHaveAttribute('aria-expanded', 'true');
+  await avatar.focus();
+  await page.keyboard.press('Escape');
+  await expect(avatar).toHaveAttribute('aria-expanded', 'false');
+
+  // 减少动态效果：无限循环背景动画被停用。
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('.bg-grid')).animationName)).toBe('none');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+  // --- 2. 节点表单与自动保存/排序竞态 ---
+  await page.evaluate(async () => {
+    window.v2State.config.proxies = [];
+    window.v2State.config.custom_rules = [];
+    window.v2State.config.custom_rule_providers = {};
+    window.saveChain.markDirty();
+    await window.saveChain.flushDraftSave();
+  });
+  await waitForSaved(page);
+  await page.locator('#step-tab-1').click();
+  const raceYaml = ['A', 'B', 'C'].map((suffix) => [
+    `  - name: Race-${suffix}`,
+    '    type: ss',
+    `    server: ${suffix.toLowerCase()}.example.com`,
+    '    port: 8388',
+    '    cipher: aes-128-gcm',
+    '    password: race-password',
+  ].join('\n'));
+  const raceImport = await importMethod(page, 'yaml', `proxies:\n${raceYaml.join('\n')}\n`);
+  expect(raceImport.status(), await raceImport.text()).toBe(200);
+  await waitForSaved(page);
+  await page.locator('#step-tab-2').click();
+  await expect(page.locator('#nodeGrid .node-card')).toHaveCount(3, { timeout: 15_000 });
+
+  const nodeForm = page.locator('#nodeFormPanel');
+  const cardFor = (name) => page.locator('#nodeGrid .node-card').filter({ hasText: name }).first();
+  await cardFor('Race-B').getByRole('button', { name: '编辑' }).click();
+  await expect(nodeForm).toBeVisible();
+  // 编辑中的节点禁止排序、删除与拖拽。
+  await expect(cardFor('Race-B').getByRole('button', { name: '上移' })).toBeDisabled();
+  await expect(cardFor('Race-B').getByRole('button', { name: '下移' })).toBeDisabled();
+  await expect(cardFor('Race-B').getByRole('button', { name: '删除' })).toBeDisabled();
+  expect(await cardFor('Race-B').getAttribute('draggable')).toBe('false');
+
+  const serverInput = nodeForm.getByLabel('服务器地址');
+  await serverInput.fill('race-b-edited.example.com');
+  // 表单未保存时移动另一个节点：编辑节点索引改变，且自动保存回包触发 renderAll。
+  const reorderSave = page.waitForResponse((item) => item.url() === `${baseURL}/api/config` && item.request().method() === 'PUT');
+  await cardFor('Race-C').getByRole('button', { name: '上移' }).click();
+  expect((await reorderSave).status()).toBe(200);
+  await waitForSaved(page);
+  // 回包不得重建表单，用户输入保留；锁定跟随节点到新位置。
+  await expect(serverInput).toHaveValue('race-b-edited.example.com');
+  await expect(cardFor('Race-B').getByRole('button', { name: '删除' })).toBeDisabled();
+  await nodeForm.getByRole('button', { name: '保存节点草稿' }).click();
+  await expect(nodeForm).toBeHidden({ timeout: 15_000 });
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.proxies.map((node) => `${node.name}@${node.server}`))).toEqual([
+    'Race-A@a.example.com',
+    'Race-C@c.example.com',
+    'Race-B@race-b-edited.example.com',
+  ]);
+
+  // /api/node/build 挂起期间保存回包整体替换 state.config：必须写回原节点，不能追加重复节点。
+  await cardFor('Race-A').getByRole('button', { name: '编辑' }).click();
+  await expect(nodeForm).toBeVisible();
+  await nodeForm.getByLabel('端口').fill('9555');
+  let releaseBuild;
+  const buildGate = new Promise((resolve) => { releaseBuild = resolve; });
+  await page.route(`${baseURL}/api/node/build`, async (route) => {
+    await buildGate;
+    await route.continue();
+  });
+  await nodeForm.getByRole('button', { name: '保存节点草稿' }).click();
+  await page.evaluate(async () => {
+    window.v2State.config.custom_rules = window.v2State.config.custom_rules.concat(['DOMAIN-SUFFIX,race.example.test,Proxy']);
+    window.saveChain.markDirty();
+    await window.saveChain.flushDraftSave();
+  });
+  releaseBuild();
+  await expect(nodeForm).toBeHidden({ timeout: 15_000 });
+  await page.unroute(`${baseURL}/api/node/build`);
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.proxies.map((node) => `${node.name}:${node.port}`))).toEqual([
+    'Race-A:9555',
+    'Race-C:8388',
+    'Race-B:8388',
+  ]);
+  expect(await state(page, () => window.v2State.config.custom_rules)).toContain('DOMAIN-SUFFIX,race.example.test,Proxy');
+
+  // --- 3. 退出登录清空上一用户的节点、订阅链接与管理员结果中的明文 Token ---
+  const temporaryUsername = `e2e-logout-${Date.now()}`;
+  await page.locator('#adminUsername').fill(temporaryUsername);
+  await page.locator('#adminPassword').fill(temporaryUserPassword);
+  await page.locator('#adminPanelHost').getByRole('button', { name: '创建用户' }).click();
+  const temporaryRow = page.locator('#adminPanelHost .admin-row').filter({ hasText: temporaryUsername }).first();
+  await expect(temporaryRow).toBeVisible({ timeout: 15_000 });
+  await temporaryRow.getByRole('button', { name: '重置 Token' }).click();
+  await expect(page.locator('#adminPanelHost .admin-result')).toContainText('Token：', { timeout: 15_000 });
+  const adminResultText = await page.locator('#adminPanelHost .admin-result').textContent();
+  const plainToken = String(adminResultText || '').split('Token：')[1].trim();
+  expect(plainToken.length).toBeGreaterThan(8);
+  const ownSubscriptionUrl = String(await page.locator('#subUrl').textContent());
+  expect(ownSubscriptionUrl).toContain('/sub/');
+
+  await avatar.click();
+  await page.locator('#userDropdown').getByRole('button', { name: '退出登录' }).click();
+  await expect(page.locator('#loginOverlay')).toHaveClass(/active/, { timeout: 15_000 });
+  await expect(page.locator('#loginUsername')).toBeFocused();
+  // 退出后登录层不得预填上一用户的明文密码（登录表单已在登录成功时重置，showAuthOverlay 再清空一次）。
+  await expect(page.locator('#loginPassword')).toHaveValue('');
+  await expect(page.locator('#loginUsername')).toHaveValue('');
+  await expect(page.locator('#nodeGrid .node-card')).toHaveCount(0);
+  await expect(page.locator('#subUrl')).toHaveText('尚未发布订阅');
+  await expect(page.locator('#adminPanelHost')).toBeHidden();
+  await expect(page.locator('#adminPanelHost .admin-result')).toHaveCount(0);
+  const bodyAfterLogout = await page.evaluate(() => document.body.textContent || '');
+  expect(bodyAfterLogout).not.toContain(plainToken);
+  expect(bodyAfterLogout).not.toContain(ownSubscriptionUrl);
+  expect(bodyAfterLogout).not.toContain('Race-A');
+  expect(await state(page, () => ({
+    authCsrf: Boolean(window.v2State.authCsrf),
+    csrfToken: window.v2State.csrfToken,
+    adminResult: window.v2State.adminResult,
+    proxies: window.v2State.config.proxies.length,
+  }))).toEqual({ authCsrf: true, csrfToken: '', adminResult: '', proxies: 0 });
+
+  // 退出后再登录：首个登录请求必须使用 auth 用途 token 直接成功。
+  await loginAs(adminUsername, adminPassword);
+  await expect(page.locator('#nodeGrid .node-card')).toHaveCount(3, { timeout: 15_000 });
+
+  // --- 4. 会话中途过期：弹出登录层，同一用户重登后可保留并保存未保存修改 ---
+  await page.locator('#step-tab-3').click();
+  await page.context().clearCookies();
+  tracker.allowResponse(
+    (responseItem, request) => request.method() === 'PUT' && responseItem.status() === 401 && responseItem.url() === `${baseURL}/api/config`,
+    '会话过期后的草稿保存被拒绝',
+    'Failed to load resource: the server responded with a status of 401 (Unauthorized)',
+  );
+  await page.locator('#ruleType').selectOption('DOMAIN-SUFFIX');
+  await page.locator('#ruleValue').fill('expired.example.test');
+  await page.locator('#ruleTarget').fill('Proxy');
+  await page.locator('#addRuleBtn').click();
+  await expect(page.locator('#loginOverlay')).toHaveClass(/active/, { timeout: 15_000 });
+  expect(await state(page, () => window.v2State.dirtyGeneration > window.v2State.savedGeneration)).toBe(true);
+  const keepDialog = new Promise((resolve) => {
+    page.once('dialog', async (dialog) => {
+      const message = dialog.message();
+      await dialog.accept();
+      resolve(message);
+    });
+  });
+  await loginAs(adminUsername, adminPassword);
+  expect(await keepDialog).toContain('登录过期前有尚未保存的修改');
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.custom_rules)).toContain('DOMAIN-SUFFIX,expired.example.test,Proxy');
+
+  tracker.assertClean();
+});
+
+test('V2 主页外置资源与 CSP（生产路径）：响应头收紧、无调试对象暴露且可正常登录使用', async ({ page }) => {
+  const violations = [];
+  page.on('console', (message) => {
+    if (/Content Security Policy|Refused to (?:execute|load|apply)/i.test(message.text())) violations.push(message.text());
+  });
+  await page.addInitScript(() => {
+    window.__cspViolations = [];
+    document.addEventListener('securitypolicyviolation', (event) => {
+      window.__cspViolations.push(`${event.violatedDirective} ${event.blockedURI}`);
+    });
+  });
+  const response = await page.goto(`${baseURL}/`, { waitUntil: 'load' });
+  expect(response?.status()).toBe(200);
+  const csp = response?.headers()['content-security-policy'] || '';
+  expect(csp).toContain("script-src 'self'");
+  await expect(page.locator('#loginOverlay')).toHaveClass(/active/);
+  // 生产路径不注入 __CCG_DEBUG__：内部状态与保存链不得挂到全局。
+  expect(await page.evaluate(() => ({ state: typeof window.v2State, chain: typeof window.saveChain }))).toEqual({ state: 'undefined', chain: 'undefined' });
+  const inline = await page.evaluate(() => ({
+    scripts: Array.from(document.querySelectorAll('script:not([src])')).length,
+    handlers: Array.from(document.querySelectorAll('*')).filter((el) => el.getAttributeNames().some((name) => name.startsWith('on'))).length,
+  }));
+  expect(inline).toEqual({ scripts: 0, handlers: 0 });
+  expect(await page.evaluate(() => window.__cspViolations)).toEqual([]);
+  expect(violations).toEqual([]);
+
+  // 生产路径下页面仍可正常登录并加载工作台。
+  await page.locator('#loginForm input[name="username"]').fill(adminUsername);
+  await page.locator('#loginForm input[name="password"]').fill(adminPassword);
+  await page.locator('#loginForm button[type="submit"]').click();
+  await expect(page.locator('#loginOverlay')).not.toHaveClass(/active/, { timeout: 15_000 });
+  await expect(page.locator('#userAvatar')).toHaveAttribute('title', adminUsername, { timeout: 15_000 });
+  await expect(page.locator('#draftStatus')).not.toHaveText('登录后加载你的独立草稿');
+  await page.locator('#step-tab-2').click();
+  await expect(page.locator('#step2')).toBeVisible();
+  expect(await page.evaluate(() => typeof window.v2State)).toBe('undefined');
+  expect(await page.evaluate(() => window.__cspViolations)).toEqual([]);
+});
+
+// 换号与迟到回包回归共用的辅助：以管理员身份创建一个普通用户。
+async function createPlainUser(page, username, password) {
+  const status = await page.evaluate(async ({ name, secret }) => {
+    const response = await fetch(`/api/users/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.v2State.csrfToken },
+      body: JSON.stringify({ password: secret, is_admin: false }),
+    });
+    return response.status;
+  }, { name: username, secret: password });
+  expect(status).toBe(200);
+}
+
+async function signInViaForm(page, username, password) {
+  await page.locator('#loginTabBtn').click();
+  await page.locator('#loginForm input[name="username"]').fill(username);
+  await page.locator('#loginForm input[name="password"]').fill(password);
+  await page.locator('#loginForm button[type="submit"]').click();
+  await expect(page.locator('#loginOverlay')).not.toHaveClass(/active/, { timeout: 15_000 });
+  await page.waitForFunction(
+    () => window.v2State && window.v2State.authenticated && !window.v2State.loading,
+    null,
+    { timeout: 15_000 },
+  );
+}
+
+test('V2 换号回归：会话过期后用另一账号登录应清空节点、订阅链接与 YAML 区', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+  const otherUser = `e2e-swap-${Date.now()}`;
+  await createPlainUser(page, otherUser, temporaryUserPassword);
+
+  await page.locator('#step-tab-1').click();
+  const imported = await importMethod(page, 'yaml', 'proxies:\n  - name: Swap-A\n    type: ss\n    server: swap-a.example.com\n    port: 8388\n    cipher: aes-128-gcm\n    password: swap-password\n');
+  expect(imported.status(), await imported.text()).toBe(200);
+  await waitForSaved(page);
+  await page.locator('#step-tab-4').click();
+  await page.locator('#validateBtn').click();
+  await expect(page.locator('#yamlWrap')).toHaveClass(/show/, { timeout: 30_000 });
+  await expect(page.locator('#yamlCode')).toContainText('Swap-A');
+  const adminSubscriptionUrl = String(await page.locator('#subUrl').textContent());
+  expect(adminSubscriptionUrl).toContain('/sub/');
+
+  // 会话过期：清 Cookie 后触发一次写入，弹出登录层。
+  await page.context().clearCookies();
+  await page.locator('#step-tab-3').click();
+  await page.locator('#ruleType').selectOption('DOMAIN-SUFFIX');
+  await page.locator('#ruleValue').fill('swap.example.test');
+  await page.locator('#ruleTarget').fill('Swap-Policy-A');
+  await page.locator('#addRuleBtn').click();
+  await expect(page.locator('#loginOverlay')).toHaveClass(/active/, { timeout: 15_000 });
+  await expect(page.locator('#loginPassword')).toHaveValue('');
+
+  // 换另一账号登录：上一用户的节点、订阅链接、YAML 与规则输入框都不得残留。
+  await signInViaForm(page, otherUser, temporaryUserPassword);
+  await expect(page.locator('#nodeGrid .node-card')).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator('#yamlCode')).not.toContainText('Swap-A');
+  await expect(page.locator('#yamlWrap')).not.toHaveClass(/show/);
+  expect(String(await page.locator('#subUrl').textContent())).not.toBe(adminSubscriptionUrl);
+  await expect(page.locator('#ruleValue')).toHaveValue('');
+  // 目标策略框被清空后 renderRules 会回填默认策略，只要不是上一用户填写的值即可。
+  await expect(page.locator('#ruleTarget')).not.toHaveValue('Swap-Policy-A');
+  const snapshot = await page.evaluate(() => ({
+    username: window.v2State.user && window.v2State.user.username,
+    proxies: window.v2State.config.proxies.length,
+    rules: window.v2State.config.custom_rules,
+    body: document.body.textContent || '',
+  }));
+  expect(snapshot.username).toBe(otherUser);
+  expect(snapshot.proxies).toBe(0);
+  expect(snapshot.rules.join('\n')).not.toContain('swap.example.test');
+  expect(snapshot.body).not.toContain('Swap-A');
+  expect(snapshot.body).not.toContain(adminSubscriptionUrl);
+});
+
+test('V2 迟到回包回归：/api/validate 挂起期间退出并换号登录，放行后不得写回上一用户 YAML', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+  const otherUser = `e2e-late-${Date.now()}`;
+  await createPlainUser(page, otherUser, temporaryUserPassword);
+
+  await page.locator('#step-tab-1').click();
+  const imported = await importMethod(page, 'yaml', 'proxies:\n  - name: Late-A\n    type: ss\n    server: late-a.example.com\n    port: 8388\n    cipher: aes-128-gcm\n    password: late-password\n');
+  expect(imported.status(), await imported.text()).toBe(200);
+  await waitForSaved(page);
+  await page.locator('#step-tab-4').click();
+
+  // 在发出请求时立即用 A 的会话取回真实回包，再挂起到换号之后才交给页面。
+  let releaseValidate;
+  const validateGate = new Promise((resolve) => { releaseValidate = resolve; });
+  let heldBody = '';
+  let validateHeld;
+  const validateIntercepted = new Promise((resolve) => { validateHeld = resolve; });
+  await page.route(`${baseURL}/api/validate`, async (route) => {
+    const upstream = await route.fetch();
+    heldBody = await upstream.text();
+    validateHeld();
+    await validateGate;
+    await route.fulfill({ response: upstream, body: heldBody });
+  });
+  await page.locator('#validateBtn').click();
+  await validateIntercepted;
+  expect(heldBody).toContain('Late-A');
+
+  await page.locator('#userAvatar').click();
+  await page.locator('#userDropdown').getByRole('button', { name: '退出登录' }).click();
+  await expect(page.locator('#loginOverlay')).toHaveClass(/active/, { timeout: 15_000 });
+  await expect(page.locator('#loginPassword')).toHaveValue('');
+  await signInViaForm(page, otherUser, temporaryUserPassword);
+  // 让新用户草稿代数与 A 发起校验时一致（均为 1），旧回包若未被丢弃就会通过代数比对并写入页面。
+  await page.locator('#step-tab-1').click();
+  const lateImport = await importMethod(page, 'yaml', 'proxies:\n  - name: Late-B\n    type: ss\n    server: late-b.example.com\n    port: 8388\n    cipher: aes-128-gcm\n    password: late-b-password\n');
+  expect(lateImport.status(), await lateImport.text()).toBe(200);
+  await waitForSaved(page);
+  await page.locator('#step-tab-4').click();
+
+  releaseValidate();
+  await page.waitForTimeout(800);
+  await page.unroute(`${baseURL}/api/validate`);
+  await expect(page.locator('#yamlCode')).not.toContainText('Late-A');
+  await expect(page.locator('#yamlWrap')).not.toHaveClass(/show/);
+  expect(await page.evaluate(() => ({
+    validation: window.v2State.validation,
+    proxies: window.v2State.config.proxies.map((node) => node.name),
+    validateInFlight: window.v2State.validateInFlight,
+  }))).toEqual({ validation: null, proxies: ['Late-B'], validateInFlight: false });
+  await expect(page.locator('#validateBtn')).toBeEnabled();
 });

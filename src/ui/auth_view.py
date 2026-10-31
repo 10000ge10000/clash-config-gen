@@ -103,3 +103,23 @@ def render_auth_gate(brand_mark_svg: str, project_url: str, documentation_url: s
         """
     )
     st.markdown(page_html, unsafe_allow_html=True)
+
+
+def refresh_auth_user(session_state, token: str, load_user) -> dict | None:
+    """每次 rerun 都按会话令牌重新校验，并用最新权限刷新 session_state.auth_user。
+
+    load_user 即 storage.get_user_by_auth_session：令牌无效、已吊销、过期或账号被禁用时返回 None。
+    校验失败必须清空缓存的用户，避免已打开的标签页继续持有旧权限。
+    """
+    user = load_user(token) if token else None
+    if not user or not user["is_enabled"]:
+        session_state["auth_user"] = None
+        session_state.pop("session_loaded_user_id", None)
+        return None
+    auth_user = {
+        "id": int(user["id"]),
+        "username": user["username"],
+        "is_admin": bool(user["is_admin"]),
+    }
+    session_state["auth_user"] = auth_user
+    return auth_user

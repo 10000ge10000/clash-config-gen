@@ -1,33 +1,38 @@
 import copy
-import difflib
 import hashlib
 import json
-import os
+import logging
 import re
-import shutil
-import tempfile
 import threading
-import time
-import uuid
-from contextlib import asynccontextmanager, contextmanager
+from collections import OrderedDict
+from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import quote
-
-if os.name == "nt":
-    import msvcrt
-else:
-    import fcntl
 
 import yaml
 from fastapi import FastAPI, Form, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from api_errors import _api_error_payload, _safe_error_text
 from auth import get_bool_env
-from config_builder import DEFAULT_RULE_TYPE, DUSTINWIN_PROVIDERS_MAP, LHIE1_PROVIDERS_MAP, is_no_base_rule_type
+from auth_service import (
+    AUTH_COOKIE_DAYS,
+    AUTH_COOKIE_NAME,
+    _auth_client_ip,
+    _auth_redirect,
+    _is_valid_auth_request,
+    _positive_int_env,
+    _register_rate_limit_window,
+    _register_rate_limited,
+    _request_session_binding,
+    _set_auth_cookie,
+    _try_login,
+)
+from config_builder import DEFAULT_RULE_TYPE, DUSTINWIN_PROVIDERS_MAP, is_no_base_rule_type
 from config_builder import (
-    build_config,
     build_subscription_headers,
     build_yaml,
     validate_config,
@@ -36,10 +41,19 @@ from config_defaults import (
     FULL_CLIENT_DNS_PRESET,
     GLOBAL_CONFIG_SCHEMA,
     OPENCLASH_ROUTER_SAFE_PRESET,
-    apply_v2_global_defaults,
-    build_default_global_config,
 )
 from diagnostics import build_subscription_diagnostics
+from draft_service import (
+    _build_draft_config,
+    _config_stats,
+    _draft_meta_warnings,
+    _merged_global_config,
+    _normalize_draft,
+    _provider_defaults,
+    _public_validation,
+    _run_validation,
+    _safe_targets_for_draft,
+)
 from importers import (
     fetch_text_from_external_url,
     normalize_subscription_content,
@@ -49,18 +63,40 @@ from importers import (
     tag_import_source,
     validate_ruleset_alias,
 )
-from mihomo_validator import validate_with_mihomo
 from node_builder import NODE_FORM_SCHEMA, build_manual_node
-from normalizer import normalize_proxies, normalize_proxies_for_mihomo
-from ruleset_updater import get_ruleset_cache_path, start_ruleset_update_worker
-from security import (
-    create_csrf_token,
-    is_trusted_request_origin,
-    request_client_ip,
-    validate_csrf_token,
+from normalizer import normalize_proxies_for_mihomo
+from ruleset_store import (
+    MAX_RULESET_UPLOAD_BYTES,
+    RULESET_BEHAVIORS,
+    RULESET_EXTENSIONS,
+    RULESET_FORMATS,
+    RULESET_ORDERS,
+    _cleanup_unreferenced_user_rulesets,
+    _delete_user_with_rulesets,
+    _has_any_user,
+    _materialize_private_urls_in_draft,
+    _materialize_private_urls_in_loaded_config,
+    _parse_versioned_ruleset_filename,
+    _private_ruleset_filename,
+    _promote_referenced_pending_rulesets,
+    _referenced_user_rulesets_for_config,
+    _reload_admin_actor_locked,
+    _reload_ruleset_user,
+    _reserve_pending_ruleset,
+    _retry_ruleset_tombstones,
+    _ruleset_format_from_extension,
+    _ruleset_user_dir,
+    _ruleset_user_lock,
+    _safe_user_ruleset_target,
+    _toggle_user_with_admin,
+    _user_ruleset_provider_path,
+    _user_ruleset_url,
+    _versioned_ruleset_filename,
+    _write_user_ruleset_atomic,
 )
+from ruleset_updater import get_ruleset_cache_path, start_ruleset_update_worker
+from security import create_csrf_token, csrf_session_binding, ensure_csrf_secret
 from storage import (
-    authenticate_user,
     create_auth_session,
     create_user,
     delete_regular_user,
@@ -68,103 +104,173 @@ from storage import (
     get_config_by_token,
     get_public_base_url,
     get_user_by_auth_session,
-    get_user_by_id,
     get_user_config,
     health_snapshot,
     init_db,
     list_users,
-    recent_login_failure_counts,
     record_auth_audit_event,
     reset_subscription_token,
     revoke_auth_session,
     save_user_config_atomic,
     save_user_draft,
-    set_user_enabled,
     validate_new_user_credentials,
 )
 from ui.time_display import format_beijing_time
 
 
+LOGGER = logging.getLogger(__name__)
+
+# 访问日志中的订阅 token 等同于订阅凭据：/sub/<token>、/ruleset/user/<token>/...
+# 一律替换为 <redacted>。/sub/auth/、/sub/assets/ 是固定路由，不是 token。
+_ACCESS_LOG_TOKEN_PATTERNS = (
+    re.compile(r"(/sub/)(?!(?:auth|assets)(?:[/?#\s\"]|$))[^/?#\s\"]+"),
+    re.compile(r"(/ruleset/user/)[^/?#\s\"]+"),
+)
+
+
+def _redact_access_log_text(value: str) -> str:
+    for pattern in _ACCESS_LOG_TOKEN_PATTERNS:
+        value = pattern.sub(r"\1<redacted>", value)
+    return value
+
+
+class _AccessLogTokenFilter(logging.Filter):
+    """只改写 uvicorn.access 记录中的路径参数，不丢弃任何日志。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and args:
+            record.args = tuple(
+                _redact_access_log_text(item) if isinstance(item, str) else item
+                for item in args
+            )
+        elif isinstance(args, dict) and args:
+            record.args = {
+                key: _redact_access_log_text(item) if isinstance(item, str) else item
+                for key, item in args.items()
+            }
+        elif isinstance(record.msg, str):
+            record.msg = _redact_access_log_text(record.msg)
+        return True
+
+
+def _install_access_log_filter() -> None:
+    """幂等安装；uvicorn 的 dictConfig 不会移除 logger 上已有的 filter。"""
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(item, _AccessLogTokenFilter) for item in access_logger.filters):
+        access_logger.addFilter(_AccessLogTokenFilter())
+
+
+_install_access_log_filter()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    _install_access_log_filter()
+    if not get_public_base_url():
+        raise RuntimeError(
+            "未配置 PUBLIC_BASE_URL：订阅链接、规则集缓存地址和 Origin 校验都依赖对外访问地址，"
+            "请在环境变量或 .env 中设置，例如 PUBLIC_BASE_URL=https://sub.example.com"
+        )
+    # CSRF_SECRET 缺失或仍是示例值时直接启动失败，而不是等到首个表单/API 请求才 500。
+    ensure_csrf_secret()
     init_db()
+    # 必须在 ensure_admin_from_env 之前判断：数据卷未挂载时新库会立刻被
+    # 环境变量管理员“填充”，之后再判断就无法识别出这是一个空库。
+    had_users = _has_any_user()
     ensure_admin_from_env()
-    _retry_ruleset_tombstones()
+    if had_users:
+        _retry_ruleset_tombstones()
+    else:
+        LOGGER.warning("用户表为空（新数据库或数据卷未挂载），已跳过启动时的规则集孤儿清理")
     start_ruleset_update_worker()
     yield
 
 
-app = FastAPI(title="Clash-Config-Gen Subscription API", lifespan=lifespan)
-AUTH_COOKIE_NAME = "clash_config_gen_session"
-AUTH_COOKIE_DAYS = 30
+# 关闭自动文档：CSP 不放行 Swagger UI 的 CDN 脚本，且无需对公网暴露接口结构。
+app = FastAPI(
+    title="Clash-Config-Gen Subscription API",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 AUTH_ASSET_PATH = Path(__file__).with_name("assets") / "auth-future-city.png"
+# 本地开发时 design/ 位于仓库根目录；镜像内 src/ 与 design/ 平铺在同一工作目录。
 V2_PREVIEW_CANDIDATES = [
-    Path(__file__).resolve().parent.parent / "design" / "v2-preview.html",
-    Path(__file__).with_name("design") / "v2-preview.html",
+    Path(__file__).resolve().parent.parent / "design" / "index.html",
+    Path(__file__).with_name("design") / "index.html",
 ]
+UI_ASSET_DIR_CANDIDATES = [
+    Path(__file__).resolve().parent.parent / "design" / "assets",
+    Path(__file__).with_name("design") / "assets",
+]
+# /ui/ 只放行这两个静态文件，不接受路径参数，杜绝目录遍历。
+UI_ASSET_MEDIA_TYPES = {
+    "app.css": "text/css; charset=utf-8",
+    "app.js": "text/javascript; charset=utf-8",
+}
 
 # /api 变更类请求统一使用这个 CSRF action，前端从 /api/session 领取。
 API_CSRF_ACTION = "api"
 
-
-def _is_api_request(request: Request) -> bool:
-    return request.url.path == "/api" or request.url.path.startswith("/api/")
-
-
-_SECRET_ERROR_PATTERN = re.compile(
-    r"(?i)(password|passwd|secret|token|private[-_ ]?key|access[-_ ]?key)"
-    r"\s*[:=]\s*([^,;\s}]+)"
+# 主页脚本已外置到 /ui/app.js，script-src 不再放行内联脚本；页面仍有内联 style 属性，
+# 因此 style-src 保留 'unsafe-inline'。生产在 Cloudflare 后会注入 Web Analytics
+# beacon，所以放行 static.cloudflareinsights.com（脚本）与 cloudflareinsights.com（上报）。
+# Referrer-Policy 必须保留同源 Referer，Origin/Referer 校验依赖它。
+_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' https://static.cloudflareinsights.com; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self' data:; "
+    "connect-src 'self' https://cloudflareinsights.com; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "object-src 'none'; "
+    "form-action 'self'"
 )
-_SECRET_DETAIL_KEYS = {
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "private-key",
-    "private_key",
-    "access-key",
-    "access_key",
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": _CONTENT_SECURITY_POLICY,
 }
 
 
-def _safe_error_text(value: object, fallback: str = "请求失败") -> str:
-    """把内部异常转换为不含凭据的短错误文本。"""
-    text = str(value or "").strip()
-    text = _SECRET_ERROR_PATTERN.sub(r"\1=[已隐藏]", text)
-    # 避免 traceback/路径/超长响应被错误地回显到 API。
-    text = text.replace("\x00", "")[:1000]
-    return text or fallback
+def _apply_security_headers(headers) -> None:
+    """只在缺失时补齐安全头（含 HTTPS 下的 HSTS）；中间件与 500 处理器共用。"""
+    for name, value in _SECURITY_HEADERS.items():
+        headers.setdefault(name, value)
+    if get_public_base_url().lower().startswith("https://"):
+        headers.setdefault("Strict-Transport-Security", "max-age=31536000")
 
 
-def _redact_error_details(value: object):
-    if isinstance(value, dict):
-        return {
-            key: _redact_error_details(item)
-            for key, item in value.items()
-            if str(key).lower() not in _SECRET_DETAIL_KEYS
-        }
-    if isinstance(value, list):
-        return [_redact_error_details(item) for item in value]
-    if isinstance(value, tuple):
-        return [_redact_error_details(item) for item in value]
-    if isinstance(value, str):
-        return _safe_error_text(value)
-    return value
+class _SecurityHeadersMiddleware:
+    """纯 ASGI 中间件：只在响应头缺失时补齐，不改写路由自己设置的值。"""
+
+    def __init__(self, asgi_app):
+        self.app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_security_headers(message):
+            if message["type"] == "http.response.start":
+                _apply_security_headers(MutableHeaders(scope=message))
+            await send(message)
+
+        await self.app(scope, receive, send_with_security_headers)
 
 
-def _api_error_payload(detail: object, fallback: str = "请求失败") -> dict:
-    if isinstance(detail, dict):
-        error = _safe_error_text(detail.get("error") or detail.get("message"), fallback)
-        extra = {
-            key: _redact_error_details(value)
-            for key, value in detail.items()
-            if key not in {"error", "message"}
-        }
-        payload = {"ok": False, "error": error}
-        if extra:
-            payload["details"] = extra
-        return payload
-    return {"ok": False, "error": _safe_error_text(detail, fallback)}
+app.add_middleware(_SecurityHeadersMiddleware)
+
+
+def _is_api_request(request: Request) -> bool:
+    return request.url.path == "/api" or request.url.path.startswith("/api/")
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -209,16 +315,29 @@ async def api_request_validation_exception_handler(request: Request, exc: Reques
 
 @app.exception_handler(Exception)
 async def api_unhandled_exception_handler(request: Request, _exc: Exception):
+    # Exception 处理器由最外层 ServerErrorMiddleware 调用，响应不经过安全头中间件，需在此显式补齐。
     if _is_api_request(request):
-        return JSONResponse(status_code=500, content={"ok": False, "error": "服务器内部错误"})
-    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+        response = JSONResponse(status_code=500, content={"ok": False, "error": "服务器内部错误"})
+    else:
+        response = JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+    try:
+        _apply_security_headers(response.headers)
+    except Exception:
+        # 补头失败（如读取配置异常）时仍返回 500，避免在错误处理器里再次抛错。
+        LOGGER.exception("500 响应补充安全头失败")
+    return response
 
 
 @app.get("/v2")
 def v2_preview_page():
     for candidate in V2_PREVIEW_CANDIDATES:
         if candidate.is_file():
-            return FileResponse(candidate, media_type="text/html; charset=utf-8")
+            return FileResponse(
+                candidate,
+                media_type="text/html; charset=utf-8",
+                # 主页随版本更新，必须每次向服务端确认，避免旧前端配新接口。
+                headers={"Cache-Control": "no-cache"},
+            )
     raise HTTPException(status_code=404, detail="V2 预览页不存在")
 
 
@@ -228,46 +347,43 @@ def root_v2_page():
     return v2_preview_page()
 
 
+def _ui_asset_response(filename: str) -> FileResponse:
+    """返回主页白名单静态资源；文件名只来自路由常量，不来自请求路径。"""
+    media_type = UI_ASSET_MEDIA_TYPES[filename]
+    for asset_dir in UI_ASSET_DIR_CANDIDATES:
+        candidate = asset_dir / filename
+        if candidate.is_file():
+            return FileResponse(
+                candidate,
+                media_type=media_type,
+                # 与主页同步更新，同样每次向服务端确认，避免新旧 HTML/JS 混用。
+                headers={"Cache-Control": "no-cache"},
+            )
+    raise HTTPException(status_code=404, detail="主页静态资源不存在")
+
+
+@app.get("/ui/app.css")
+def ui_app_css():
+    return _ui_asset_response("app.css")
+
+
+@app.get("/ui/app.js")
+def ui_app_js():
+    return _ui_asset_response("app.js")
+
+
 @app.get("/health")
-def health_check():
-    return health_snapshot()
-
-
-def _auth_redirect(message: str = "") -> RedirectResponse:
-    target = "/" if not message else f"/?auth_error={quote(message)}"
-    return RedirectResponse(target, status_code=303)
-
-
-def _set_auth_cookie(response: Response, token: str, remember: bool) -> None:
-    response.set_cookie(
-        key=AUTH_COOKIE_NAME,
-        value=token,
-        max_age=AUTH_COOKIE_DAYS * 86400 if remember else None,
-        httponly=True,
-        secure=get_bool_env("AUTH_COOKIE_SECURE", True),
-        samesite="lax",
-        path="/",
-    )
-
-
-def _auth_client_ip(request: Request) -> str:
-    peer_ip = request.client.host if request.client else ""
-    return request_client_ip(peer_ip, request.headers.get("x-forwarded-for", ""))
-
-
-def _is_valid_auth_request(request: Request, csrf_token: str, action: str) -> bool:
-    return is_trusted_request_origin(
-        request.headers.get("origin", ""),
-        request.headers.get("referer", ""),
-        get_public_base_url(),
-    ) and validate_csrf_token(csrf_token, action)
-
-
-def _positive_int_env(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.getenv(name, str(default))))
-    except ValueError:
-        return default
+def health_check(request: Request):
+    snapshot = health_snapshot()
+    session_user = get_user_by_auth_session(request.cookies.get(AUTH_COOKIE_NAME, ""))
+    if session_user and bool(session_user["is_admin"]):
+        return snapshot
+    # 未认证（含普通用户）只暴露探活所需的状态，不泄露数据库路径和用户规模。
+    return {
+        "status": snapshot.get("status", "ok"),
+        "database_ok": True,
+        "public_base_url_configured": bool(snapshot.get("public_base_url")),
+    }
 
 
 @app.get("/sub/assets/auth-future-city.png")
@@ -307,34 +423,6 @@ def login(
     return _auth_redirect(result["error"])
 
 
-def _try_login(username: str, password: str, persistent: bool, client_ip: str) -> dict:
-    """供表单登录与 JSON 登录共用的认证逻辑；返回统一结果字典。"""
-    normalized_username = username.strip().lower()
-    window_seconds = _positive_int_env("AUTH_RATE_LIMIT_WINDOW_SECONDS", 900)
-    account_limit = _positive_int_env("AUTH_RATE_LIMIT_ACCOUNT_FAILURES", 5)
-    ip_limit = _positive_int_env("AUTH_RATE_LIMIT_IP_FAILURES", 20)
-    account_failures, ip_failures = recent_login_failure_counts(
-        normalized_username,
-        client_ip,
-        window_seconds,
-    )
-    if account_failures >= account_limit or ip_failures >= ip_limit:
-        record_auth_audit_event("login_blocked", normalized_username, client_ip, False, "rate_limit")
-        return {"ok": False, "blocked": True, "error": "登录尝试过于频繁，请稍后再试。"}
-
-    user = authenticate_user(username, password)
-    if not user:
-        record_auth_audit_event("login", normalized_username, client_ip, False, "invalid_credentials")
-        return {"ok": False, "blocked": False, "error": "用户名或密码错误，或账号已被禁用。"}
-
-    token = create_auth_session(
-        int(user["id"]),
-        days=AUTH_COOKIE_DAYS if persistent else 1,
-    )
-    record_auth_audit_event("login", str(user["username"]), client_ip, True, "authenticated")
-    return {"ok": True, "token": token, "persistent": persistent, "user": user}
-
-
 @app.post("/sub/auth/register")
 def register(
     request: Request,
@@ -351,6 +439,11 @@ def register(
     if not get_bool_env("ALLOW_REGISTRATION", False):
         record_auth_audit_event("register", normalized_username, client_ip, False, "registration_disabled")
         return _auth_redirect("当前部署已关闭公开注册，请联系管理员创建账号。")
+    if _register_rate_limited(client_ip):
+        record_auth_audit_event("register_blocked", normalized_username, client_ip, False, "rate_limit")
+        response = _auth_redirect("注册尝试过于频繁，请稍后再试。")
+        response.headers["Retry-After"] = str(_register_rate_limit_window())
+        return response
     if password != password_confirm:
         record_auth_audit_event("register", normalized_username, client_ip, False, "password_mismatch")
         return _auth_redirect("两次输入的密码不一致。")
@@ -462,46 +555,53 @@ def get_user_ruleset(token: str, user_id: int, filename: str):
     )
 
 
-def _materialize_private_provider_urls(user_id: int, token: str, providers: object) -> bool:
-    """Rewrite only current-user private provider URLs to the active token."""
-    if not isinstance(providers, dict):
-        return False
-    changed = False
-    for provider in providers.values():
-        if not isinstance(provider, dict):
-            continue
-        filename = _private_ruleset_filename(user_id, str(provider.get("path") or ""))
-        if not filename:
-            continue
-        next_url = _user_ruleset_url(token, user_id, filename)
-        if provider.get("url") != next_url:
-            provider["url"] = next_url
-            changed = True
-        # Private providers are fetched by the subscription client itself;
-        # never let a stale/edited draft route them through a dummy proxy.
-        if provider.get("proxy") != "DIRECT":
-            provider["proxy"] = "DIRECT"
-            changed = True
-    return changed
+# 订阅正文缓存：键包含 token、用户、规则类型与已发布 YAML 的摘要，
+# 重新发布（YAML 变化）或重置 token 后天然不再命中，无需显式失效。
+# 只缓存校验通过的结果；错误路径每次都重新计算。
+_SUBSCRIPTION_CACHE: "OrderedDict[tuple, tuple[str, int, int]]" = OrderedDict()
+_SUBSCRIPTION_CACHE_GUARD = threading.Lock()
+_SUBSCRIPTION_CACHE_MAX_ENTRIES = 32
 
 
-def _materialize_private_urls_in_draft(user: dict, draft: dict, token: str | None = None) -> bool:
-    active_token = token
-    if active_token is None:
-        active_token = str(_load_saved_config(user).get("token") or "")
-    return _materialize_private_provider_urls(
-        int(user["id"]),
-        str(active_token or ""),
-        draft.get("custom_rule_providers") if isinstance(draft, dict) else {},
-    )
-
-
-def _materialize_private_urls_in_loaded_config(config: dict, loaded_config: dict) -> bool:
-    return _materialize_private_provider_urls(
-        int(config.get("user_id") or 0),
+def _subscription_cache_key(config: dict, final_yaml: str) -> tuple:
+    return (
         str(config.get("token") or ""),
-        loaded_config.get("rule-providers") if isinstance(loaded_config, dict) else {},
+        int(config.get("user_id") or 0),
+        str(config.get("selected_rule_type") or ""),
+        hashlib.sha256(final_yaml.encode("utf-8")).hexdigest(),
     )
+
+
+def _subscription_cache_get(key: tuple) -> tuple[str, int, int] | None:
+    with _SUBSCRIPTION_CACHE_GUARD:
+        cached = _SUBSCRIPTION_CACHE.get(key)
+        if cached is not None:
+            _SUBSCRIPTION_CACHE.move_to_end(key)
+        return cached
+
+
+def _subscription_cache_put(key: tuple, value: tuple[str, int, int]) -> None:
+    with _SUBSCRIPTION_CACHE_GUARD:
+        _SUBSCRIPTION_CACHE[key] = value
+        _SUBSCRIPTION_CACHE.move_to_end(key)
+        while len(_SUBSCRIPTION_CACHE) > _SUBSCRIPTION_CACHE_MAX_ENTRIES:
+            _SUBSCRIPTION_CACHE.popitem(last=False)
+
+
+def _load_subscription_yaml(final_yaml: str) -> dict:
+    """解析已发布 YAML；详情只写日志，非 /api 响应只返回通用提示。"""
+    try:
+        loaded_config = yaml.safe_load(final_yaml)
+    except Exception as exc:
+        # YAML 异常文本会带出出错行原文（可能含节点密码），日志只记类型与位置。
+        mark = getattr(exc, "problem_mark", None)
+        position = f"line {mark.line + 1}, column {mark.column + 1}" if mark is not None else "unknown"
+        LOGGER.warning("订阅 YAML 解析失败: %s at %s", type(exc).__name__, position)
+        raise HTTPException(status_code=500, detail="订阅配置已损坏，请重新发布配置") from exc
+    if not isinstance(loaded_config, dict):
+        LOGGER.warning("订阅 YAML 顶层结构不是字典: %s", type(loaded_config).__name__)
+        raise HTTPException(status_code=500, detail="订阅配置已损坏，请重新发布配置")
+    return loaded_config
 
 
 def _build_subscription_response(token: str, include_body: bool = True) -> Response:
@@ -513,36 +613,51 @@ def _build_subscription_response(token: str, include_body: bool = True) -> Respo
     if not final_yaml.strip():
         raise HTTPException(status_code=409, detail="该用户尚未保存可用配置")
 
-    try:
-        loaded_config = yaml.safe_load(final_yaml)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"订阅 YAML 已损坏: {exc}") from exc
-    if not isinstance(loaded_config, dict):
-        raise HTTPException(status_code=500, detail="订阅 YAML 顶层结构不是字典")
+    cache_key = _subscription_cache_key(config, final_yaml)
+    cached = _subscription_cache_get(cache_key)
+    if cached is not None:
+        body_yaml, proxy_count, group_count = cached
+        return Response(
+            content=body_yaml if include_body else "",
+            media_type="application/x-yaml; charset=utf-8",
+            headers=build_subscription_headers(proxy_count, group_count),
+        )
+
+    loaded_config = _load_subscription_yaml(final_yaml)
 
     materialized_urls = _materialize_private_urls_in_loaded_config(config, loaded_config)
 
     proxies = loaded_config.get("proxies") or []
+    needs_rebuild = materialized_urls
     if isinstance(proxies, list):
         loaded_config["proxies"] = normalize_proxies_for_mihomo(
             [proxy for proxy in proxies if isinstance(proxy, dict)]
         )
-        final_yaml = build_yaml(loaded_config)
-    elif materialized_urls:
-        final_yaml = build_yaml(loaded_config)
+        needs_rebuild = True
 
     errors, _warnings = validate_config(
         loaded_config,
         allow_no_match=is_no_base_rule_type(config.get("selected_rule_type")),
     )
     if errors:
-        raise HTTPException(status_code=409, detail=f"该用户保存的配置未通过可用性检查: {'; '.join(errors)}")
+        LOGGER.warning("订阅配置未通过可用性检查（user_id=%s）: %s", config.get("user_id"), _safe_error_text("; ".join(errors)))
+        raise HTTPException(status_code=409, detail="该用户保存的配置未通过可用性检查，请在管理界面重新校验并发布")
 
     proxy_count = len(loaded_config.get("proxies") or [])
     group_count = len(loaded_config.get("proxy-groups") or [])
+    if not include_body:
+        # HEAD 只需要状态码与元信息头（节点/策略组计数），跳过 YAML 序列化。
+        return Response(
+            content="",
+            media_type="application/x-yaml; charset=utf-8",
+            headers=build_subscription_headers(proxy_count, group_count),
+        )
 
+    if needs_rebuild:
+        final_yaml = build_yaml(loaded_config)
+    _subscription_cache_put(cache_key, (final_yaml, proxy_count, group_count))
     return Response(
-        content=final_yaml if include_body else "",
+        content=final_yaml,
         media_type="application/x-yaml; charset=utf-8",
         headers=build_subscription_headers(proxy_count, group_count),
     )
@@ -555,12 +670,7 @@ def _subscription_snapshot(token: str) -> tuple[dict, dict, str]:
     final_yaml = config.get("final_yaml") or ""
     if not final_yaml.strip():
         raise HTTPException(status_code=409, detail="该用户尚未保存可用配置")
-    try:
-        loaded_config = yaml.safe_load(final_yaml)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"订阅 YAML 已损坏: {exc}") from exc
-    if not isinstance(loaded_config, dict):
-        raise HTTPException(status_code=500, detail="订阅 YAML 顶层结构不是字典")
+    loaded_config = _load_subscription_yaml(final_yaml)
     if _materialize_private_urls_in_loaded_config(config, loaded_config):
         final_yaml = build_yaml(loaded_config)
     return config, loaded_config, final_yaml
@@ -596,111 +706,7 @@ def get_subscription_diagnostics(token: str):
 # /api JSON 端点（V2 前端真实功能）
 # ==========================================
 
-MAX_DRAFT_PROXIES = 500
 MAX_DRAFT_BODY_BYTES = 2 * 1024 * 1024
-MAX_RULESET_UPLOAD_BYTES = 4 * 1024 * 1024
-MAX_RULESET_USER_BYTES = 32 * 1024 * 1024
-MAX_RULESET_USER_FILES = 100
-BUILTIN_TARGETS = (
-    "DIRECT",
-    "REJECT",
-    "REJECT-DROP",
-    "PASS",
-    "Proxy",
-    "Domestic",
-    "Others",
-)
-RULESET_EXTENSIONS = {"list", "yaml", "yml", "txt", "text", "mrs"}
-RULESET_FORMATS = {"text", "yaml", "mrs"}
-RULESET_BEHAVIORS = {"classical", "domain", "ipcidr"}
-RULESET_ORDERS = {"优先 (覆盖)", "默认 (追加)", "追加", "prepend", "append"}
-RULESET_FORMAT_EXTENSIONS = {"text": "txt", "yaml": "yaml", "mrs": "mrs"}
-
-# 规则集上传需要在“配额检查 → 临时文件写入 → os.replace”整个窗口内
-# 对同一用户串行化。threading.Lock 只解决同进程并发，文件锁同时覆盖
-# FastAPI 与 Streamlit 两个进程；锁文件只存放在 RULESET_DIR/.locks/ 下。
-_RULESET_USER_LOCKS: dict[int, threading.Lock] = {}
-_RULESET_USER_LOCKS_GUARD = threading.Lock()
-
-
-def _ruleset_lock_dir() -> Path:
-    """Return the private, application-owned directory for process locks."""
-    base_dir = Path(_ruleset_dir()).resolve()
-    lexical_lock_dir = base_dir / ".locks"
-    if lexical_lock_dir.is_symlink():
-        raise ValueError("规则集锁目录不能是符号链接")
-    lock_dir = lexical_lock_dir.resolve()
-    if base_dir not in lock_dir.parents:
-        raise ValueError("规则集锁目录路径越界")
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    if lock_dir.is_symlink() or not lock_dir.is_dir():
-        raise ValueError("规则集锁目录不是安全目录")
-    return lock_dir
-
-
-def _acquire_ruleset_file_lock(handle) -> None:
-    """Acquire one byte in a lock file using only the standard library."""
-    handle.seek(0)
-    if handle.tell() == 0 and handle.seek(0, os.SEEK_END) == 0:
-        handle.write(b"0")
-        handle.flush()
-        handle.seek(0)
-    else:
-        handle.seek(0)
-
-    if os.name == "nt":
-        # msvcrt locking is per-process and needs a real byte in the file.
-        # Non-blocking attempts avoid msvcrt's implementation-dependent retry
-        # interval while still making the context manager block reliably.
-        while True:
-            try:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                return
-            except OSError:
-                time.sleep(0.05)
-    else:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-
-
-def _release_ruleset_file_lock(handle) -> None:
-    try:
-        handle.seek(0)
-        if os.name == "nt":
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        # Closing the descriptor below still releases an advisory lock.  Do
-        # not mask the original exception from the protected operation.
-        pass
-
-
-@contextmanager
-def _ruleset_user_lock(user_id: int):
-    """Serialize one user's ruleset lifecycle across threads and processes."""
-    numeric_id = int(user_id)
-    if numeric_id < 1:
-        raise ValueError("用户 ID 无效")
-    with _RULESET_USER_LOCKS_GUARD:
-        thread_lock = _RULESET_USER_LOCKS.setdefault(numeric_id, threading.Lock())
-    with thread_lock:
-        lock_dir = _ruleset_lock_dir()
-        lock_path = lock_dir / f"{numeric_id}.lock"
-        if lock_path.is_symlink():
-            raise ValueError("规则集用户锁不能是符号链接")
-        try:
-            if lock_path.resolve().parent != lock_dir:
-                raise ValueError("规则集用户锁路径越界")
-        except OSError as exc:
-            raise ValueError("规则集用户锁路径无效") from exc
-        handle = lock_path.open("a+b")
-        try:
-            _acquire_ruleset_file_lock(handle)
-            yield
-        finally:
-            _release_ruleset_file_lock(handle)
-            handle.close()
 
 
 def _require_api_user(request: Request) -> dict:
@@ -712,31 +718,22 @@ def _require_api_user(request: Request) -> dict:
     return dict(user)
 
 
-def _reload_ruleset_user(user_id: int) -> dict:
-    """Reload a user after acquiring the ruleset lifecycle guard."""
-    current = get_user_by_id(int(user_id))
-    if current is None:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    if not bool(current["is_enabled"]):
-        raise HTTPException(status_code=409, detail="用户已被禁用")
-    return dict(current)
-
-
-def _reload_admin_actor_locked(actor_id: int) -> dict:
-    """Re-read the administrator inside a target-user lifecycle guard."""
-    actor = get_user_by_id(int(actor_id))
-    if actor is None or not bool(actor["is_enabled"]):
-        raise HTTPException(status_code=401, detail="管理员会话已失效")
-    if not bool(actor["is_admin"]):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    return dict(actor)
-
-
 def _require_api_csrf(request: Request) -> None:
-    """/api 变更请求统一校验 Origin + CSRF Token；失败返回 403。"""
+    """/api 变更请求统一校验 Origin + CSRF Token；失败返回 403。
+
+    api 用途 token 绑定签发时的会话：多标签页换号后，旧标签页持有的旧账号 token
+    配新账号 Cookie 会因摘要不一致被拒，避免把 A 的草稿写进 B。
+    """
     token = request.headers.get("x-csrf-token", "")
-    if not _is_valid_auth_request(request, token, API_CSRF_ACTION):
+    if not _is_valid_auth_request(request, token, API_CSRF_ACTION, binding=_request_session_binding(request)):
         raise HTTPException(status_code=403, detail="请求验证失败，请刷新页面后重试")
+
+
+def _require_api_user_and_csrf(request: Request) -> dict:
+    """会话（读库）+ CSRF 校验，供 async 路由经线程池调用。"""
+    user = _require_api_user(request)
+    _require_api_csrf(request)
+    return user
 
 
 def _api_user_safe_dict(user: dict) -> dict:
@@ -755,14 +752,24 @@ def api_session(request: Request):
         "ok": True,
         "authenticated": bool(user),
         "user": _api_user_safe_dict(dict(user)) if user else None,
-        "csrf_token": create_csrf_token(API_CSRF_ACTION if user else "auth"),
+        # 已登录：api token 绑定当前会话；未登录：auth token 不绑定。
+        "csrf_token": (
+            create_csrf_token(API_CSRF_ACTION, binding=csrf_session_binding(session_token))
+            if user
+            else create_csrf_token("auth")
+        ),
         "allow_registration": get_bool_env("ALLOW_REGISTRATION", False),
     }
 
 
 @app.post("/api/auth/login")
 async def api_login(request: Request):
+    # 只在事件循环里读取请求体；PBKDF2 与数据库访问放到线程池。
     body = await _read_json_body(request)
+    return await run_in_threadpool(_api_login_sync, request, body)
+
+
+def _api_login_sync(request: Request, body: dict) -> JSONResponse:
     client_ip = _auth_client_ip(request)
     username = body.get("username")
     password = body.get("password")
@@ -794,7 +801,8 @@ async def api_login(request: Request):
         content={
             "ok": True,
             "user": _api_user_safe_dict(dict(result["user"])),
-            "csrf_token": create_csrf_token(API_CSRF_ACTION),
+            # 绑定本次登录新签发的会话（即将写入 Cookie 的 token）。
+            "csrf_token": create_csrf_token(API_CSRF_ACTION, binding=csrf_session_binding(result["token"])),
         },
         status_code=200,
     )
@@ -805,6 +813,10 @@ async def api_login(request: Request):
 @app.post("/api/auth/register")
 async def api_register(request: Request):
     body = await _read_json_body(request)
+    return await run_in_threadpool(_api_register_sync, request, body)
+
+
+def _api_register_sync(request: Request, body: dict) -> JSONResponse:
     client_ip = _auth_client_ip(request)
     username = body.get("username")
     password = body.get("password")
@@ -820,6 +832,13 @@ async def api_register(request: Request):
     if not get_bool_env("ALLOW_REGISTRATION", False):
         record_auth_audit_event("register", str(username or "").strip().lower(), client_ip, False, "registration_disabled")
         raise HTTPException(status_code=403, detail="当前部署已关闭公开注册")
+    if _register_rate_limited(client_ip):
+        record_auth_audit_event("register_blocked", username.strip().lower(), client_ip, False, "rate_limit")
+        raise HTTPException(
+            status_code=429,
+            detail="注册尝试过于频繁，请稍后再试",
+            headers={"Retry-After": str(_register_rate_limit_window())},
+        )
 
     if password != password_confirm:
         record_auth_audit_event("register", username.strip().lower(), client_ip, False, "password_mismatch")
@@ -845,7 +864,7 @@ async def api_register(request: Request):
         content={
             "ok": True,
             "user": _api_user_safe_dict(dict(user)),
-            "csrf_token": create_csrf_token(API_CSRF_ACTION),
+            "csrf_token": create_csrf_token(API_CSRF_ACTION, binding=csrf_session_binding(token)),
         },
         status_code=200,
     )
@@ -881,13 +900,27 @@ def api_logout(request: Request):
 
 
 async def _read_json_body(request: Request) -> dict:
-    """读取 JSON 请求体，区分空请求与格式错误，并统一限制请求大小。"""
+    """读取 JSON 请求体，区分空请求与格式错误，并统一限制请求大小。
+
+    流式累加，超过上限立即 413，不会先把超大请求体整体读入内存。
+    """
+    too_large = HTTPException(status_code=413, detail="请求体超过 2MB，请精简节点后重试")
+    declared_length = request.headers.get("content-length", "")
+    if declared_length.strip().isdigit() and int(declared_length) > MAX_DRAFT_BODY_BYTES:
+        raise too_large
+    chunks: list[bytes] = []
+    received = 0
     try:
-        raw = await request.body()
+        async for chunk in request.stream():
+            received += len(chunk)
+            if received > MAX_DRAFT_BODY_BYTES:
+                break
+            chunks.append(chunk)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="无法读取请求体") from exc
-    if len(raw) > MAX_DRAFT_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="请求体超过 2MB，请精简节点后重试")
+    if received > MAX_DRAFT_BODY_BYTES:
+        raise too_large
+    raw = b"".join(chunks)
     if not raw.strip():
         raise HTTPException(status_code=400, detail="请求体不能为空，必须提交 JSON")
     try:
@@ -899,356 +932,8 @@ async def _read_json_body(request: Request) -> dict:
     return body
 
 
-def _merged_global_config(raw_global_config: dict | None, saved_global_config: dict | None = None) -> dict:
-    """合并当前草稿的全局设置；完整请求优先，旧账号缺失字段使用默认值。"""
-    base = {}
-    if raw_global_config is None and isinstance(saved_global_config, dict):
-        base.update(saved_global_config)
-    elif isinstance(raw_global_config, dict):
-        base.update(raw_global_config)
-    return apply_v2_global_defaults(build_default_global_config(), base)
-
-
-def _draft_source(body: dict) -> dict:
-    if isinstance(body.get("config"), dict):
-        source = copy.deepcopy(body["config"])
-    else:
-        source = copy.deepcopy(body)
-    return source
-
-
-def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict, dict]:
-    """将旧/新请求收敛到同一份完整 canonical draft，不写入数据库。"""
-    source = _draft_source(body)
-    saved = saved_config or {}
-    if not isinstance(source.get("proxies"), list):
-        raise HTTPException(status_code=400, detail="proxies 必须是节点数组")
-    if len(source["proxies"]) > MAX_DRAFT_PROXIES:
-        raise HTTPException(status_code=413, detail=f"节点数量超过上限 {MAX_DRAFT_PROXIES}")
-
-    raw_proxies: list[dict] = []
-    for index, proxy in enumerate(source["proxies"], start=1):
-        if not isinstance(proxy, dict):
-            raise HTTPException(status_code=400, detail=f"第 {index} 个节点必须是对象")
-        raw_proxy = copy.deepcopy(proxy)
-        proxy_name = str(raw_proxy.get("name") or "").strip()
-        if not proxy_name:
-            raise HTTPException(status_code=400, detail=f"第 {index} 个节点 name 不能为空")
-        if len(proxy_name) > 128:
-            raise HTTPException(status_code=400, detail=f"第 {index} 个节点 name 长度不能超过 128 字符")
-        raw_proxies.append(raw_proxy)
-
-    normalized_proxies, proxy_warnings, proxy_errors = normalize_proxies(raw_proxies)
-    port_errors = [error for error in proxy_errors if "端口" in str(error)]
-    if port_errors:
-        # Invalid ports are input errors, not a draft validation state.  Do
-        # this before any storage write so PUT/validate/publish cannot retain
-        # or publish a malformed replacement node.
-        raise HTTPException(status_code=400, detail="；".join(port_errors))
-
-    raw_global = source.get("global_config")
-    if raw_global is not None and not isinstance(raw_global, dict):
-        raise HTTPException(status_code=400, detail="global_config 必须是对象")
-    global_config = _merged_global_config(raw_global, saved.get("global_config"))
-
-    custom_rules = source.get("custom_rules", [])
-    if custom_rules is None:
-        custom_rules = []
-    if not isinstance(custom_rules, list):
-        raise HTTPException(status_code=400, detail="custom_rules 必须是数组")
-    if len(custom_rules) > 500:
-        raise HTTPException(status_code=413, detail="自定义规则数量超过上限 500")
-    for rule_index, rule in enumerate(custom_rules, start=1):
-        if not isinstance(rule, str):
-            raise HTTPException(status_code=400, detail="custom_rules 的每项必须是字符串")
-        if len(rule) > 512:
-            raise HTTPException(status_code=400, detail=f"第 {rule_index} 条规则长度不能超过 512 字符")
-    custom_rules = copy.deepcopy(custom_rules)
-
-    custom_rule_providers = source.get("custom_rule_providers", {})
-    if custom_rule_providers is None:
-        custom_rule_providers = {}
-    if not isinstance(custom_rule_providers, dict):
-        raise HTTPException(status_code=400, detail="custom_rule_providers 必须是对象")
-    for alias, provider in custom_rule_providers.items():
-        if not isinstance(provider, dict):
-            raise HTTPException(status_code=400, detail="custom_rule_providers 的每项必须是对象")
-        for url_key in ("url", "path"):
-            url_value = provider.get(url_key)
-            if url_value is not None and not isinstance(url_value, str):
-                raise HTTPException(status_code=400, detail=f"规则集 {alias} 的 {url_key} 必须是字符串")
-        interval_value = provider.get("interval")
-        if interval_value is not None:
-            if isinstance(interval_value, bool) or not isinstance(interval_value, int) or not 1 <= interval_value <= 31536000:
-                raise HTTPException(status_code=400, detail=f"规则集 {alias} 的 interval 必须是 1-31536000 的整数")
-    custom_rule_providers = copy.deepcopy(custom_rule_providers)
-
-    selected_rule_type = source.get("selected_rule_type", DEFAULT_RULE_TYPE)
-    if selected_rule_type is None:
-        selected_rule_type = DEFAULT_RULE_TYPE
-    if not isinstance(selected_rule_type, str):
-        raise HTTPException(status_code=400, detail="selected_rule_type 必须是字符串")
-    selected_rule_type = selected_rule_type.strip() or DEFAULT_RULE_TYPE
-
-    import_sources = source.get("import_sources", [])
-    if import_sources is None:
-        import_sources = []
-    if not isinstance(import_sources, list):
-        raise HTTPException(status_code=400, detail="import_sources 必须是数组")
-    import_sources = copy.deepcopy(import_sources)
-    if any(not isinstance(item, dict) for item in import_sources):
-        raise HTTPException(status_code=400, detail="import_sources 的每项必须是对象")
-
-    source_counts: dict[str, int] = {}
-    for proxy in normalized_proxies:
-        source_id = str(proxy.get("_source_id") or "")
-        if source_id:
-            source_counts[source_id] = source_counts.get(source_id, 0) + 1
-    for item in import_sources:
-        item["node_count"] = source_counts.get(str(item.get("id") or ""), 0)
-
-    canonical = {
-        "proxies": normalized_proxies,
-        "global_config": global_config,
-        "custom_rules": custom_rules,
-        "custom_rule_providers": custom_rule_providers,
-        "selected_rule_type": selected_rule_type,
-        "import_sources": import_sources,
-    }
-    return canonical, {
-        "warnings": [
-            f"节点规范化：{warning}"
-            for warning in proxy_warnings
-        ],
-        "errors": [
-            f"节点规范化：{error}"
-            for error in proxy_errors
-        ],
-    }
-
-
-def _draft_meta_warnings(meta: dict | None) -> list[str]:
-    """把规范化阶段的错误也作为 bootstrap 警告展示，避免 GET 配置静默吞掉。"""
-    meta = meta or {}
-    warnings = [str(item) for item in (meta.get("warnings") or [])]
-    warnings.extend(f"草稿校验：{item}" for item in (meta.get("errors") or []))
-    return warnings
-
-
 def _load_saved_config(user: dict) -> dict:
     return get_user_config(int(user["id"]))
-
-
-def _provider_defaults() -> dict:
-    # 两套规则源分别暴露，不能因为切换一套而覆盖另一套。
-    return {
-        "dustinwin": {
-            name: str(config["target"])
-            for name, config in DUSTINWIN_PROVIDERS_MAP.items()
-        },
-        "lhie1": {
-            name: target for name, (_, target) in LHIE1_PROVIDERS_MAP.items()
-        },
-    }
-
-
-def _safe_targets_for_draft(draft: dict) -> tuple[list[str], list[str]]:
-    names = {
-        str(proxy.get("name"))
-        for proxy in draft.get("proxies", [])
-        if isinstance(proxy, dict) and str(proxy.get("name") or "").strip()
-    }
-    fallback = set(BUILTIN_TARGETS) | names
-    try:
-        built = build_config(
-            draft.get("proxies") or [],
-            draft.get("global_config") or {},
-            draft.get("custom_rules") or [],
-            draft.get("custom_rule_providers") or {},
-            draft.get("selected_rule_type") or DEFAULT_RULE_TYPE,
-        )
-        group_names = {
-            str(group.get("name"))
-            for group in built.get("proxy-groups", [])
-            if isinstance(group, dict) and str(group.get("name") or "").strip()
-        }
-        proxy_names = {
-            str(proxy.get("name"))
-            for proxy in built.get("proxies", [])
-            if isinstance(proxy, dict) and str(proxy.get("name") or "").strip()
-        }
-        return sorted(set(BUILTIN_TARGETS) | group_names | proxy_names), []
-    except Exception:
-        return sorted(fallback), ["策略组构建失败，已返回内置目标和当前节点名"]
-
-
-def _draft_signature(draft: dict) -> str:
-    canonical_json = json.dumps(
-        draft,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
-
-
-def _config_stats(built_config: dict | None, draft: dict) -> dict:
-    if not isinstance(built_config, dict):
-        return {
-            "nodes": len(draft.get("proxies") or []),
-            "groups": 0,
-            "rules": len(draft.get("custom_rules") or []),
-            "providers": len(draft.get("custom_rule_providers") or {}),
-            "sources": len(draft.get("import_sources") or []),
-        }
-    return {
-        "nodes": len(built_config.get("proxies") or []),
-        "groups": len(built_config.get("proxy-groups") or []),
-        "rules": len(built_config.get("rules") or []),
-        "providers": len(built_config.get("rule-providers") or {}),
-        "sources": len(draft.get("import_sources") or []),
-    }
-
-
-def _proxy_names_from_yaml(yaml_text: str) -> list[str]:
-    """从配置 YAML 提取 proxies 名称列表（解析失败时返回空，不阻塞 diff）。"""
-    if not (yaml_text or "").strip():
-        return []
-    try:
-        parsed = yaml.safe_load(yaml_text)
-    except Exception:
-        return []
-    proxies = parsed.get("proxies") if isinstance(parsed, dict) else None
-    if not isinstance(proxies, list):
-        return []
-    names: list[str] = []
-    for proxy in proxies:
-        if isinstance(proxy, dict) and proxy.get("name"):
-            names.append(str(proxy["name"]))
-    return names
-
-
-def _yaml_diff(draft_yaml: str, published_yaml: str) -> dict:
-    draft_lines = draft_yaml.splitlines()
-    published_lines = (published_yaml or "").splitlines()
-    unified = "\n".join(
-        difflib.unified_diff(
-            published_lines,
-            draft_lines,
-            fromfile="published.yaml",
-            tofile="draft.yaml",
-            lineterm="",
-        )
-    )
-    draft_names = _proxy_names_from_yaml(draft_yaml)
-    published_names = _proxy_names_from_yaml(published_yaml)
-    published_set = set(published_names)
-    draft_set = set(draft_names)
-    added = [name for name in draft_names if name not in published_set]
-    removed = [name for name in published_names if name not in draft_set]
-    return {
-        "has_changes": draft_yaml != (published_yaml or ""),
-        "published": bool((published_yaml or "").strip()),
-        "unified": unified,
-        "lines": len(unified.splitlines()) if unified else 0,
-        "added_proxies": added,
-        "removed_proxies": removed,
-    }
-
-
-def _validation_checks(errors: list[str], warnings: list[str], mihomo_result) -> list[dict]:
-    checks = [
-        {"status": "error", "label": "结构检查", "detail": _safe_error_text(error)}
-        for error in errors
-    ]
-    checks.extend(
-        {"status": "warn", "label": "提示", "detail": _safe_error_text(warning)}
-        for warning in warnings
-    )
-    status = getattr(mihomo_result, "status", "unknown")
-    if status != "skipped":
-        checks.append(
-            {
-                "status": "ok" if bool(getattr(mihomo_result, "ok", False)) else "error",
-                "label": f"mihomo 内核校验（{status}）",
-                "detail": _safe_error_text(getattr(mihomo_result, "message", "")),
-            }
-        )
-    return checks
-
-
-def _run_validation(draft: dict, published_yaml: str = "", normalization_meta: dict | None = None) -> dict:
-    """验证、生成 YAML、计算 targets/signature/diff；不写入数据库。"""
-    meta = normalization_meta or {"warnings": [], "errors": []}
-    warnings = list(meta.get("warnings") or [])
-    errors = list(meta.get("errors") or [])
-    node_names = [str(proxy.get("name") or "") for proxy in draft.get("proxies") or []]
-    duplicates = sorted({name for name in node_names if name and node_names.count(name) > 1})
-    errors.extend(f"节点名称重复：{name}" for name in duplicates)
-
-    built_config = None
-    draft_yaml = ""
-    mihomo_result = type(
-        "ValidationResult",
-        (),
-        {"status": "skipped", "ok": True, "message": "未启用 mihomo 校验"},
-    )()
-    try:
-        built_config = build_config(
-            draft.get("proxies") or [],
-            draft.get("global_config") or {},
-            draft.get("custom_rules") or [],
-            draft.get("custom_rule_providers") or {},
-            draft.get("selected_rule_type") or DEFAULT_RULE_TYPE,
-        )
-        draft_yaml = build_yaml(built_config)
-        config_errors, config_warnings = validate_config(
-            built_config,
-            allow_no_match=is_no_base_rule_type(draft.get("selected_rule_type")),
-        )
-        errors.extend(config_errors)
-        warnings.extend(config_warnings)
-        mihomo_result = validate_with_mihomo(draft_yaml)
-    except Exception:
-        errors.append("配置生成失败，请检查节点、规则和全局设置")
-        warnings.append("配置生成阶段发生错误，未返回内部异常详情")
-
-    mihomo_ok = bool(getattr(mihomo_result, "ok", False))
-    mihomo_status = getattr(mihomo_result, "status", "skipped")
-    if mihomo_status == "skipped":
-        mihomo_ok = True
-    ok = not errors and mihomo_ok
-    targets, target_warnings = _safe_targets_for_draft(draft)
-    warnings.extend(target_warnings)
-    checks = _validation_checks(errors, warnings, mihomo_result)
-    stats = _config_stats(built_config, draft)
-    publish_diff = _yaml_diff(draft_yaml, published_yaml)
-    return {
-        "ok": ok,
-        "checks": checks,
-        "warnings": warnings,
-        "stats": stats,
-        "statistics": dict(stats),
-        "mihomo": {
-            "status": mihomo_status,
-            "ok": bool(mihomo_ok),
-            "message": _safe_error_text(getattr(mihomo_result, "message", "")),
-        },
-        "yaml": draft_yaml,
-        "draft_signature": _draft_signature(draft),
-        "all_targets": targets,
-        # `publish_diff` 是 V2 canonical key；`diff` 保留给旧客户端。
-        "publish_diff": publish_diff,
-        "diff": publish_diff,
-        "config": copy.deepcopy(draft),
-        "_built_config": built_config,
-        "_errors": errors,
-    }
-
-
-def _public_validation(data: dict) -> dict:
-    return {key: value for key, value in data.items() if not key.startswith("_")}
 
 
 def _subscription_data(saved_config: dict) -> dict:
@@ -1279,22 +964,26 @@ def _publish_summary(saved_config: dict, subscription: dict | None = None) -> di
     }
 
 
-def _bootstrap(user: dict, draft: dict, saved_config: dict | None = None, warnings: list[str] | None = None) -> dict:
+def _bootstrap(
+    user: dict,
+    draft: dict,
+    saved_config: dict | None = None,
+    warnings: list[str] | None = None,
+    built_config: dict | None = None,
+) -> dict:
+    """``built_config`` 为调用方刚为同一草稿构建的配置时直接复用，避免重复 build。"""
     saved = saved_config or _load_saved_config(user)
     _materialize_private_urls_in_draft(user, draft, str(saved.get("token") or ""))
-    targets, target_warnings = _safe_targets_for_draft(draft)
+    built = built_config if isinstance(built_config, dict) else None
+    if built is None:
+        try:
+            built = _build_draft_config(draft)
+        except Exception:
+            built = None
+    targets, target_warnings = _safe_targets_for_draft(draft, built)
     all_warnings = list(warnings or []) + target_warnings
     subscription = _subscription_data(saved)
-    try:
-        built = build_config(
-            draft["proxies"],
-            draft["global_config"],
-            draft["custom_rules"],
-            draft["custom_rule_providers"],
-            draft["selected_rule_type"],
-        )
-    except Exception:
-        built = None
+    if built is None:
         all_warnings.append("当前草稿尚未能生成完整策略组，目标列表已降级")
     stats = _config_stats(built, draft)
     config = copy.deepcopy(draft)
@@ -1347,9 +1036,13 @@ def api_get_config(request: Request):
 
 @app.put("/api/config")
 async def api_put_config(request: Request):
-    user = _require_api_user(request)
-    _require_api_csrf(request)
+    # async 路由只负责 await 读取请求体；读库、文件锁与配置构建在线程池执行。
+    user = await run_in_threadpool(_require_api_user_and_csrf, request)
     body = await _read_json_body(request)
+    return await run_in_threadpool(_api_put_config_sync, user, body)
+
+
+def _api_put_config_sync(user: dict, body: dict) -> dict:
     user_id = int(user["id"])
     # Keep the complete provider lifecycle under one guard.  In particular,
     # cleanup in another process cannot remove a referenced version between
@@ -1378,9 +1071,13 @@ async def api_put_config(request: Request):
 
 @app.post("/api/import")
 async def api_import(request: Request):
-    user = _require_api_user(request)
-    _require_api_csrf(request)
+    await run_in_threadpool(_require_api_user_and_csrf, request)
     body = await _read_json_body(request)
+    # 远程订阅抓取是阻塞网络 IO，必须离开事件循环。
+    return await run_in_threadpool(_api_import_sync, body)
+
+
+def _api_import_sync(body: dict) -> dict:
     mode = str((body.get("mode") or "yaml").strip().lower())
     content = str(body.get("content") or "")
     url = str(body.get("url") or "")
@@ -1454,9 +1151,12 @@ async def api_import(request: Request):
 
 @app.post("/api/node/build")
 async def api_node_build(request: Request):
-    user = _require_api_user(request)
-    _require_api_csrf(request)
+    user = await run_in_threadpool(_require_api_user_and_csrf, request)
     body = await _read_json_body(request)
+    return await run_in_threadpool(_api_node_build_sync, user, body)
+
+
+def _api_node_build_sync(user: dict, body: dict) -> dict:
     node_type = str(body.get("type") or "").strip().lower()
     fields = body.get("fields")
     if not isinstance(fields, dict):
@@ -1485,617 +1185,14 @@ async def api_node_build(request: Request):
     return {"ok": True, "node": node}
 
 
-def _ruleset_dir() -> str:
-    default = "/app/ruleset" if os.name != "nt" else "ruleset"
-    return os.getenv("RULESET_DIR", default)
-
-
-def _ruleset_users_dir() -> Path:
-    """Return the numeric per-user namespace root after symlink checks."""
-    base_dir = Path(_ruleset_dir()).resolve()
-    lexical_users_dir = base_dir / "users"
-    if lexical_users_dir.is_symlink():
-        raise ValueError("规则集用户根目录不能是符号链接")
-    users_dir = lexical_users_dir.resolve()
-    if base_dir not in users_dir.parents:
-        raise ValueError("规则集用户根目录路径越界")
-    return users_dir
-
-
-def _ruleset_user_dir(user_id: int) -> Path:
-    """Return the private physical namespace for one user's uploads.
-
-    Physical upload files are isolated below ``users/<numeric-id>/`` so equal
-    aliases never collide.  Existing drafts that reference the old global
-    ``./ruleset/<alias>.<ext>`` path remain untouched by normalization and are
-    intentionally outside this namespace.
-    """
-    users_dir = _ruleset_users_dir()
-    lexical_user_dir = users_dir / str(int(user_id))
-    if lexical_user_dir.is_symlink():
-        raise ValueError("规则集用户目录不能是符号链接")
-    user_dir = lexical_user_dir.resolve()
-    if users_dir not in user_dir.parents:
-        raise ValueError("规则集用户目录路径越界")
-    return user_dir
-
-
-_VERSIONED_RULESET_FILENAME_PATTERN = re.compile(
-    r"^(?P<alias>[A-Za-z0-9][A-Za-z0-9._-]{0,63})--(?P<digest>[0-9a-f]{64})\.(?P<extension>yaml|txt|mrs)$"
-)
-_RULESET_TOMBSTONE_PATTERN = re.compile(r"^(?P<user_id>[0-9]+)-(?P<nonce>[0-9a-f]{32})$")
-_RULESET_PENDING_MARKER_SUFFIX = ".pending.json"
-_DEFAULT_RULESET_PENDING_TTL_SECONDS = 15 * 60
-
-
-def _ruleset_pending_ttl_seconds() -> int:
-    """Return the bounded lifetime of an upload not yet referenced by config."""
-    raw = os.getenv("RULESET_PENDING_TTL_SECONDS")
-    try:
-        value = int(raw) if raw is not None else _DEFAULT_RULESET_PENDING_TTL_SECONDS
-    except (TypeError, ValueError):
-        value = _DEFAULT_RULESET_PENDING_TTL_SECONDS
-    return max(1, min(value, 7 * 24 * 60 * 60))
-
-
-def _ruleset_pending_root() -> Path:
-    base_dir = Path(_ruleset_dir()).resolve()
-    lexical_pending = base_dir / ".pending"
-    if lexical_pending.is_symlink():
-        raise ValueError("规则集待引用目录不能是符号链接")
-    pending_root = lexical_pending.resolve()
-    if base_dir not in pending_root.parents:
-        raise ValueError("规则集待引用目录路径越界")
-    return pending_root
-
-
-def _ruleset_pending_user_dir(user_id: int) -> Path:
-    pending_root = _ruleset_pending_root()
-    lexical_user_dir = pending_root / str(int(user_id))
-    if lexical_user_dir.is_symlink():
-        raise ValueError("规则集待引用用户目录不能是符号链接")
-    user_dir = lexical_user_dir.resolve()
-    if pending_root not in user_dir.parents:
-        raise ValueError("规则集待引用用户目录路径越界")
-    return user_dir
-
-
-def _pending_marker_path(user_id: int, filename: str) -> Path | None:
-    if not _parse_versioned_ruleset_filename(filename):
-        return None
-    pending_dir = _ruleset_pending_user_dir(user_id)
-    lexical = pending_dir / f"{filename}{_RULESET_PENDING_MARKER_SUFFIX}"
-    try:
-        resolved = lexical.resolve()
-    except OSError:
-        return None
-    if lexical.parent != pending_dir.resolve() or resolved.parent != pending_dir.resolve() or lexical.is_symlink():
-        return None
-    return lexical
-
-
-def _pending_ruleset_filenames(user_id: int) -> set[str]:
-    """Read active upload reservations and discard expired/malformed markers."""
-    pending_dir = _ruleset_pending_user_dir(user_id)
-    if not pending_dir.exists():
-        return set()
-    if pending_dir.is_symlink() or not pending_dir.is_dir():
-        raise OSError("规则集待引用用户目录不是安全目录")
-    now = time.time()
-    active: set[str] = set()
-    for marker in pending_dir.iterdir():
-        if marker.is_symlink() or not marker.is_file() or not marker.name.endswith(_RULESET_PENDING_MARKER_SUFFIX):
-            continue
-        filename = marker.name[: -len(_RULESET_PENDING_MARKER_SUFFIX)]
-        remove = False
-        try:
-            with marker.open("r", encoding="utf-8") as handle:
-                metadata = json.load(handle)
-            expires_at = float(metadata.get("expires_at", 0))
-            if metadata.get("filename") != filename or expires_at <= now:
-                remove = True
-            elif _parse_versioned_ruleset_filename(filename):
-                active.add(filename)
-            else:
-                remove = True
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            remove = True
-        if remove:
-            try:
-                marker.unlink()
-            except OSError:
-                pass
-    return active
-
-
-def _reserve_pending_ruleset(user_id: int, filename: str) -> None:
-    """Atomically reserve an immutable upload until draft/publish references it."""
-    marker = _pending_marker_path(user_id, filename)
-    if marker is None:
-        raise ValueError("规则集待引用文件名无效")
-    pending_dir = marker.parent
-    pending_dir.mkdir(parents=True, exist_ok=True)
-    metadata = {
-        "filename": filename,
-        "created_at": time.time(),
-        "expires_at": time.time() + _ruleset_pending_ttl_seconds(),
-    }
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            prefix=f".{filename}.",
-            suffix=".tmp",
-            dir=pending_dir,
-            encoding="utf-8",
-            delete=False,
-        ) as temporary:
-            temporary_path = Path(temporary.name)
-            json.dump(metadata, temporary, ensure_ascii=False, separators=(",", ":"))
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.replace(temporary_path, marker)
-        temporary_path = None
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except OSError:
-                pass
-
-
-def _release_pending_marker(user_id: int, filename: str) -> None:
-    marker = _pending_marker_path(user_id, filename)
-    if marker is None:
-        return
-    try:
-        marker.unlink()
-    except FileNotFoundError:
-        pass
-
-
-def _remove_pending_user_namespace(user_id: int) -> None:
-    """Remove only one user's reservation namespace after DB deletion."""
-    pending_dir = _ruleset_pending_user_dir(user_id)
-    if not pending_dir.exists():
-        return
-    if pending_dir.is_symlink() or not pending_dir.is_dir():
-        raise OSError("规则集待引用用户目录不是安全目录")
-    shutil.rmtree(pending_dir)
-
-
-def _promote_referenced_pending_rulesets(user_id: int, config: dict | None) -> None:
-    """Release reservations that are now durable draft/published references."""
-    user_dir = _ruleset_user_dir(user_id)
-    referenced = _referenced_user_rulesets_for_config(user_id, config, user_dir)
-    for filename in _pending_ruleset_filenames(user_id):
-        target = _safe_user_ruleset_target(user_dir, filename)
-        if target is None or not target.exists() or target in referenced:
-            _release_pending_marker(user_id, filename)
-
-
-def _user_ruleset_provider_path(user_id: int, filename: str) -> str:
-    """Return the mihomo cache path for one versioned private file."""
-    return f"./ruleset/users/{int(user_id)}/{filename}"
-
-
-def _versioned_ruleset_filename(alias: str, extension: str, content: bytes) -> str:
-    digest = hashlib.sha256(content).hexdigest()
-    return f"{alias}--{digest}.{extension}"
-
-
-def _parse_versioned_ruleset_filename(filename: str) -> tuple[str, str] | None:
-    match = _VERSIONED_RULESET_FILENAME_PATTERN.fullmatch(str(filename or ""))
-    if not match:
-        return None
-    return match.group("alias"), match.group("extension")
-
-
-def _private_ruleset_filename(user_id: int, provider_path: str) -> str | None:
-    normalized = str(provider_path or "").replace("\\", "/")
-    prefix = f"./ruleset/users/{int(user_id)}/"
-    if not normalized.startswith(prefix):
-        return None
-    filename = normalized[len(prefix):]
-    if "/" in filename or not _parse_versioned_ruleset_filename(filename):
-        return None
-    return filename
-
-
-def _safe_user_ruleset_target(user_dir: Path, filename: str) -> Path | None:
-    """Resolve one version filename without following an escaping symlink."""
-    lexical = user_dir / filename
-    try:
-        resolved = lexical.resolve()
-    except OSError:
-        return None
-    base = user_dir.resolve()
-    if lexical.parent != base or resolved.parent != base or lexical.is_symlink():
-        return None
-    return resolved
-
-
-def _user_ruleset_url(token: str, user_id: int, filename: str) -> str:
-    return (
-        f"{get_public_base_url()}/ruleset/user/"
-        f"{quote(str(token), safe='')}/{int(user_id)}/{quote(filename, safe='')}"
-    )
-
-
-def _ruleset_storage_extension(format_value: str) -> str:
-    """Map the public provider format to the canonical on-disk extension."""
-    normalized = str(format_value or "").strip().lower()
-    if normalized in RULESET_FORMAT_EXTENSIONS:
-        return RULESET_FORMAT_EXTENSIONS[normalized]
-    # Accept extension-shaped values for an idempotent delete call from older
-    # clients, but always resolve to the same canonical extension used by
-    # upload.  No path component is accepted here.
-    extension_map = {
-        "yaml": "yaml",
-        "yml": "yaml",
-        "txt": "txt",
-        "text": "txt",
-        "list": "txt",
-        "mrs": "mrs",
-    }
-    if normalized in extension_map:
-        return extension_map[normalized]
-    raise ValueError("format 只能是 text、yaml 或 mrs")
-
-
-def _ruleset_trash_dir() -> Path:
-    base_dir = Path(_ruleset_dir()).resolve()
-    lexical_trash_dir = base_dir / ".trash"
-    if lexical_trash_dir.is_symlink():
-        raise ValueError("规则集回收目录不能是符号链接")
-    trash_dir = lexical_trash_dir.resolve()
-    if base_dir not in trash_dir.parents:
-        raise ValueError("规则集回收目录路径越界")
-    return trash_dir
-
-
-def _retry_ruleset_tombstones() -> list[str]:
-    """Recover/delete tombstones and purge orphaned numeric user namespaces.
-
-    Every decision is made after taking the user's cross-process lock and
-    re-reading the database.  A database row wins over filesystem cleanup:
-    valid users are never deleted, and a tombstone is restored only when its
-    original namespace is absent.
-    """
-    pending: list[str] = []
-    try:
-        trash_dir = _ruleset_trash_dir()
-    except ValueError:
-        return []
-    if trash_dir.is_dir() and not trash_dir.is_symlink():
-        try:
-            tombstones = list(trash_dir.iterdir())
-        except OSError:
-            tombstones = []
-        for item in tombstones:
-            match = _RULESET_TOMBSTONE_PATTERN.fullmatch(item.name)
-            if not match:
-                continue
-            user_id = int(match.group("user_id"))
-            try:
-                with _ruleset_user_lock(user_id):
-                    # Re-read the DB inside the guard.  Another process may
-                    # have recreated or deleted the account since scanning.
-                    db_user = get_user_by_id(user_id)
-                    user_dir = _ruleset_user_dir(user_id)
-                    if item.is_symlink() or not item.is_dir():
-                        pending.append(item.name)
-                        continue
-                    if db_user is not None:
-                        users_dir = _ruleset_users_dir()
-                        if user_dir.exists() or user_dir.is_symlink():
-                            # Never overwrite valid user data with a stale
-                            # tombstone.  Leave it for an explicit retry.
-                            pending.append(item.name)
-                            continue
-                        users_dir.mkdir(parents=True, exist_ok=True)
-                        os.replace(item, user_dir)
-                    else:
-                        shutil.rmtree(item)
-            except Exception:
-                pending.append(item.name)
-
-    # A process can die after the DB commit and before rename().  Reconcile
-    # numeric user directories only when the database confirms the user is
-    # gone; all other directories and all symlinks are left untouched.
-    try:
-        users_dir = _ruleset_users_dir()
-    except ValueError:
-        return pending
-    if users_dir.is_dir() and not users_dir.is_symlink():
-        try:
-            orphan_candidates = list(users_dir.iterdir())
-        except OSError:
-            orphan_candidates = []
-        for item in orphan_candidates:
-            if not re.fullmatch(r"[0-9]+", item.name):
-                continue
-            if item.is_symlink() or not item.is_dir():
-                continue
-            user_id = int(item.name)
-            try:
-                with _ruleset_user_lock(user_id):
-                    if get_user_by_id(user_id) is not None:
-                        continue
-                    moved = _move_user_ruleset_to_tombstone(user_id)
-                    if moved is None:
-                        continue
-                    _orphan_user_dir, tombstone = moved
-                    try:
-                        shutil.rmtree(tombstone)
-                    except OSError:
-                        pending.append(tombstone.name)
-            except Exception:
-                pending.append(item.name)
-
-    # Reservation markers live outside users/<id>.  Once the DB row is gone,
-    # they are safe to remove in the same user guard; never touch a namespace
-    # whose account still exists.
-    try:
-        pending_root = _ruleset_pending_root()
-    except ValueError:
-        pending_root = None
-    if pending_root is not None and pending_root.is_dir() and not pending_root.is_symlink():
-        try:
-            pending_candidates = list(pending_root.iterdir())
-        except OSError:
-            pending_candidates = []
-        for item in pending_candidates:
-            if not re.fullmatch(r"[0-9]+", item.name) or item.is_symlink() or not item.is_dir():
-                continue
-            user_id = int(item.name)
-            try:
-                with _ruleset_user_lock(user_id):
-                    if get_user_by_id(user_id) is None:
-                        _remove_pending_user_namespace(user_id)
-            except Exception:
-                pending.append(item.name)
-    return pending
-
-
-def _move_user_ruleset_to_tombstone(user_id: int) -> tuple[Path, Path] | None:
-    user_dir = _ruleset_user_dir(user_id)
-    if not user_dir.exists():
-        return None
-    if user_dir.is_symlink() or not user_dir.is_dir():
-        raise OSError("规则集用户目录不是安全目录")
-    trash_dir = _ruleset_trash_dir()
-    trash_dir.mkdir(parents=True, exist_ok=True)
-    tombstone = (trash_dir / f"{int(user_id)}-{uuid.uuid4().hex}").resolve()
-    if trash_dir not in tombstone.parents:
-        raise ValueError("规则集回收文件路径越界")
-    os.replace(user_dir, tombstone)
-    return user_dir, tombstone
-
-
-def _delete_user_with_rulesets(user_id: int, actor_id: int | None = None) -> bool:
-    """Delete DB rows first, then detach and remove the user's file namespace.
-
-    Once the DB transaction succeeds, the subscription token is invalid even
-    if a process crashes before the filesystem rename.  Such an orphan is
-    reclaimed by ``_retry_ruleset_tombstones`` on startup or admin actions.
-
-    ``actor_id`` is rechecked after acquiring the target lock.  It is optional
-    only for internal recovery tests/callers that already have no actor; all
-    admin API and Streamlit entry points pass it explicitly.
-    """
-    with _ruleset_user_lock(user_id):
-        if actor_id is not None:
-            _reload_admin_actor_locked(actor_id)
-        target = get_user_by_id(int(user_id))
-        if target is None:
-            raise HTTPException(status_code=404, detail="用户不存在")
-        if bool(target["is_admin"]):
-            raise HTTPException(status_code=403, detail="管理员账号不能在这里删除")
-        # DB-first is intentional: if this raises, no filesystem operation has
-        # happened and the caller can safely retry without restoration logic.
-        delete_regular_user(user_id)
-        try:
-            moved = _move_user_ruleset_to_tombstone(user_id)
-        except Exception:
-            return True
-        try:
-            _remove_pending_user_namespace(user_id)
-        except Exception:
-            # The account is already gone; leave the inaccessible reservation
-            # namespace for the next tombstone/orphan retry.
-            return True
-        if moved is None:
-            return False
-        _user_dir, tombstone = moved
-        try:
-            shutil.rmtree(tombstone)
-            return False
-        except Exception:
-            return True
-
-
-def _ruleset_user_usage(user_dir: Path) -> tuple[int, int]:
-    if not user_dir.is_dir():
-        return 0, 0
-    total_bytes = 0
-    file_count = 0
-    for item in user_dir.iterdir():
-        if not item.is_file():
-            continue
-        try:
-            total_bytes += item.stat().st_size
-        except OSError:
-            continue
-        file_count += 1
-    return total_bytes, file_count
-
-
-def _referenced_user_rulesets_from_providers(
-    user_id: int,
-    providers: object,
-    user_dir: Path,
-) -> set[Path]:
-    """Resolve only versioned providers in one current-user namespace."""
-    referenced: set[Path] = set()
-    if not isinstance(providers, dict):
-        return referenced
-    for provider in providers.values():
-        if not isinstance(provider, dict):
-            continue
-        filename = _private_ruleset_filename(user_id, str(provider.get("path") or ""))
-        if filename:
-            target = _safe_user_ruleset_target(user_dir, filename)
-            if target is not None:
-                referenced.add(target)
-    return referenced
-
-
-def _referenced_user_rulesets(user_id: int, draft: dict | None, user_dir: Path) -> set[Path]:
-    providers = (draft or {}).get("custom_rule_providers") if isinstance(draft, dict) else {}
-    return _referenced_user_rulesets_from_providers(user_id, providers, user_dir)
-
-
-def _all_user_ruleset_files(user_dir: Path) -> set[Path]:
-    """Return a conservative keep-set when a published document is unreadable."""
-    if not user_dir.is_dir():
-        return set()
-    return {
-        item.resolve()
-        for item in user_dir.iterdir()
-        if item.is_file() and not item.is_symlink()
-    }
-
-
-def _referenced_user_rulesets_from_yaml(user_id: int, final_yaml: str, user_dir: Path) -> set[Path]:
-    if not str(final_yaml or "").strip():
-        return set()
-    try:
-        loaded = yaml.safe_load(final_yaml)
-    except Exception:
-        # Never delete a published version merely because an older YAML is
-        # temporarily unreadable; the next successful publish can reclaim it.
-        return _all_user_ruleset_files(user_dir)
-    if not isinstance(loaded, dict):
-        return _all_user_ruleset_files(user_dir)
-    return _referenced_user_rulesets_from_providers(user_id, loaded.get("rule-providers"), user_dir)
-
-
-def _referenced_user_rulesets_for_config(user_id: int, config: dict | None, user_dir: Path) -> set[Path]:
-    config = config if isinstance(config, dict) else {}
-    return (
-        _referenced_user_rulesets(user_id, config, user_dir)
-        | _referenced_user_rulesets_from_yaml(user_id, str(config.get("final_yaml") or ""), user_dir)
-    )
-
-
-def _cleanup_unreferenced_user_rulesets(
-    user_id: int,
-    config: dict | None,
-    *,
-    strict: bool = False,
-) -> list[Path]:
-    """Remove stale files from one user's namespace only.
-
-    This is intentionally called while the per-user upload lock is held.  It
-    cleans failed/abandoned versions before the next quota check, but retains
-    every version referenced by either the saved draft or published YAML.
-    """
-    user_dir = _ruleset_user_dir(user_id)
-    referenced = _referenced_user_rulesets_for_config(user_id, config, user_dir)
-    # An upload response is intentionally a short-lived reservation window:
-    # the browser still has to PUT the provider into the draft.  Keep those
-    # immutable files across a concurrent publish cleanup, but release the
-    # marker as soon as the reference becomes durable.  Expired markers are
-    # removed by _pending_ruleset_filenames and become eligible below.
-    for filename in _pending_ruleset_filenames(user_id):
-        target = _safe_user_ruleset_target(user_dir, filename)
-        if target is None or not target.exists():
-            _release_pending_marker(user_id, filename)
-            continue
-        if target in referenced:
-            _release_pending_marker(user_id, filename)
-            continue
-        referenced.add(target)
-    if not user_dir.is_dir():
-        return []
-    removed: list[Path] = []
-    failures: list[OSError] = []
-    for item in user_dir.iterdir():
-        if not item.is_file() or item.resolve() in referenced:
-            continue
-        try:
-            item.unlink()
-        except OSError as exc:
-            failures.append(exc)
-            continue
-        removed.append(item)
-    if strict and failures:
-        raise OSError("部分旧规则集版本清理失败") from failures[0]
-    return removed
-
-
-def _write_user_ruleset_atomic(user_id: int, filename: str, content: bytes) -> Path:
-    """Write one immutable version atomically and enforce per-user quotas."""
-    parsed = _parse_versioned_ruleset_filename(filename)
-    if not parsed:
-        raise ValueError("规则集版本文件名无效")
-    alias, _extension = parsed
-    user_dir = _ruleset_user_dir(user_id)
-    user_dir.mkdir(parents=True, exist_ok=True)
-    target = _safe_user_ruleset_target(user_dir, filename)
-    if target is None:
-        raise ValueError("规则集文件路径越界")
-    if target.exists():
-        if target.is_file() and target.read_bytes() == content:
-            return target
-        raise ValueError("规则集版本文件冲突")
-    total_bytes, file_count = _ruleset_user_usage(user_dir)
-    new_total = total_bytes + len(content)
-    new_count = file_count + 1
-    if new_total > MAX_RULESET_USER_BYTES:
-        raise ValueError(f"该用户规则集总大小超过 {MAX_RULESET_USER_BYTES} bytes 配额")
-    if new_count > MAX_RULESET_USER_FILES:
-        raise ValueError(f"该用户规则集文件数超过 {MAX_RULESET_USER_FILES} 个配额")
-
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            prefix=f".{alias}.",
-            suffix=".tmp",
-            dir=user_dir,
-            delete=False,
-        ) as temporary:
-            temporary_path = Path(temporary.name)
-            temporary.write(content)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.replace(temporary_path, target)
-        temporary_path = None
-        return target
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except OSError:
-                pass
-
-
-def _ruleset_format_from_extension(extension: str) -> str:
-    extension = extension.lower()
-    if extension in {"yaml", "yml"}:
-        return "yaml"
-    if extension in {"mrs"}:
-        return "mrs"
-    return "text"
-
-
 @app.post("/api/ruleset/test-url")
 async def api_ruleset_test_url(request: Request):
-    _require_api_user(request)
-    _require_api_csrf(request)
+    await run_in_threadpool(_require_api_user_and_csrf, request)
     body = await _read_json_body(request)
+    return await run_in_threadpool(_api_ruleset_test_url_sync, body)
+
+
+def _api_ruleset_test_url_sync(body: dict) -> dict:
     url = str(body.get("url") or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="url 不能为空")
@@ -2117,7 +1214,7 @@ async def api_ruleset_test_url(request: Request):
 
 
 @app.post("/api/ruleset/upload")
-async def api_ruleset_upload(
+def api_ruleset_upload(
     request: Request,
     file: UploadFile,
     alias: str = Form(""),
@@ -2167,6 +1264,7 @@ async def api_ruleset_upload(
     if normalized_target == "no-resolve":
         raise HTTPException(status_code=400, detail="no-resolve 只能作为规则修饰符，不能作为目标策略")
 
+    # 本路由为同步 def（运行在线程池），这里同步读取临时文件与加文件锁不会阻塞事件循环。
     try:
         file_content = file.file.read(MAX_RULESET_UPLOAD_BYTES + 1)
     except OSError as exc:
@@ -2237,9 +1335,12 @@ async def api_ruleset_upload(
 @app.post("/api/ruleset/delete")
 async def api_ruleset_delete(request: Request):
     """Delete one unreferenced versioned file from the current user namespace."""
-    user = _require_api_user(request)
-    _require_api_csrf(request)
+    user = await run_in_threadpool(_require_api_user_and_csrf, request)
     body = await _read_json_body(request)
+    return await run_in_threadpool(_api_ruleset_delete_sync, user, body)
+
+
+def _api_ruleset_delete_sync(user: dict, body: dict) -> dict:
     user_id = int(user["id"])
     raw_path = str(body.get("path") or "")
     versioned_filename = _private_ruleset_filename(user_id, raw_path)
@@ -2274,11 +1375,15 @@ async def api_ruleset_delete(request: Request):
 
 @app.post("/api/validate")
 async def api_validate(request: Request):
-    user = _require_api_user(request)
-    _require_api_csrf(request)
+    user = await run_in_threadpool(_require_api_user_and_csrf, request)
     # 校验必须消费请求中提交的完整 canonical draft；不再读取可能仍在
     # 防抖队列中的数据库草稿，避免 validate 与 publish 之间产生竞态。
     body = await _read_json_body(request)
+    # mihomo 子进程校验与用户文件锁都是阻塞操作，放到线程池执行。
+    return await run_in_threadpool(_api_validate_sync, user, body)
+
+
+def _api_validate_sync(user: dict, body: dict) -> dict:
     user_id = int(user["id"])
     # Hold the same guard through mihomo validation and draft persistence so
     # publish cleanup cannot remove a referenced version mid-check.
@@ -2307,10 +1412,13 @@ async def api_validate(request: Request):
 
 @app.post("/api/publish")
 async def api_publish(request: Request):
-    user = _require_api_user(request)
-    _require_api_csrf(request)
+    user = await run_in_threadpool(_require_api_user_and_csrf, request)
     # publish 与 validate 使用同一份完整请求载荷，不能回退到旧的数据库草稿。
     body = await _read_json_body(request)
+    return await run_in_threadpool(_api_publish_sync, user, body)
+
+
+def _api_publish_sync(user: dict, body: dict) -> dict:
     user_id = int(user["id"])
     # The guard deliberately spans read -> normalize/materialize -> mihomo
     # validation -> DB commit -> refreshed read -> physical cleanup.  There is
@@ -2373,7 +1481,7 @@ async def api_publish(request: Request):
         except Exception:
             publish_warnings.append("旧规则集版本清理未完成，将在后续上传或启动时重试")
         subscription = _subscription_data(refreshed)
-        response = _bootstrap(current_user, draft, refreshed, publish_warnings)
+        response = _bootstrap(current_user, draft, refreshed, publish_warnings, result.get("_built_config"))
         response.update(
             {
                 "ok": True,
@@ -2440,20 +1548,6 @@ def _require_api_admin(request: Request) -> dict:
     return user
 
 
-def _toggle_user_with_admin(user_id: int, actor_id: int) -> bool:
-    """Toggle one ordinary user's enabled state under its lifecycle guard."""
-    with _ruleset_user_lock(user_id):
-        _reload_admin_actor_locked(actor_id)
-        target = get_user_by_id(int(user_id))
-        if target is None:
-            raise HTTPException(status_code=404, detail="用户不存在")
-        if bool(target["is_admin"]):
-            raise HTTPException(status_code=403, detail="管理员账号不能在这里启停")
-        new_enabled = not bool(target["is_enabled"])
-        set_user_enabled(user_id, new_enabled)
-        return new_enabled
-
-
 @app.post("/api/users/{user_id}/toggle")
 def api_user_toggle(request: Request, user_id: int):
     admin = _require_api_admin(request)
@@ -2506,9 +1600,19 @@ def api_user_delete(request: Request, user_id: int):
 
 @app.post("/api/users/{username}")
 async def api_user_create(request: Request, username: str):
-    _require_api_admin(request)
-    _require_api_csrf(request)
+    await run_in_threadpool(_require_api_admin_and_csrf, request)
     body = await _read_json_body(request)
+    # 创建用户包含 PBKDF2 哈希，放到线程池执行。
+    return await run_in_threadpool(_api_user_create_sync, username, body)
+
+
+def _require_api_admin_and_csrf(request: Request) -> dict:
+    admin = _require_api_admin(request)
+    _require_api_csrf(request)
+    return admin
+
+
+def _api_user_create_sync(username: str, body: dict) -> dict:
     password = body.get("password")
     if not isinstance(password, str) or not password:
         raise HTTPException(status_code=400, detail="密码不能为空")

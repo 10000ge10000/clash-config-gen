@@ -12,109 +12,111 @@ DEFAULT_URL_TEST_TOLERANCE = 30
 # 为了安全起见，所有服务器地址、密码、UUID 均已替换为示例数据。
 # This is a template file. All sensitive data has been replaced with placeholders.
 
-proxies_data = [
-    # --------------------------------------
-    # 1. Shadowsocks (SS) - 示例
-    # --------------------------------------
-    {
-        "name": "SS-Region-01",
-        "type": "ss",
-        "server": "ss.example.com",     # 请替换为真实服务器地址
-        "port": 8888,                   # 请替换为真实端口
-        "cipher": "2022-blake3-aes-128-gcm",
-        "password": "replace-with-your-password", # 请替换密码
-        "udp": True,
-        "ip-version": "dual",
-        "plugin": "obfs",
-        "plugin-opts": {
-            "mode": "tls",
-            "host": "bing.com"
+def _example_proxies_data():
+    """仅供 main() 示例使用的占位节点数据，不属于生产路径。"""
+    return [
+        # --------------------------------------
+        # 1. Shadowsocks (SS) - 示例
+        # --------------------------------------
+        {
+            "name": "SS-Region-01",
+            "type": "ss",
+            "server": "ss.example.com",     # 请替换为真实服务器地址
+            "port": 8888,                   # 请替换为真实端口
+            "cipher": "2022-blake3-aes-128-gcm",
+            "password": "replace-with-your-password", # 请替换密码
+            "udp": True,
+            "ip-version": "dual",
+            "plugin": "obfs",
+            "plugin-opts": {
+                "mode": "tls",
+                "host": "bing.com"
+            }
+        },
+
+        # --------------------------------------
+        # 2. Hysteria2 (Hy2) - 示例
+        # --------------------------------------
+        {
+            "name": "Hy2-Region-01",
+            "type": "hysteria2",
+            "server": "hy2.example.com",
+            "port": 443,
+            "password": "replace-with-your-auth",
+            "sni": "www.bing.com",
+            "skip-cert-verify": True,
+            "up": "50 Mbps",
+            "down": "100 Mbps",
+            "alpn": ["h3"],
+            "ip-version": "ipv4-prefer"
+        },
+
+        # --------------------------------------
+        # 3. Tuic - 示例
+        # --------------------------------------
+        {
+            "name": "Tuic-Region-01",
+            "type": "tuic",
+            "server": "tuic.example.com",
+            "port": 8443,
+            "uuid": "00000000-0000-0000-0000-000000000000", # 请替换 UUID
+            "password": "replace-with-your-password",
+            "congestion-controller": "bbr",
+            "udp-relay-mode": "native",
+            "reduce-rtt": True,
+            "alpn": ["h3"],
+            "sni": "tuic.example.com"
+        },
+
+        # --------------------------------------
+        # 4. Trojan / AnyTLS - 示例
+        # --------------------------------------
+        {
+            "name": "Trojan-Region-01",
+            "type": "trojan",
+            "server": "127.0.0.1",
+            "port": 443,
+            "password": "replace-with-your-password",
+            "sni": "trojan.example.com",
+            "udp": True,
+            "skip-cert-verify": False,
+            "client-fingerprint": "chrome"
+        },
+
+        # --------------------------------------
+        # 5. Vmess - 示例
+        # --------------------------------------
+        {
+            "name": "Vmess-Region-01",
+            "type": "vmess",
+            "server": "vmess.example.com",
+            "port": 443,
+            "uuid": "00000000-0000-0000-0000-000000000000",
+            "alterId": 0,
+            "cipher": "auto",
+            "tls": True,
+            "network": "ws",
+            "ws-opts": {
+                "path": "/",
+                "headers": {"Host": "vmess.example.com"}
+            }
+        },
+
+        # --------------------------------------
+        # 6. WireGuard - 示例
+        # --------------------------------------
+        {
+            "name": "WG-Region-01",
+            "type": "wireguard",
+            "server": "1.2.3.4",
+            "port": 51820,
+            "ip": "10.0.0.2",
+            "private-key": "replace-with-private-key", # 敏感信息
+            "public-key": "replace-with-public-key",
+            "mtu": 1420,
+            "udp": True
         }
-    },
-
-    # --------------------------------------
-    # 2. Hysteria2 (Hy2) - 示例
-    # --------------------------------------
-    {
-        "name": "Hy2-Region-01",
-        "type": "hysteria2",
-        "server": "hy2.example.com",
-        "port": 443,
-        "password": "replace-with-your-auth",
-        "sni": "www.bing.com",
-        "skip-cert-verify": True,
-        "up": "50 Mbps",
-        "down": "100 Mbps",
-        "alpn": ["h3"],
-        "ip-version": "ipv4-prefer"
-    },
-
-    # --------------------------------------
-    # 3. Tuic - 示例
-    # --------------------------------------
-    {
-        "name": "Tuic-Region-01",
-        "type": "tuic",
-        "server": "tuic.example.com",
-        "port": 8443,
-        "uuid": "00000000-0000-0000-0000-000000000000", # 请替换 UUID
-        "password": "replace-with-your-password",
-        "congestion-controller": "bbr",
-        "udp-relay-mode": "native",
-        "reduce-rtt": True,
-        "alpn": ["h3"],
-        "sni": "tuic.example.com"
-    },
-
-    # --------------------------------------
-    # 4. Trojan / AnyTLS - 示例
-    # --------------------------------------
-    {
-        "name": "Trojan-Region-01",
-        "type": "trojan",
-        "server": "127.0.0.1",
-        "port": 443,
-        "password": "replace-with-your-password",
-        "sni": "trojan.example.com",
-        "udp": True,
-        "skip-cert-verify": False,
-        "client-fingerprint": "chrome"
-    },
-
-    # --------------------------------------
-    # 5. Vmess - 示例
-    # --------------------------------------
-    {
-        "name": "Vmess-Region-01",
-        "type": "vmess",
-        "server": "vmess.example.com",
-        "port": 443,
-        "uuid": "00000000-0000-0000-0000-000000000000",
-        "alterId": 0,
-        "cipher": "auto",
-        "tls": True,
-        "network": "ws",
-        "ws-opts": {
-            "path": "/",
-            "headers": {"Host": "vmess.example.com"}
-        }
-    },
-
-    # --------------------------------------
-    # 6. WireGuard - 示例
-    # --------------------------------------
-    {
-        "name": "WG-Region-01",
-        "type": "wireguard",
-        "server": "1.2.3.4",
-        "port": 51820,
-        "ip": "10.0.0.2",
-        "private-key": "replace-with-private-key", # 敏感信息
-        "public-key": "replace-with-public-key",
-        "mtu": 1420,
-        "udp": True
-    }
-]
+    ]
 
 # ==========================================
 # 策略组逻辑 (保持原有结构)
@@ -205,6 +207,7 @@ def generate_proxy_groups(
 # ==========================================
 
 def main():
+    proxies_data = _example_proxies_data()
     final_config = {
         "port": 7890,
         "socks-port": 7891,

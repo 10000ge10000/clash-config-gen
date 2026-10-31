@@ -1,5 +1,6 @@
 import logging
 import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from config_builder import (
 LOGGER = logging.getLogger(__name__)
 RULESET_CACHE_DIR = Path(os.getenv("RULESET_CACHE_DIR", "/app/ruleset/dustinwin"))
 _STARTED = False
+_START_LOCK = threading.Lock()
 
 
 def ruleset_cache_enabled() -> bool:
@@ -39,19 +41,26 @@ def update_dustinwin_rulesets(timeout: int = 30) -> dict[str, int]:
 
     for file_name, url in sorted(source_urls.items()):
         target_path = get_ruleset_cache_path(file_name)
-        temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+        temp_path: Path | None = None
         try:
             response = requests.get(url, timeout=timeout)
             response.raise_for_status()
             if not response.content:
                 raise RuntimeError("下载内容为空")
-            temp_path.write_bytes(response.content)
+            # 同目录唯一临时文件 + os.replace，避免多进程/多线程并发写同一个 .tmp。
+            fd, temp_name = tempfile.mkstemp(
+                dir=str(RULESET_CACHE_DIR), prefix=f".{target_path.name}.", suffix=".tmp"
+            )
+            temp_path = Path(temp_name)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(response.content)
             os.replace(temp_path, target_path)
             stats["updated"] += 1
         except Exception as exc:
             stats["failed"] += 1
             try:
-                temp_path.unlink(missing_ok=True)
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
             except OSError:
                 pass
             LOGGER.warning("更新 DustinWin 规则集失败: %s (%s)", file_name, exc)
@@ -61,21 +70,28 @@ def update_dustinwin_rulesets(timeout: int = 30) -> dict[str, int]:
 def _background_loop() -> None:
     interval = max(get_ruleset_update_interval(), 3600)
     while True:
-        stats = update_dustinwin_rulesets()
-        LOGGER.info(
-            "DustinWin 规则集更新完成: updated=%s failed=%s next=%ss",
-            stats["updated"],
-            stats["failed"],
-            interval,
-        )
+        try:
+            stats = update_dustinwin_rulesets()
+            LOGGER.info(
+                "DustinWin 规则集更新完成: updated=%s failed=%s next=%ss",
+                stats["updated"],
+                stats["failed"],
+                interval,
+            )
+        except Exception:
+            # 目录不可写等异常不能让线程退出，下个周期继续重试。
+            LOGGER.exception("DustinWin 规则集更新异常，将在 %ss 后重试", interval)
         time.sleep(interval)
 
 
 def start_ruleset_update_worker() -> None:
     global _STARTED
-    if _STARTED or not ruleset_cache_enabled():
+    if not ruleset_cache_enabled():
         return
-    _STARTED = True
+    with _START_LOCK:
+        if _STARTED:
+            return
+        _STARTED = True
     initial_delay = int(os.getenv("RULESET_INITIAL_UPDATE_DELAY", "5") or "5")
 
     def delayed_start() -> None:

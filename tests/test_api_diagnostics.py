@@ -101,8 +101,8 @@ class ApiDiagnosticsTest(unittest.TestCase):
                 self.assertEqual("24", header_items["profile-update-interval"])
                 self.assertEqual("Clash-Config-Gen", header_items["profile-title"])
                 self.assertIn("clash-config-gen", header_items["profile-web-page-url"])
-                self.assertEqual("https://clash.910501.xyz", header_items["support-url"])
-                self.assertEqual("https://clash.910501.xyz", header_items["x-clash-config-project-url"])
+                self.assertEqual("https://github.com/10000ge10000/clash-config-gen", header_items["support-url"])
+                self.assertEqual("https://github.com/10000ge10000/clash-config-gen", header_items["x-clash-config-project-url"])
                 self.assertTrue(header_items["announce"].startswith("base64:"))
                 decoded_announce = base64.b64decode(
                     header_items["announce"].removeprefix("base64:")

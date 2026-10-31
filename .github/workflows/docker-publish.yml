@@ -29,6 +29,8 @@ jobs:
         run: pip install -r src/requirements.txt
 
       - name: Run unit tests
+        env:
+          RULESET_DIR: ${{ runner.temp }}/ruleset-unit
         run: PYTHONPATH=src python -m unittest discover -s tests -v
 
       - name: Set up Node.js
@@ -41,6 +43,16 @@ jobs:
         run: |
           npm ci
           npx playwright install --with-deps chromium
+
+      # V2 工作台是主入口，push main 时 ci.yml 不运行，这里补上 V2 端到端回归（spec 自行用 python -m uvicorn 启动临时服务）。
+      - name: V2 workspace regression
+        env:
+          PYTHON: python
+          PYTHONPATH: src
+          MIHOMO_VALIDATE_ENABLED: "false"
+          RULESET_CACHE_ENABLED: "false"
+          RULESET_DIR: ${{ runner.temp }}/ruleset-v2
+        run: npm run test:v2
 
       - name: Build local browser-test image
         run: docker build -t clash-config-gen-ui-test .
@@ -56,6 +68,7 @@ jobs:
             -e ALLOW_REGISTRATION=true \
             -e AUTH_COOKIE_SECURE=false \
             -e CSRF_SECRET=ci-only-secret-that-is-longer-than-thirty-two-characters \
+            -e TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128,172.16.0.0/12 \
             -e RULESET_CACHE_ENABLED=false \
             clash-config-gen-ui-test
           node tests/reverse-proxy.mjs &

@@ -43,6 +43,8 @@ server.on('upgrade', (request, socket, head) => {
     socket.pipe(upstream).pipe(socket);
   });
   upstream.on('error', () => socket.destroy());
+  // 页面刷新时浏览器会直接重置旧 WebSocket，未监听 error 会让整个反代进程崩溃。
+  socket.on('error', () => upstream.destroy());
 });
 
 server.listen(listenPort, '127.0.0.1');

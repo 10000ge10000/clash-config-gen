@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest import mock
 
 import yaml
 
@@ -25,6 +27,12 @@ from normalizer import normalize_proxy_for_mihomo
 
 
 class ValidateConfigTest(unittest.TestCase):
+    def setUp(self):
+        # 未设置 PUBLIC_BASE_URL 时规则集回退上游直链；缓存链接相关断言需显式给出公网地址。
+        patcher = mock.patch.dict(os.environ, {"PUBLIC_BASE_URL": "https://sub.example.test"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_browser_fingerprint_is_moved_to_client_fingerprint(self):
         """旧字段 fingerprint=chrome 会让 mihomo 当成证书固定并拒绝加载。"""
         proxy = normalize_proxy_for_mihomo(
