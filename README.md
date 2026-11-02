@@ -321,7 +321,7 @@ V2 上传的自定义规则集会保存为用户隔离的内容哈希版本，�
 
 | 协议 | 已适配字段 |
 | --- | --- |
-| VLESS Reality | `uuid`、`tls`、`flow`、`servername`、`reality-opts`、`client-fingerprint` |
+| VLESS Reality | `uuid`、`tls`、`flow`、`servername`、`reality-opts`、`client-fingerprint`、`smux.brutal-opts` |
 | VLESS XHTTP Reality Enc | `uuid`、`network: xhttp`、`xhttp-opts`、`encryption`、`alpn`、`servername`、`reality-opts`、`client-fingerprint`（客户端内核需 v1.19.22 或更高） |
 | TUIC v5 | `uuid`、`password`、`sni`、`alpn`、`udp-relay-mode`、`congestion-controller` |
 | Shadowsocks 2022 | `cipher`、`password`、`udp` |
@@ -338,12 +338,14 @@ V2 上传的自定义规则集会保存为用户隔离的内容哈希版本，�
 
 ### TCP Brutal 与多路复用 (smux) 使用指引
 
-- **服务端 TCP Brutal V2（内核全自动加速，推荐）**：
-  - **无需 smux 与客户端配置**：TCP Brutal V2 属于纯服务端 Linux 内核级单边拥塞控制算法，服务端部署后对所有入站 TCP 连接自动生效，客户端**无需且不应开启 `smux.brutal-opts`**。
-  - **推荐原生多连接协议**：在 TCP Brutal V2 服务端环境下，强烈推荐优先使用原生多连接协议（如 **VLESS Reality**、**Trojan**、**Shadowsocks** 等）。原生多 TCP 连接可由服务端内核 Brutal 独立高效调度发包，既享有极端弱网抗丢包加速，又规避了应用层 smux 多路复用带来的队头阻塞（HOL Blocking）与单连接性能损耗。
-- **客户端 smux Brutal 握手（仅限特殊场景）**：
-  - 仅限客户端为 Linux 且装有对应 TCP Brutal 内核模块、同时服务端开启了 smux brutal 速率握手协商的极少数场景。普通平台（Windows / macOS / iOS / Android）没有该内核模块，实测（mihomo v1.19.33，macOS 客户端）开启后连接正常，只留一条 debug 日志，Brutal 不生效，开了也没有意义。
-  - 因此，本项目已将所有协议表单中 `smux_brutal_enabled` 默认值统一定为 `false`，保障跨平台稳定可用。普通用户保持默认关闭即可。
+own-rules 有两条 Brutal 路径，可以同时存在：
+
+- **smux 协商（VLESS Reality、VMess 默认）**：`x export` 的这两种节点自带 `smux.brutal-opts`，导入后原样保留。服务端已加载 Brutal 模块时，下载方向由服务端按协商带宽发送。客户端没有模块只影响上传方向，只留一条 debug 日志，连接照常（mihomo v1.19.33 实测）。带宽默认 1000 Mbps，请在服务端 `x` → 节点配置管理 → TCP-Brutal 按实际带宽修改后重新导入。
+- **服务端内核规则（`x brutal add <客户端IP> <带宽>`）**：只在服务端设置，对原生 TCP 连接生效，客户端不用配置。VLESS XHTTP 只能走这条：XHTTP 自带多路复用，再配 smux 时 Brutal 协商报 `nested multiplexing`，连接失败。
+
+Vision 与普通 smux 仍然互斥：不带 Brutal 的 smux 对 Vision 没有意义，还可能连不上 Xray 服务端，导入时会自动移除并提示。带 `brutal-opts.enabled: true` 的才保留。
+
+smux 会让吞吐下降（同机回环实测 Vision 从约 108 MB/s 降到约 34 MB/s）。不需要 Brutal 时，用分享链接导入的节点不带 smux，服务端照常接受。
 
 ## GitHub Actions
 

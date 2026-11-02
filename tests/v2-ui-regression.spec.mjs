@@ -302,7 +302,7 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   const shareImportResponse = await importMethod(page, 'share', 'ss://aes-128-gcm:share-password@share.example.com:8443#Share-Node');
   expect(shareImportResponse.status(), await shareImportResponse.text()).toBe(200);
   await expect(page.locator('#nodeGrid .node-card')).toHaveCount(2, { timeout: 15_000 });
-  await expect(page.locator('#nodeGrid')).toContainText('ss-share.example.com');
+  await expect(page.locator('#nodeGrid')).toContainText('Share-Node');
   await expect(page.locator('#nodeCount')).toHaveText('2');
 
   const privateImportUrl = 'http://127.0.0.1:9/private-subscription';
@@ -366,7 +366,7 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
 
   await page.locator('#nodeGrid .node-card').filter({ hasText: 'Manual-Edited' }).getByRole('button', { name: '上移' }).click();
   const namesAfterReorder = await state(page, () => window.v2State.config.proxies.map((node) => node.name));
-  expect(namesAfterReorder).toEqual(['YAML-Node', 'Manual-Edited', 'ss-share.example.com']);
+  expect(namesAfterReorder).toEqual(['YAML-Node', 'Manual-Edited', 'Share-Node']);
   page.once('dialog', (dialog) => dialog.accept());
   await page.locator('#nodeGrid .node-card').filter({ hasText: 'YAML-Node' }).getByRole('button', { name: '删除' }).click();
   await expect(page.locator('#nodeGrid .node-card')).toHaveCount(2);
@@ -624,7 +624,7 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   await expect(page.locator('#loginOverlay')).not.toHaveClass(/active/, { timeout: 15_000 });
   await expect(page.locator('#nodeGrid .node-card')).toHaveCount(2, { timeout: 15_000 });
   await expect(page.locator('#nodeGrid')).toContainText('Manual-Edited');
-  await expect(page.locator('#nodeGrid')).toContainText('ss-share.example.com');
+  await expect(page.locator('#nodeGrid')).toContainText('Share-Node');
   await expect(page.locator('#subUrl')).toHaveText(newSubscriptionUrl);
   await page.locator('#step-tab-3').click();
   await expect(page.locator('#ruleSource')).toHaveValue('dustinwin规则');

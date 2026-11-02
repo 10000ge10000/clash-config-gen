@@ -619,8 +619,8 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
         manual_node["ip-version"] = common_ip_version
     if enable_smux:
         has_vision = "xtls-rprx-vision" in str(manual_node.get("flow") or f.get("vless_flow") or f.get("flow") or "").lower()
-        if has_vision and smux_enabled:
-            raise ValueError("xtls-rprx-vision 与 smux 多路复用互斥，不可同时启用")
+        if has_vision and smux_enabled and not smux_brutal_enabled:
+            raise ValueError("xtls-rprx-vision 与普通 smux 多路复用互斥，只有开启 Brutal 时才能同时启用")
         manual_node["smux"] = {
             "enabled": smux_enabled,
             "protocol": smux_protocol,
@@ -703,7 +703,7 @@ def _smux_fields(node_type: str = ""):
         _f("smux_max_connections", "最大连接数", "number", default=4, minimum=1, visible=show),
         _f("smux_brutal_enabled", "Brutal 拥塞控制", "checkbox",
            default=False, visible=show,
-           help_="客户端 smux Brutal 握手（仅限装有内核模块的 Linux 客户端）。若服务端已部署 TCP Brutal V2（内核全自动加速），客户端无需且不应开启此项。"),
+           help_="通过 smux 协商 Brutal 带宽。服务端已加载 Brutal 模块时，下载方向由服务端按此带宽发送；客户端没有模块只影响上传方向，连接不受影响。"),
         _f("smux_brutal_up", "Brutal 上行 (Mbps)", "number", default=100, minimum=1, visible=show_brutal),
         _f("smux_brutal_down", "Brutal 下行 (Mbps)", "number", default=100, minimum=1, visible=show_brutal),
     ]

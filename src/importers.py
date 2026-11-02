@@ -4,6 +4,7 @@ import json
 import re
 import os
 import socket
+import textwrap
 import threading
 import time
 import uuid
@@ -229,6 +230,27 @@ def safe_ruleset_file_path(alias: str, rule_format: str, ruleset_dir: str = "rul
     return target_path
 
 
+def _normalize_node_list_snippet(raw_text: str) -> str | None:
+    """把终端复制的节点片段整理成顶格列表；不是节点片段时返回 None。
+
+    片段通常带统一缩进（`- name` 在第 3 列），复制时首行缩进又常被选区吃掉，变成首行
+    顶格、后面几行还在原来的列。这两种写法 YAML 都解析不了，只能先把列对齐。
+    """
+    lines = [line.rstrip() for line in raw_text.splitlines()]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines or not lines[0].lstrip().startswith("- name:"):
+        return None
+    if len(lines) > 1 and lines[1].strip() and not lines[0].startswith(" "):
+        # 第二行是同一节点的字段，比 "-" 多缩进 2 列，由此反推首行本来的缩进。
+        list_indent = len(lines[1]) - len(lines[1].lstrip()) - 2
+        if list_indent > 0:
+            lines[0] = " " * list_indent + lines[0]
+    return textwrap.dedent("\n".join(lines))
+
+
 def parse_proxy_yaml(raw_text: str) -> tuple[list[dict[str, Any]], list[str]]:
     """智能解析完整 OpenClash 配置、纯节点列表、onekey 片段、Base64 订阅或 URI 列表。"""
     if not raw_text or not raw_text.strip():
@@ -237,15 +259,13 @@ def parse_proxy_yaml(raw_text: str) -> tuple[list[dict[str, Any]], list[str]]:
     _raise_if_html_response(raw_text)
 
     warnings: list[str] = []
-    text = raw_text.strip()
 
-    # onekey 格式检测：直接以 - name: 开头的节点列表（无 proxies: 包裹）
-    # 或者以空格开头的 - name:（缩进格式）
-    first_nonempty = next((line for line in text.splitlines() if line.strip()), "")
-    if first_nonempty.strip().startswith("- name:") or first_nonempty.startswith("  - name:"):
+    # onekey 格式检测：以 - name: 开头的节点列表（无 proxies: 包裹），含带缩进的片段
+    snippet = _normalize_node_list_snippet(raw_text)
+    if snippet is not None:
         try:
             # 尝试包装为 proxies 列表
-            wrapped = f"proxies:\n{text}"
+            wrapped = f"proxies:\n{snippet}"
             loaded = yaml.safe_load(wrapped)
             if loaded and isinstance(loaded, dict) and "proxies" in loaded:
                 proxies = loaded["proxies"]
@@ -356,20 +376,26 @@ def parse_share_link(share_link: str) -> dict[str, Any]:
     parsed = urlparse(share_link.strip())
     protocol = parsed.scheme.lower()
     if protocol == "ss":
-        return _parse_ss(parsed, share_link)
-    if protocol == "trojan":
-        return _parse_trojan(parsed)
-    if protocol == "vmess":
+        proxy = _parse_ss(parsed, share_link)
+    elif protocol == "trojan":
+        proxy = _parse_trojan(parsed)
+    elif protocol == "vmess":
         return _parse_vmess(share_link)
-    if protocol in {"hysteria2", "hy2"}:
-        return _parse_hysteria2(parsed)
-    if protocol == "tuic":
-        return _parse_tuic(parsed)
-    if protocol == "vless":
-        return _parse_vless(parsed)
-    if protocol == "anytls":
-        return _parse_anytls(parsed)
-    raise ValueError(f"暂不支持的分享链接协议: {protocol}")
+    elif protocol in {"hysteria2", "hy2"}:
+        proxy = _parse_hysteria2(parsed)
+    elif protocol == "tuic":
+        proxy = _parse_tuic(parsed)
+    elif protocol == "vless":
+        proxy = _parse_vless(parsed)
+    elif protocol == "anytls":
+        proxy = _parse_anytls(parsed)
+    else:
+        raise ValueError(f"暂不支持的分享链接协议: {protocol}")
+    # 节点名在 #fragment（VMess 在 ps）。没有读取时同一台机器的两个 VLESS 会重名，后一个被跳过。
+    name = " ".join(unquote(parsed.fragment).split())
+    if name:
+        proxy["name"] = name
+    return proxy
 
 
 def _extract_yaml_candidate(raw_text: str) -> str:

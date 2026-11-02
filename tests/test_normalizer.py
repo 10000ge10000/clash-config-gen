@@ -14,7 +14,7 @@ import importers
 
 
 class NormalizerDefensiveSanitizationTest(unittest.TestCase):
-    def test_vision_flow_with_smux_enabled_is_sanitized_with_warning(self):
+    def test_vision_flow_keeps_smux_with_brutal(self):
         proxy: dict[str, Any] = {
             "name": "vless-reality-test",
             "type": "vless",
@@ -35,9 +35,24 @@ class NormalizerDefensiveSanitizationTest(unittest.TestCase):
             },
         }
         res = normalize_proxy(proxy)
-        self.assertNotIn("smux", res.proxy)
+        self.assertTrue(res.proxy["smux"]["brutal-opts"]["enabled"])
         self.assertEqual(res.proxy["flow"], "xtls-rprx-vision")
         self.assertEqual(res.proxy["server"], "1.2.3.4")
+        self.assertEqual([], [w for w in res.warnings if "互斥" in w])
+
+    def test_vision_flow_with_plain_smux_is_sanitized_with_warning(self):
+        proxy: dict[str, Any] = {
+            "name": "vless-reality-test",
+            "type": "vless",
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "11111111-2222-3333-4444-555555555555",
+            "flow": "xtls-rprx-vision",
+            "tls": True,
+            "smux": {"enabled": True, "protocol": "h2mux", "brutal-opts": {"enabled": False}},
+        }
+        res = normalize_proxy(proxy)
+        self.assertNotIn("smux", res.proxy)
         self.assertIn("已自动移除与 xtls-rprx-vision 互斥的 smux 多路复用配置", res.warnings)
 
     def test_vision_udp443_flow_with_smux_is_also_sanitized(self):
@@ -156,7 +171,7 @@ class NormalizerDefensiveSanitizationTest(unittest.TestCase):
                     "smux_enabled": True,
                 },
             )
-        self.assertIn("xtls-rprx-vision 与 smux 多路复用互斥，不可同时启用", str(ctx.exception))
+        self.assertIn("xtls-rprx-vision 与普通 smux 多路复用互斥，只有开启 Brutal 时才能同时启用", str(ctx.exception))
 
         # 2. flow contains xtls-rprx-vision-udp443 and enable_smux=True -> raises ValueError
         with self.assertRaises(ValueError) as ctx:
@@ -171,7 +186,7 @@ class NormalizerDefensiveSanitizationTest(unittest.TestCase):
                     "enable_smux": True,
                 },
             )
-        self.assertIn("xtls-rprx-vision 与 smux 多路复用互斥，不可同时启用", str(ctx.exception))
+        self.assertIn("xtls-rprx-vision 与普通 smux 多路复用互斥，只有开启 Brutal 时才能同时启用", str(ctx.exception))
 
         # 2b. flow passed as 'flow' key directly instead of 'vless_flow' -> raises ValueError
         with self.assertRaises(ValueError) as ctx:
@@ -186,7 +201,7 @@ class NormalizerDefensiveSanitizationTest(unittest.TestCase):
                     "enable_smux": True,
                 },
             )
-        self.assertIn("xtls-rprx-vision 与 smux 多路复用互斥，不可同时启用", str(ctx.exception))
+        self.assertIn("xtls-rprx-vision 与普通 smux 多路复用互斥，只有开启 Brutal 时才能同时启用", str(ctx.exception))
 
         # 3. flow is none and enable_smux=True -> succeeds
         node = build_manual_node(
@@ -236,10 +251,6 @@ class NormalizerDefensiveSanitizationTest(unittest.TestCase):
     smux:
       enabled: true
       protocol: h2mux
-      brutal-opts:
-        enabled: true
-        up: 100 Mbps
-        down: 100 Mbps
 """
         nodes, warnings = importers.parse_proxy_yaml(raw_yaml)
         self.assertEqual(1, len(nodes))

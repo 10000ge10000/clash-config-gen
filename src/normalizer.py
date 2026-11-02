@@ -144,7 +144,11 @@ def normalize_proxy(proxy: dict[str, Any]) -> NormalizationResult:
         elif isinstance(smux_val, (str, int)):
             smux_enabled = _normalize_bool_value(smux_val) is True
 
-        if smux_enabled:
+        # 普通 smux 对 Vision 没有意义，还可能连不上 Xray 服务端。带 Brutal 的是明确配置：
+        # mihomo 服务端支持 Vision + smux，Brutal 也只能靠 smux 协商，不能删。
+        brutal_opts = smux_val.get("brutal-opts") if isinstance(smux_val, dict) else None
+        brutal_enabled = isinstance(brutal_opts, dict) and _normalize_bool_value(brutal_opts.get("enabled")) is True
+        if smux_enabled and not brutal_enabled:
             normalized.pop("smux", None)
             warnings.append("已自动移除与 xtls-rprx-vision 互斥的 smux 多路复用配置")
 

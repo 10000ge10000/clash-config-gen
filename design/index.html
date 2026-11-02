@@ -129,7 +129,7 @@
       <section class="step-section" id="step4" role="tabpanel" aria-labelledby="step-tab-4" tabindex="0">
         <div class="step-banner" style="--bc:52,211,153"><div class="sb-ico">✓</div><div class="sb-body"><div class="sb-eyebrow">Step 04 · Validate & Publish</div><h2 class="sb-title">校验与发布</h2><p class="sb-desc">校验和发布是两个独立动作；只有当前草稿通过服务端校验且之后未再修改时，发布按钮才会启用。</p></div><div class="sb-num">04</div></div>
         <div class="panel">
-          <div class="generate-hero"><h3>校验当前草稿</h3><p>服务端返回检查项、提示、统计、mihomo 内核校验结果、完整 YAML 与发布差异。</p><button class="btn btn-primary btn-lg" id="validateBtn" type="button"><span class="btn-scan"></span>校验草稿</button><div class="status-note" id="validationStatus">尚未校验</div></div>
+          <div class="generate-hero"><h3>校验并发布</h3><p>先校验当前草稿，通过后即可发布。服务端返回检查项、提示、统计、mihomo 内核校验结果、完整 YAML 与发布差异。</p><div class="hero-actions"><button class="btn btn-primary btn-lg" id="validateBtn" type="button"><span class="btn-scan"></span>校验草稿</button><button class="btn btn-primary btn-lg" id="publishBtn" type="button" disabled>发布当前草稿</button></div><div class="status-note" id="validationStatus">尚未校验</div><div class="status-note" id="publishGuard">发布需要先校验当前未修改草稿。</div><pre id="publishDiff" class="publish-diff"></pre></div>
           <div class="check-results show" id="checkResults"><div class="check-empty">尚未校验，点击“校验草稿”开始</div></div>
           <div class="validation-meta" id="validationStats"></div>
           <div id="validationWarnings" class="phase2-empty" hidden></div>
@@ -137,7 +137,6 @@
             <div class="yaml-head"><div class="yaml-dots"><i></i><i></i><i></i></div><span>config.yaml — 已校验预览</span><span style="margin-left:auto;color:var(--text-faint)" id="yamlMeta"></span></div>
             <div class="yaml-code" id="yamlCode"></div>
             <div class="gen-actions"><button class="btn btn-primary" id="downloadYamlBtn" type="button">下载 config.yaml</button><button class="btn" id="copySubBtn" type="button">复制订阅链接</button><button class="btn btn-ghost" id="saveDraftBtn" type="button">保存草稿</button></div>
-            <div class="publish-block"><div class="status-note" id="publishGuard">发布需要先校验当前未修改草稿。</div><button class="btn btn-primary" id="publishBtn" type="button" disabled>发布当前草稿</button><pre id="publishDiff" class="publish-diff"></pre></div>
           </div>
         </div>
       </section>

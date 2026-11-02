@@ -208,6 +208,54 @@ class ImportSecurityTest(unittest.TestCase):
         self.assertNotIn("encryption", proxy)
         self.assertNotIn("xhttp-opts", proxy)
 
+    def test_share_link_fragment_is_node_name(self):
+        links = {
+            "vless://11111111-2222-3333-4444-555555555555@203.0.113.7:9527?security=reality&type=tcp#HK-vless-reality": "HK-vless-reality",
+            "vless://11111111-2222-3333-4444-555555555555@203.0.113.7:9531?security=reality&type=xhttp&path=%2Fa#HK%20vless-xhttp": "HK vless-xhttp",
+            "hysteria2://pw@203.0.113.7:29949?sni=a.example#HK-hy2": "HK-hy2",
+            "tuic://11111111-2222-3333-4444-555555555555:pw@203.0.113.7:9528?sni=a.example#HK-tuic": "HK-tuic",
+            "anytls://pw@203.0.113.7:9530?sni=a.example#HK-anytls": "HK-anytls",
+            "ss://MjAyMi1ibGFrZTMtYWVzLTEyOC1nY206cHc=@203.0.113.7:9529#HK-ss": "HK-ss",
+            "trojan://pw@203.0.113.7:443?sni=a.example#HK-trojan": "HK-trojan",
+        }
+        for link, expected in links.items():
+            self.assertEqual(importers.parse_share_link(link)["name"], expected, link)
+        # 没有 fragment 时仍用协议加地址，换行等控制字符不进节点名
+        bare = "vless://11111111-2222-3333-4444-555555555555@203.0.113.7:9527?security=reality"
+        self.assertEqual(importers.parse_share_link(bare)["name"], "vless-203.0.113.7")
+        self.assertEqual(importers.parse_share_link(bare + "#%20%20")["name"], "vless-203.0.113.7")
+        self.assertEqual(importers.parse_share_link(bare + "#a%0Ab")["name"], "a b")
+
+    def test_share_links_from_one_server_keep_both_vless_nodes(self):
+        text = "\n".join([
+            "vless://11111111-2222-3333-4444-555555555555@203.0.113.7:9527?security=reality&type=tcp#HK-vless-reality",
+            "vless://11111111-2222-3333-4444-555555555555@203.0.113.7:9531?security=reality&type=xhttp&path=%2Fa#HK-vless-xhttp",
+        ])
+        proxies, _ = importers.parse_proxy_yaml(text)
+        self.assertEqual([p["name"] for p in proxies], ["HK-vless-reality", "HK-vless-xhttp"])
+
+    def test_terminal_copied_node_snippets_parse(self):
+        indented = """  - name: "HK-ss"
+    type: ss
+    server: "203.0.113.7"
+    port: 9529
+    cipher: "2022-blake3-aes-128-gcm"
+    password: "AAAAAAAAAAAAAAAAAAAAAA=="
+  - name: "HK-vmess"
+    type: vmess
+    server: "203.0.113.7"
+    port: 8880
+    uuid: "11111111-2222-3333-4444-555555555555"
+    cipher: auto
+    alterId: 0
+"""
+        lost_first_indent = indented.lstrip()
+        top_level = "\n".join(line[2:] for line in indented.splitlines())
+        for label, text in (("indented", indented), ("lost-first-indent", lost_first_indent), ("top-level", top_level), ("surrounding-blanks", f"\n\n{indented}\n")):
+            with self.subTest(label):
+                nodes, _ = importers.parse_proxy_yaml(text)
+                self.assertEqual(["HK-ss", "HK-vmess"], [node["name"] for node in nodes])
+
     def test_onekey_export_yaml_keeps_xhttp_fields(self):
         content = """# onekey-export schema=1 core=v1.19.33
 proxies:

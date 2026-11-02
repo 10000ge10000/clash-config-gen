@@ -2247,7 +2247,7 @@ class APITest(unittest.TestCase):
         self.assertFalse(vless_brutal["default"])
         self.assertFalse(ss_brutal["default"])
         self.assertFalse(vmess_brutal["default"])
-        self.assertIn("TCP Brutal V2", vless_brutal["help"])
+        self.assertIn("下载方向", vless_brutal["help"])
         self.assertEqual(vless_brutal["help"], ss_brutal["help"])
         self.assertEqual(vless_brutal["help"], vmess_brutal["help"])
 
@@ -2328,7 +2328,7 @@ class APITest(unittest.TestCase):
             headers=self._headers(),
         )
         self.assertEqual(400, vless_conflict.status_code)
-        self.assertIn("xtls-rprx-vision 与 smux 多路复用互斥，不可同时启用", vless_conflict.json()["error"])
+        self.assertIn("xtls-rprx-vision 与普通 smux 多路复用互斥，只有开启 Brutal 时才能同时启用", vless_conflict.json()["error"])
 
         vmess = self.client.post(
             "/api/node/build",
