@@ -271,7 +271,6 @@ def parse_proxy_yaml(raw_text: str) -> tuple[list[dict[str, Any]], list[str]]:
                 proxies = loaded["proxies"]
                 if isinstance(proxies, list) and proxies:
                     valid, validate_warnings = validate_proxies(proxies)
-                    warnings.append("已按 onekey 节点列表格式解析")
                     return valid, warnings + validate_warnings
         except Exception:
             pass  # 继续尝试其他解析方式
@@ -282,8 +281,10 @@ def parse_proxy_yaml(raw_text: str) -> tuple[list[dict[str, Any]], list[str]]:
     for label, candidate in attempts:
         try:
             _raise_if_html_response(candidate)
+            # 同时有链接和 YAML（整页复制）时取 YAML：smux、ECH 这些字段链接里没有
+            has_yaml_nodes = re.search(r"(?m)^\s*(?:proxies:\s*$|- name:|- \{)", candidate) is not None
             uri_proxies = _parse_uri_lines(candidate)
-            if uri_proxies:
+            if uri_proxies and not has_yaml_nodes:
                 warnings.append(f"已按 URI 订阅列表解析: {label}")
                 return validate_proxies(uri_proxies)
 
@@ -315,6 +316,12 @@ def parse_proxy_yaml(raw_text: str) -> tuple[list[dict[str, Any]], list[str]]:
             return valid, warnings + validate_warnings
         except Exception as exc:
             errors.append(f"{label}: {exc}")
+
+    # YAML 部分坏了但内容里还有链接时退回链接，至少能导入节点
+    for _label, candidate in attempts:
+        uri_proxies = _parse_uri_lines(candidate)
+        if uri_proxies:
+            return validate_proxies(uri_proxies)
 
     detail = "\n".join(f"- {item}" for item in errors[-5:])
     raise ValueError(f"无法解析为有效节点。已尝试原文、自动修复、Base64 解码和 URI 列表。\n{detail}")
@@ -360,9 +367,6 @@ def validate_proxies(proxies: list[Any]) -> tuple[list[dict[str, Any]], list[str
             warnings.append(f"导入内容中存在重复节点名 {name}，后续重复项已跳过")
             continue
         seen_names.add(name)
-
-        if normalized.get("type") in {"anytls", "tuic"}:
-            warnings.append(f"节点 {name} 使用 {normalized['type']}，请确认你的 OpenClash 内核版本支持该协议")
 
         valid.append(normalized)
 
@@ -426,7 +430,8 @@ def _extract_yaml_candidate(raw_text: str) -> str:
             extracted_blocks.append("")
             continue
 
-        if indent > base_indent:
+        # 缩进更深但不像 YAML 的行（终端的标题、二维码）表示节点已结束
+        if indent > base_indent and (":" in stripped or stripped.startswith("-")):
             extracted_blocks.append(line[base_indent:])
             continue
 

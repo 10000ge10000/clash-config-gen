@@ -410,8 +410,11 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
         node_password = _required_text(f, "node_password", "密码")
         hy2_sni = _str(f.get("hy2_sni")).strip()
         hy2_obfs_type = _enum_field(f, "hy2_obfs_type", "Hysteria2 混淆插件", HY2_OBFS_OPTIONS, default="none")
-        hy2_up_mbps = _int_field(f, "hy2_up_mbps", "Hysteria2 上行容量", default=50, minimum=1)
-        hy2_down_mbps = _int_field(f, "hy2_down_mbps", "Hysteria2 下行容量", default=100, minimum=1)
+        # 显式留空表示不限速，由客户端用 BBR；字段缺失时仍用默认值
+        hy2_up_blank = "hy2_up_mbps" in f and str(f["hy2_up_mbps"]).strip() == ""
+        hy2_down_blank = "hy2_down_mbps" in f and str(f["hy2_down_mbps"]).strip() == ""
+        hy2_up_mbps = 0 if hy2_up_blank else _int_field(f, "hy2_up_mbps", "Hysteria2 上行容量", default=50, minimum=1)
+        hy2_down_mbps = 0 if hy2_down_blank else _int_field(f, "hy2_down_mbps", "Hysteria2 下行容量", default=100, minimum=1)
         hy2_obfs_password = _str(f.get("hy2_obfs_password"))
         hy2_skip_cert = _bool(f.get("hy2_skip_cert", True))
         hy2_alpn_items = _alpn_items(f.get("hy2_alpn"), "Hysteria2 ALPN", default="h3")
@@ -441,8 +444,10 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
                 raise ValueError("Hysteria2 混淆启用时混淆密码不能为空")
             manual_node["obfs"] = hy2_obfs_type
             manual_node["obfs-password"] = hy2_obfs_password
-        manual_node["up"] = f"{hy2_up_mbps} Mbps"
-        manual_node["down"] = f"{hy2_down_mbps} Mbps"
+        if not hy2_up_blank:
+            manual_node["up"] = f"{hy2_up_mbps} Mbps"
+        if not hy2_down_blank:
+            manual_node["down"] = f"{hy2_down_mbps} Mbps"
         manual_node["hop-interval"] = normalized_hop_interval
         if hy2_fingerprint != "none":
             manual_node["client-fingerprint"] = hy2_fingerprint
@@ -591,11 +596,13 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
         anytls_min_idle_session = _int_field(
             f, "anytls_min_idle_session", "AnyTLS min-idle-session", default=2, minimum=0
         )
+        anytls_tfo = _bool(f.get("anytls_tfo"))
         anytls_ech_enabled = _bool(f.get("anytls_ech_enabled"))
         anytls_ech_config = _str(f.get("anytls_ech_config"))
         anytls_ech_query_server_name = _str(f.get("anytls_ech_query_server_name"))
 
         manual_node["password"] = anytls_password
+        manual_node["tfo"] = anytls_tfo
         manual_node["skip-cert-verify"] = anytls_skip_cert_verify
         if anytls_sni:
             manual_node["sni"] = anytls_sni
@@ -805,6 +812,7 @@ NODE_FORM_SCHEMA = {
         _f("anytls_idle_session_check_interval", "idle-session-check-interval", "number", default=30, minimum=1),
         _f("anytls_idle_session_timeout", "idle-session-timeout", "number", default=180, minimum=1),
         _f("anytls_min_idle_session", "min-idle-session", "number", default=2, minimum=0),
+        _f("anytls_tfo", "TFO", "checkbox"),
         _f("anytls_ech_enabled", "启用 ECH", "checkbox"),
         _f("anytls_ech_config", "ECH config", "textarea", visible={"key": "anytls_ech_enabled", "equals": True}),
         _f("anytls_ech_query_server_name", "ECH query-server-name", visible={"key": "anytls_ech_enabled", "equals": True}),
@@ -830,8 +838,10 @@ NODE_FORM_SCHEMA = {
         _f("node_password", "密码", "password", required=True),
         _f("hy2_sni", "SNI", default="www.bing.com"),
         _f("hy2_obfs_type", "混淆插件", "select", default="none", options=HY2_OBFS_OPTIONS),
-        _f("hy2_up_mbps", "上行链路容量 (Mbps)", "number", default=50, minimum=1),
-        _f("hy2_down_mbps", "下行链路容量 (Mbps)", "number", default=100, minimum=1),
+        _f("hy2_up_mbps", "上行链路容量 (Mbps)", "number", default=50, minimum=1,
+           help_="留空表示不声明带宽，由客户端用 BBR"),
+        _f("hy2_down_mbps", "下行链路容量 (Mbps)", "number", default=100, minimum=1,
+           help_="留空表示不声明带宽，由客户端用 BBR"),
         _f("hy2_obfs_password", "混淆密码", "password", visible={"key": "hy2_obfs_type", "not_equals": "none"}, required=True),
         _f("hy2_skip_cert", "跳过证书验证", "checkbox", default=True),
         _f("hy2_alpn", "ALPN", "select", default="h3", options=ALPN_OPTIONS,

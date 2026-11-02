@@ -297,13 +297,13 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   expect(yamlImportResponse.status(), await yamlImportResponse.text()).toBe(200);
   await expect(page.locator('#nodeGrid .node-card')).toHaveCount(1, { timeout: 15_000 });
   await expect(page.locator('#nodeGrid')).toContainText('YAML-Node');
-  await expect(page.locator('#nodeCount')).toHaveText('1');
+  await expect(page.locator('#footerNodeCount')).toHaveText('1');
 
   const shareImportResponse = await importMethod(page, 'share', 'ss://aes-128-gcm:share-password@share.example.com:8443#Share-Node');
   expect(shareImportResponse.status(), await shareImportResponse.text()).toBe(200);
   await expect(page.locator('#nodeGrid .node-card')).toHaveCount(2, { timeout: 15_000 });
   await expect(page.locator('#nodeGrid')).toContainText('Share-Node');
-  await expect(page.locator('#nodeCount')).toHaveText('2');
+  await expect(page.locator('#footerNodeCount')).toHaveText('2');
 
   const privateImportUrl = 'http://127.0.0.1:9/private-subscription';
   tracker.allowResponse(
@@ -1846,5 +1846,87 @@ proxies:
   expect(saved.alpn).toEqual(['h2']);
   expect(saved['reality-opts']['short-id']).toBe('1234abcd');
   expect(saved.flow).toBeUndefined();
+  tracker.assertClean();
+});
+
+test('V2 onekey 表单回显：smux Brutal 与 TFO 勾选，Hy2 不写入默认带宽，取消 smux 生效', async ({ page }) => {
+  test.setTimeout(120_000);
+  const tracker = trackPageFailures(page);
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+  await page.locator('#step-tab-1').click();
+  await page.locator('.method-card[data-method="yaml"]').click();
+  await page.locator('#importInput').fill(`- name: "Echo-Vision"
+  type: vless
+  server: 203.0.113.7
+  port: 9527
+  uuid: 123e4567-e89b-12d3-a456-426614174000
+  network: tcp
+  tls: true
+  udp: true
+  tfo: true
+  flow: xtls-rprx-vision
+  servername: www.apple.com
+  reality-opts:
+    public-key: AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA
+    short-id: "1234abcd"
+  client-fingerprint: chrome
+  smux:
+    enabled: true
+    protocol: smux
+    max-connections: 4
+    min-streams: 4
+    padding: true
+    brutal-opts:
+      enabled: true
+      up: 900
+      down: 800
+- name: "Echo-Hy2"
+  type: hysteria2
+  server: 203.0.113.7
+  port: 29949
+  password: secret
+  sni: www.bing.com
+`);
+  await page.locator('#importBtn').click();
+  await expect(page.locator('#importSummary')).toContainText('本次导入 2 个节点', { timeout: 15_000 });
+  await expect(page.locator('#importMessages')).toBeHidden();
+  await waitForSaved(page);
+  await page.locator('#step-tab-2').click();
+  const field = (key) => page.locator(`#nodeSchemaFields [data-field-key="${key}"]`);
+  const openCard = async (name) => {
+    await page.locator('#nodeGrid .node-card').filter({ hasText: name }).first().getByRole('button', { name: '编辑' }).click();
+    await expect(page.locator('#nodeFormPanel')).toBeVisible();
+  };
+  const node = (name) => page.evaluate((target) => window.v2State.config.proxies.find((item) => item.name === target), name);
+  const saveForm = async () => {
+    await page.locator('#saveNodeBtn').click();
+    await expect(page.locator('#nodeFormPanel')).toBeHidden({ timeout: 15_000 });
+    await waitForSaved(page);
+  };
+
+  await openCard('Echo-Vision');
+  await expect(field('vless_tfo')).toBeChecked();
+  await expect(field('enable_smux')).toBeChecked();
+  await expect(field('smux_brutal_enabled')).toBeChecked();
+  await expect(field('smux_protocol')).toHaveValue('smux');
+  await expect(field('smux_brutal_up')).toHaveValue('900');
+  await expect(field('smux_brutal_down')).toHaveValue('800');
+  await saveForm();
+  const saved = await node('Echo-Vision');
+  expect(saved.smux['brutal-opts'].enabled).toBe(true);
+  expect(saved.smux['min-streams']).toBe(4);
+  expect(saved.tfo).toBe(true);
+
+  await openCard('Echo-Hy2');
+  await saveForm();
+  const hy2 = await node('Echo-Hy2');
+  expect(hy2.up).toBeUndefined();
+  expect(hy2.down).toBeUndefined();
+
+  await openCard('Echo-Vision');
+  await field('enable_smux').uncheck();
+  await saveForm();
+  expect((await node('Echo-Vision')).smux).toBeUndefined();
   tracker.assertClean();
 });

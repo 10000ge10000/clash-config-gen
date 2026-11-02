@@ -53,12 +53,6 @@
         <div class="hero-eyebrow">Subscription Workspace</div>
         <h1>从节点导入到订阅生效，<span class="grad">一套流程直接闭环</span></h1>
         <p>面向 Docker 自部署、OpenClash 软路由与 mihomo 客户端的订阅生成工具。导入节点、编辑规则、生成订阅、校验 YAML —— 全程用户隔离，Token 订阅即时生效。</p>
-        <div class="stats">
-          <div class="stat-card" style="--edge-c:rgba(34,211,238,.6)"><div class="stat-label">节点</div><div class="stat-value"><span id="nodeCount">—</span></div><div class="stat-trend" id="nodeTrend">后端草稿数据</div></div>
-          <div class="stat-card" style="--edge-c:rgba(99,102,241,.6)"><div class="stat-label">规则</div><div class="stat-value"><span id="ruleCountStat">—</span></div><div class="stat-trend" id="ruleTrend">等待后端统计</div></div>
-          <div class="stat-card" style="--edge-c:rgba(167,139,250,.6)"><div class="stat-label">策略组</div><div class="stat-value"><span id="groupCount">—</span></div><div class="stat-trend" id="groupTrend">等待后端统计</div></div>
-          <div class="stat-card" style="--edge-c:rgba(52,211,153,.6)"><div class="stat-label">订阅状态</div><div class="stat-value" style="font-size:20px;padding-top:5px" id="subscriptionStatus">—</div><div class="stat-trend" id="subscriptionMeta">等待后端状态</div></div>
-        </div>
       </section>
 
       <section class="step-section active" id="step1" role="tabpanel" aria-labelledby="step-tab-1" tabindex="0">
@@ -129,7 +123,7 @@
       <section class="step-section" id="step4" role="tabpanel" aria-labelledby="step-tab-4" tabindex="0">
         <div class="step-banner" style="--bc:52,211,153"><div class="sb-ico">✓</div><div class="sb-body"><div class="sb-eyebrow">Step 04 · Validate & Publish</div><h2 class="sb-title">校验与发布</h2><p class="sb-desc">校验和发布是两个独立动作；只有当前草稿通过服务端校验且之后未再修改时，发布按钮才会启用。</p></div><div class="sb-num">04</div></div>
         <div class="panel">
-          <div class="generate-hero"><h3>校验并发布</h3><p>先校验当前草稿，通过后即可发布。服务端返回检查项、提示、统计、mihomo 内核校验结果、完整 YAML 与发布差异。</p><div class="hero-actions"><button class="btn btn-primary btn-lg" id="validateBtn" type="button"><span class="btn-scan"></span>校验草稿</button><button class="btn btn-primary btn-lg" id="publishBtn" type="button" disabled>发布当前草稿</button></div><div class="status-note" id="validationStatus">尚未校验</div><div class="status-note" id="publishGuard">发布需要先校验当前未修改草稿。</div><pre id="publishDiff" class="publish-diff"></pre></div>
+          <div class="generate-hero"><h3>校验并发布</h3><p>先校验当前草稿，通过后即可发布。服务端返回检查项、提示、统计、mihomo 内核校验结果、完整 YAML 与发布差异。</p><div class="hero-actions"><button class="btn btn-primary btn-lg" id="validateBtn" type="button">校验草稿</button><button class="btn btn-primary btn-lg" id="publishBtn" type="button" disabled>发布当前草稿</button></div><div class="status-note" id="validationStatus">尚未校验</div><div class="status-note" id="publishGuard">发布需要先校验当前未修改草稿。</div><pre id="publishDiff" class="publish-diff"></pre></div>
           <div class="check-results show" id="checkResults"><div class="check-empty">尚未校验，点击“校验草稿”开始</div></div>
           <div class="validation-meta" id="validationStats"></div>
           <div id="validationWarnings" class="phase2-empty" hidden></div>

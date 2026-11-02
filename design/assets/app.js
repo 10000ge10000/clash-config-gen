@@ -1147,12 +1147,6 @@
     var counts = state.counts || {};
     var ready = !state.loading && state.authenticated;
     var nodeCount = ready && Array.isArray(state.config.proxies) ? state.config.proxies.length : undefined;
-    setText("nodeCount", nodeCount, "—");
-    setText("ruleCountStat", ready ? counts.rules : undefined, "—");
-    setText("groupCount", ready ? counts.groups : undefined, "—");
-    var subscription = state.subscription || {};
-    setText("subscriptionStatus", subscription.status === "published" ? "已发布" : (subscription.status === "draft" ? "草稿" : "—"));
-    setText("subscriptionMeta", subscription.published_at || (subscription.status === "draft" ? "尚未发布" : "—"));
     setText("nodeSummary", ready ? String(nodeCount) + " 个节点" : "正在加载");
     setText("ruleCount", ready ? state.config.custom_rules.length : undefined, "—");
     setText("footerNodeCount", nodeCount, "—");
@@ -1931,6 +1925,8 @@
   function serializeTextValue(control, field) {
     if (control.type === "checkbox") return Boolean(control.checked);
     if ((field.input_type || control.type) === "number") {
+      // 留空要原样传回，Number("") 是 0，会被当成填了 0
+      if (String(control.value).trim() === "") return "";
       var number = Number(control.value);
       return Number.isFinite(number) ? number : control.value;
     }
@@ -2146,6 +2142,19 @@
       node_password: value.password || ""
     };
     var type = String(value.type || "").toLowerCase();
+    if (type === "ss" || type === "vless" || type === "vmess") {
+      var smux = isObject(value.smux) ? value.smux : {};
+      var brutal = isObject(smux["brutal-opts"]) ? smux["brutal-opts"] : {};
+      Object.assign(fields, {
+        enable_smux: isObject(value.smux),
+        smux_enabled: smux.enabled !== false,
+        smux_protocol: smux.protocol || "h2mux",
+        smux_max_connections: smux["max-connections"] || 4,
+        smux_brutal_enabled: Boolean(brutal.enabled),
+        smux_brutal_up: Number(String(brutal.up || "").split(" ")[0]) || 100,
+        smux_brutal_down: Number(String(brutal.down || "").split(" ")[0]) || 100
+      });
+    }
     if (type === "ss") Object.assign(fields, {
       ss_encryption: value.cipher || "aes-128-gcm",
       ss_udp_over_tcp: Boolean(value["udp-over-tcp"]),
@@ -2214,6 +2223,7 @@
       anytls_fp: value["client-fingerprint"] || "chrome",
       anytls_skip_cert_verify: Boolean(value["skip-cert-verify"]),
       anytls_alpn: Array.isArray(value.alpn) ? value.alpn.join(",") : (value.alpn || "h2,http/1.1"),
+      anytls_tfo: Boolean(value.tfo),
       anytls_ip_version: value["ip-version"] || "默认",
       anytls_idle_session_check_interval: value["idle-session-check-interval"] || 30,
       anytls_idle_session_timeout: value["idle-session-timeout"] || 180,
@@ -2242,8 +2252,9 @@
       hy2_sni: value.sni || "",
       hy2_obfs_type: value.obfs || "none",
       hy2_obfs_password: value["obfs-password"] || "",
-      hy2_up_mbps: Number(String(value.up || "").split(" ")[0]) || 50,
-      hy2_down_mbps: Number(String(value.down || "").split(" ")[0]) || 100,
+      // 节点没写带宽时留空，保存时不能凭空写入默认值，否则客户端会被限速
+      hy2_up_mbps: Number(String(value.up || "").split(" ")[0]) || "",
+      hy2_down_mbps: Number(String(value.down || "").split(" ")[0]) || "",
       hy2_skip_cert: value["skip-cert-verify"] !== false,
       hy2_alpn: Array.isArray(value.alpn) ? value.alpn.join(",") : (value.alpn || "h3"),
       enable_port_hopping: Boolean(value.ports),
@@ -2551,6 +2562,15 @@
     }
     if (formFields && String(next.type || "") === "hysteria2" && !formFields.enable_quic_params) {
       delete merged["quic-params"];
+    }
+    if (formFields && Object.prototype.hasOwnProperty.call(formFields, "enable_smux")) {
+      // 表单取消勾选表示关闭，合并时不能保留原值
+      if (!formFields.enable_smux) delete merged.smux;
+      else if (!formFields.smux_brutal_enabled && isObject(merged.smux)) delete merged.smux["brutal-opts"];
+    }
+    if (formFields && String(next.type || "") === "hysteria2") {
+      if (!Object.prototype.hasOwnProperty.call(next, "up")) delete merged.up;
+      if (!Object.prototype.hasOwnProperty.call(next, "down")) delete merged.down;
     }
     if (formFields && String(next.type || "") === "anytls" && !formFields.anytls_ech_enabled) {
       delete merged["ech-opts"];

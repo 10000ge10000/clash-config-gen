@@ -234,6 +234,62 @@ class ImportSecurityTest(unittest.TestCase):
         proxies, _ = importers.parse_proxy_yaml(text)
         self.assertEqual([p["name"] for p in proxies], ["HK-vless-reality", "HK-vless-xhttp"])
 
+    def test_clean_onekey_snippets_import_without_warnings(self):
+        for snippet in (
+            '- name: "A"\n  type: tuic\n  server: 203.0.113.7\n  port: 1\n  uuid: u\n  password: p\n',
+            '- name: "B"\n  type: anytls\n  server: 203.0.113.7\n  port: 1\n  password: p\n',
+            '- name: "C"\n  type: ss\n  server: 203.0.113.7\n  port: 1\n  cipher: aes-128-gcm\n  password: p\n',
+        ):
+            proxies, warnings = importers.parse_proxy_yaml(snippet)
+            self.assertEqual(1, len(proxies))
+            self.assertEqual([], warnings)
+
+    def test_whole_terminal_page_prefers_yaml_over_share_link(self):
+        page = """
+  ▌ VLESS Reality                                   HK-vless-reality
+  ──────────────────────────
+  节点名        HK-vless-reality
+  端口          9527 (TCP)
+
+  分享链接 ──────────────────
+vless://11111111-2222-3333-4444-555555555555@203.0.113.7:9527?security=reality&type=tcp#HK-vless-reality
+  链接不含 Brutal 参数，需要 Brutal 请用下方 YAML
+
+  节点 YAML ─────────────────
+- name: "HK-vless-reality"
+  type: vless
+  server: "203.0.113.7"
+  port: 9527
+  uuid: "11111111-2222-3333-4444-555555555555"
+  flow: xtls-rprx-vision
+  tfo: true
+  reality-opts:
+    public-key: "PBK"
+    short-id: "0011"
+  smux:
+    enabled: true
+    protocol: smux
+    brutal-opts:
+      enabled: true
+      up: 1000
+      down: 1000
+
+  二维码 ────────────────────
+ ▄▄▄▄▄▄▄ ▄ ▄▄ ▄▄▄▄▄▄▄
+ █ ▄▄▄ █ ▀█▀  █ ▄▄▄ █
+  按回车返回总览 ›
+"""
+        proxies, warnings = importers.parse_proxy_yaml(page)
+        self.assertEqual(["HK-vless-reality"], [p["name"] for p in proxies])
+        self.assertTrue(proxies[0]["smux"]["brutal-opts"]["enabled"])
+        self.assertIs(True, proxies[0]["tfo"])
+        self.assertEqual([], warnings)
+
+    def test_broken_yaml_falls_back_to_share_link(self):
+        text = "- name: [broken\nvless://11111111-2222-3333-4444-555555555555@203.0.113.7:9527?security=reality#HK"
+        proxies, _ = importers.parse_proxy_yaml(text)
+        self.assertEqual(["HK"], [p["name"] for p in proxies])
+
     def test_terminal_copied_node_snippets_parse(self):
         indented = """  - name: "HK-ss"
     type: ss

@@ -328,12 +328,25 @@ async def api_unhandled_exception_handler(request: Request, _exc: Exception):
     return response
 
 
+def _home_html_with_asset_versions(path: Path) -> str:
+    """给 CSS/JS 链接加内容哈希：CDN 可能覆盖 no-cache 缓存数小时，旧样式会配上新页面。"""
+    html = path.read_text(encoding="utf-8")
+    for filename in UI_ASSET_MEDIA_TYPES:
+        for asset_dir in UI_ASSET_DIR_CANDIDATES:
+            asset = asset_dir / filename
+            if asset.is_file():
+                version = hashlib.sha256(asset.read_bytes()).hexdigest()[:12]
+                html = html.replace(f'"/ui/{filename}"', f'"/ui/{filename}?v={version}"')
+                break
+    return html
+
+
 @app.get("/v2")
 def v2_preview_page():
     for candidate in V2_PREVIEW_CANDIDATES:
         if candidate.is_file():
-            return FileResponse(
-                candidate,
+            return Response(
+                content=_home_html_with_asset_versions(candidate),
                 media_type="text/html; charset=utf-8",
                 # 主页随版本更新，必须每次向服务端确认，避免旧前端配新接口。
                 headers={"Cache-Control": "no-cache"},
