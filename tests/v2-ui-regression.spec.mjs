@@ -1751,3 +1751,100 @@ test('V2 渲染性能回归：保存回包复用卡片、筛选只隐藏、全�
 
   tracker.assertClean();
 });
+
+test('V2 onekey 导入回归：标记默认勾选覆盖、就地更新，XHTTP 字段经表单往返不丢', async ({ page }) => {
+  test.setTimeout(120_000);
+  const tracker = trackPageFailures(page);
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+  const exportYaml = (server, password) => `# onekey-export schema=1 core=v1.19.33
+proxies:
+  - name: "OneKeyE2E-ss"
+    type: ss
+    server: "${server}"
+    port: 9529
+    cipher: 2022-blake3-aes-128-gcm
+    password: "${password}"
+    udp: true
+  - name: "OneKeyE2E-vless-xhttp"
+    type: vless
+    server: "${server}"
+    port: 9531
+    uuid: 123e4567-e89b-12d3-a456-426614174000
+    network: xhttp
+    tls: true
+    udp: true
+    alpn:
+      - h2
+    servername: www.apple.com
+    client-fingerprint: chrome
+    encryption: "mlkem768x25519plus.native.0rtt.fixture"
+    reality-opts:
+      public-key: AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA
+      short-id: "1234abcd"
+    xhttp-opts:
+      path: /fixture
+      mode: stream-one
+`;
+  const nodeByName = (name) => page.evaluate((target) => {
+    const list = window.v2State.config.proxies;
+    const index = list.findIndex((node) => node.name === target);
+    return { index, node: list[index], total: list.length, sources: (window.v2State.config.import_sources || []).length };
+  }, name);
+  await page.locator('#step-tab-1').click();
+  await page.locator('.method-card[data-method="yaml"]').click();
+  const input = page.locator('#importInput');
+  const replace = page.locator('#importReplace');
+
+  // 带标记的内容默认勾选，首次导入全部新增
+  await input.fill(exportYaml('203.0.113.7', 'old-password'));
+  await expect(replace).toBeChecked();
+  await page.locator('#importBtn').click();
+  await expect(page.locator('#importSummary')).toContainText('本次导入 2 个节点；覆盖 0 个', { timeout: 15_000 });
+  await waitForSaved(page);
+  await expect(replace).not.toBeChecked();
+  const before = await nodeByName('OneKeyE2E-ss');
+  expect(before.node.server).toBe('203.0.113.7');
+
+  // 重新导入就地更新，顺序不变，旧来源被清掉，不留空来源
+  await input.fill(exportYaml('203.0.113.8', 'new-password'));
+  await expect(replace).toBeChecked();
+  await page.locator('#importBtn').click();
+  await expect(page.locator('#importSummary')).toContainText('本次导入 0 个节点；覆盖 2 个', { timeout: 15_000 });
+  await waitForSaved(page);
+  const after = await nodeByName('OneKeyE2E-ss');
+  expect(after.index).toBe(before.index);
+  expect(after.total).toBe(before.total);
+  expect(after.sources).toBe(before.sources);
+  expect(after.node.server).toBe('203.0.113.8');
+  expect(after.node.password).toBe('new-password');
+
+  // 没有标记时保持原有行为：重名跳过
+  await input.fill(exportYaml('203.0.113.9', 'ignored').replace('# onekey-export schema=1 core=v1.19.33\n', ''));
+  await expect(replace).not.toBeChecked();
+  await page.locator('#importBtn').click();
+  await expect(page.locator('#importSummary')).toContainText('跳过 2 个', { timeout: 15_000 });
+  expect((await nodeByName('OneKeyE2E-ss')).node.server).toBe('203.0.113.8');
+
+  // Reality 字段和 XHTTP 字段都要出现，保存后节点不丢内容；无 flow 的节点也一样
+  await page.locator('#step-tab-2').click();
+  const card = page.locator('#nodeGrid .node-card').filter({ hasText: 'OneKeyE2E-vless-xhttp' }).first();
+  await card.getByRole('button', { name: '编辑' }).click();
+  const form = page.locator('#nodeFormPanel');
+  await expect(form).toBeVisible();
+  await expect(form.locator('[data-field-key="vless_xhttp_path"]')).toHaveValue('/fixture');
+  await expect(form.locator('[data-field-key="vless_xhttp_mode"]')).toHaveValue('stream-one');
+  await expect(form.locator('[data-field-key="vless_encryption"]')).toHaveValue('mlkem768x25519plus.native.0rtt.fixture');
+  await expect(form.locator('[data-field-key="vless_public_key"]')).toBeVisible();
+  await expect(form.locator('[data-field-key="vless_short_id"]')).toHaveValue('1234abcd');
+  await form.getByRole('button', { name: '保存节点草稿' }).click();
+  await expect(page.locator('#nodeGrid .node-card').filter({ hasText: 'OneKeyE2E-vless-xhttp' })).toHaveCount(1);
+  await waitForSaved(page);
+  const saved = (await nodeByName('OneKeyE2E-vless-xhttp')).node;
+  expect(saved['xhttp-opts']).toEqual({ path: '/fixture', mode: 'stream-one' });
+  expect(saved.encryption).toBe('mlkem768x25519plus.native.0rtt.fixture');
+  expect(saved.alpn).toEqual(['h2']);
+  expect(saved['reality-opts']['short-id']).toBe('1234abcd');
+  expect(saved.flow).toBeUndefined();
+  tracker.assertClean();
+});

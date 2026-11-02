@@ -2136,6 +2136,7 @@
     var ws = isObject(value["ws-opts"]) ? value["ws-opts"] : {};
     var h2 = isObject(value["h2-opts"]) ? value["h2-opts"] : {};
     var grpc = isObject(value["grpc-opts"]) ? value["grpc-opts"] : {};
+    var xhttp = isObject(value["xhttp-opts"]) ? value["xhttp-opts"] : {};
     var quic = isObject(value["quic-params"]) ? value["quic-params"] : {};
     var fields = {
       node_name: value.name || "",
@@ -2174,6 +2175,11 @@
       vless_h2_path: h2.path || "/",
       vless_h2_host: Array.isArray(h2.host) ? h2.host[0] : (h2.host || ""),
       vless_grpc_service_name: grpc["grpc-service-name"] || "",
+      vless_xhttp_path: xhttp.path || "/",
+      vless_xhttp_host: xhttp.host || "",
+      vless_xhttp_mode: xhttp.mode || "stream-one",
+      vless_encryption: value.encryption || "",
+      vless_alpn: Array.isArray(value.alpn) ? value.alpn.join(",") : "",
       vless_public_key: value["reality-opts"] && value["reality-opts"]["public-key"] || "",
       vless_short_id: value["reality-opts"] && value["reality-opts"]["short-id"] || "",
       vless_skip_cert_verify: Boolean(value["skip-cert-verify"])
@@ -2539,7 +2545,7 @@
       // These are known transport containers.  When the user explicitly
       // switches transport, remove stale containers absent from the new
       // builder output; unknown top-level keys remain intact.
-      ["ws-opts", "h2-opts", "grpc-opts", "grpc-service-name"].forEach(function (key) {
+      ["ws-opts", "h2-opts", "grpc-opts", "grpc-service-name", "xhttp-opts"].forEach(function (key) {
         if (!Object.prototype.hasOwnProperty.call(next, key)) delete merged[key];
       });
     }
@@ -2550,6 +2556,9 @@
       delete merged["ech-opts"];
     }
     if (formFields && String(next.type || "") === "vless") {
+      // 表单清空这两项表示关闭，合并时不能保留原值。
+      if (!Object.prototype.hasOwnProperty.call(next, "encryption")) delete merged.encryption;
+      if (!Object.prototype.hasOwnProperty.call(next, "alpn")) delete merged.alpn;
       // `flow: none` is not an instruction to discard Reality credentials.
       // Some valid subscriptions carry reality-opts without a flow value, and
       // the field form must round-trip them.  Only an explicit clear of both
@@ -2956,14 +2965,18 @@
         content: state.importMethod === "url" ? "" : value,
         url: state.importMethod === "url" ? value : "",
         name: state.importMethod === "url" ? "远程订阅" : (state.importMethod === "share" ? "分享链接" : "YAML 导入"),
-        existing_proxies: clone(state.config.proxies)
+        existing_proxies: clone(state.config.proxies),
+        on_conflict: importReplaceChecked() ? "replace" : "skip"
       };
       var result = await apiRequest("/api/import", { method: "POST", body: body });
       if (isStale(epoch)) return;
       var incoming = Array.isArray(result.proxies) ? result.proxies : [];
+      var replacing = Array.isArray(result.replaced_proxies) ? result.replaced_proxies : [];
+      var emptiedSourceIds = applyReplacedProxies(replacing);
       state.config.proxies = state.config.proxies.concat(incoming);
       if (result.source && isObject(result.source)) {
         var sources = Array.isArray(state.config.import_sources) ? state.config.import_sources : [];
+        sources = sources.filter(function (source) { return emptiedSourceIds.indexOf(source.id) < 0; });
         var existing = sources.findIndex(function (source) { return source.id === result.source.id; });
         if (existing >= 0) sources[existing] = clone(result.source);
         else sources.push(clone(result.source));
@@ -2973,6 +2986,7 @@
       await flushDraftSave();
       if (isStale(epoch)) return;
       if (input) input.value = "";
+      resetImportReplace();
       // 保存回包已刷新派生信息；这里只渲染节点相关区域（新卡片才播放入场动画）。
       renderBlock("nodes");
       renderBlock("pills");
@@ -2980,9 +2994,9 @@
       renderImport();
       var skipped = Array.isArray(result.skipped) ? result.skipped.length : 0;
       var warnings = Array.isArray(result.warnings) ? result.warnings.length : 0;
-      setText("importSummary", "本次导入 " + incoming.length + " 个节点；跳过 " + skipped + " 个；警告 " + warnings + " 条");
+      setText("importSummary", "本次导入 " + incoming.length + " 个节点；覆盖 " + replacing.length + " 个；跳过 " + skipped + " 个；警告 " + warnings + " 条");
       if (warnings) showToast("导入完成，存在 " + warnings + " 条警告", "info");
-      else showToast("导入完成，新增 " + incoming.length + " 个节点", "info");
+      else showToast("导入完成，新增 " + incoming.length + " 个，覆盖 " + replacing.length + " 个节点", "info");
       renderImportMessages(result);
     } catch (error) {
       if (isStale(epoch)) return;
@@ -2990,6 +3004,44 @@
     } finally {
       if (button) button.disabled = false;
     }
+  }
+
+  function importReplaceChecked() {
+    var box = $("importReplace");
+    return Boolean(box && box.checked);
+  }
+
+  // 就地替换同名节点，顺序不变，策略组按名称引用也就不会失效。
+  // 返回替换后不再有节点的旧来源 id，这些来源要从列表里去掉。
+  function applyReplacedProxies(replacing) {
+    var byName = {};
+    replacing.forEach(function (node) { byName[String(node.name)] = node; });
+    var oldSourceIds = [];
+    state.config.proxies = state.config.proxies.map(function (node) {
+      var replacement = byName[String(node.name)];
+      if (!replacement) return node;
+      if (node._source_id) oldSourceIds.push(node._source_id);
+      return replacement;
+    });
+    return oldSourceIds.filter(function (id, index) {
+      return oldSourceIds.indexOf(id) === index && !state.config.proxies.some(function (node) { return node._source_id === id; });
+    });
+  }
+
+  // onekey `x export` 的内容首行带标记：同一台 VPS 重新导出后默认覆盖更新。
+  // 用户手动改过勾选后不再自动改动。
+  function syncImportReplaceDefault() {
+    var input = $("importInput");
+    var box = $("importReplace");
+    if (!input || !box || box.dataset.userSet === "true") return;
+    box.checked = input.value.indexOf("# onekey-export") >= 0;
+  }
+
+  function resetImportReplace() {
+    var box = $("importReplace");
+    if (!box) return;
+    box.checked = false;
+    delete box.dataset.userSet;
   }
 
   function renderImportMessages(result) {
@@ -3848,8 +3900,13 @@
       });
     });
     $("importBtn") && $("importBtn").addEventListener("click", importNodes);
+    $("importInput") && $("importInput").addEventListener("input", syncImportReplaceDefault);
+    $("importReplace") && $("importReplace").addEventListener("change", function (event) {
+      event.target.dataset.userSet = "true";
+    });
     $("clearImportBtn") && $("clearImportBtn").addEventListener("click", function () {
       if ($("importInput")) $("importInput").value = "";
+      resetImportReplace();
       if ($("importMessages")) $("importMessages").hidden = true;
       setText("importSummary", "输入已清空");
     });

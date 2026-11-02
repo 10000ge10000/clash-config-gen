@@ -27,6 +27,7 @@ ALPN_OPTIONS = ["h3", "h3-29", "h3-27"]
 VMESS_NETWORK_OPTIONS = ["tcp", "ws", "h2", "grpc"]
 TROJAN_NETWORK_OPTIONS = ["tcp", "ws", "grpc"]
 VLESS_NETWORK_OPTIONS = ["tcp", "ws", "h2", "grpc", "http", "xhttp"]
+VLESS_XHTTP_MODE_OPTIONS = ["auto", "stream-one", "stream-up", "packet-up"]
 VMESS_CIPHER_OPTIONS = ["auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305"]
 SS_CIPHER_OPTIONS = [
     "aes-128-gcm", "aes-192-gcm", "aes-256-gcm",
@@ -559,6 +560,20 @@ def build_manual_node(node_type: str, fields: dict) -> dict:
             manual_node["h2-opts"] = h2_opts
         elif vless_network == "grpc":
             manual_node["grpc-opts"] = {"grpc-service-name": _required_service(f, "vless_grpc_service_name")}
+        elif vless_network == "xhttp":
+            xhttp_opts = {"path": _str(f.get("vless_xhttp_path"), "/")}
+            vless_xhttp_host = _str(f.get("vless_xhttp_host")).strip()
+            if vless_xhttp_host:
+                xhttp_opts["host"] = vless_xhttp_host
+            xhttp_opts["mode"] = _enum_field(f, "vless_xhttp_mode", "XHTTP mode", VLESS_XHTTP_MODE_OPTIONS, default="stream-one")
+            manual_node["xhttp-opts"] = xhttp_opts
+
+        vless_encryption = _str(f.get("vless_encryption")).strip()
+        if vless_encryption and vless_encryption != "none":
+            manual_node["encryption"] = vless_encryption
+        vless_alpn = [item.strip() for item in _str(f.get("vless_alpn")).split(",") if item.strip()]
+        if vless_alpn:
+            manual_node["alpn"] = vless_alpn
 
     elif node_type == "anytls":
         anytls_password = _required_text(f, "anytls_password", "密码")
@@ -737,13 +752,20 @@ NODE_FORM_SCHEMA = {
         _f("vless_h2_path", "HTTP/2 path", default="/", visible={"key": "vless_network", "equals": "h2"}),
         _f("vless_h2_host", "HTTP/2 Host", visible={"key": "vless_network", "equals": "h2"}),
         _f("vless_grpc_service_name", "gRPC service-name", visible={"key": "vless_network", "equals": "grpc"}, required=True),
+        _f("vless_xhttp_path", "XHTTP path", default="/", visible={"key": "vless_network", "equals": "xhttp"}),
+        _f("vless_xhttp_host", "XHTTP Host", visible={"key": "vless_network", "equals": "xhttp"}),
+        _f("vless_xhttp_mode", "XHTTP mode", "select", default="stream-one", options=VLESS_XHTTP_MODE_OPTIONS,
+           visible={"key": "vless_network", "equals": "xhttp"}),
+        _f("vless_encryption", "encryption", help_="VLESS Encryption 客户端串（mlkem768x25519plus…），不用加密时留空。需要 mihomo v1.19.22 或更高"),
+        _f("vless_alpn", "ALPN", help_="逗号分隔，如 h2。XHTTP Reality 通常填 h2"),
         _f("vless_tfo", "TFO", "checkbox"),
         _f("vless_fp", "客户端指纹", "select", default="chrome", options=FINGERPRINT_OPTIONS),
         _ip_version_field("vless_ip_version"),
-        _f("vless_public_key", "public-key (reality)", visible={"key": "vless_flow", "not_equals": "none"},
-           help_="flow 不为 none 时必填，Base64URL 格式"),
-        _f("vless_short_id", "short-id (reality)", visible={"key": "vless_flow", "not_equals": "none"},
-           help_="flow 不为 none 时必填，可为空字符串以外的十六进制串"),
+        # XHTTP Reality 没有 flow，这两项的显示不能依赖 flow
+        _f("vless_public_key", "public-key (reality)",
+           help_="使用 Reality 时必填，Base64URL 格式"),
+        _f("vless_short_id", "short-id (reality)",
+           help_="使用 Reality 时必填，可为空字符串以外的十六进制串"),
         _f("vless_skip_cert_verify", "跳过证书验证", "checkbox"),
     ] + _smux_fields("vless") + _dialer_fields(),
     "vmess": _common_fields("vmess") + [

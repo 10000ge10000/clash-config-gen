@@ -317,9 +317,12 @@ V2 上传的自定义规则集会保存为用户隔离的内容哈希版本，�
 
 ## onekey 协议兼容
 
+在 VPS 上运行 `x export`，把输出粘贴到“快速填入”的 YAML 导入即可，一次导入全部节点。输出首行带 `# onekey-export` 标记，此时默认勾选“覆盖同名节点”，同一台 VPS 重置凭据后重新导入会就地更新，节点顺序和策略组引用不变。节点名是 `<节点标识>-<协议>`，多台 VPS 不会冲突。
+
 | 协议 | 已适配字段 |
 | --- | --- |
-| VLESS Reality | `uuid`、`tls`、`flow`、`servername`、`reality-opts`、`client-fingerprint`、`smux` |
+| VLESS Reality | `uuid`、`tls`、`flow`、`servername`、`reality-opts`、`client-fingerprint` |
+| VLESS XHTTP Reality Enc | `uuid`、`network: xhttp`、`xhttp-opts`、`encryption`、`alpn`、`servername`、`reality-opts`、`client-fingerprint`（客户端内核需 v1.19.22 或更高） |
 | TUIC v5 | `uuid`、`password`、`sni`、`alpn`、`udp-relay-mode`、`congestion-controller` |
 | Shadowsocks 2022 | `cipher`、`password`、`udp` |
 | AnyTLS | `password`、`sni`、`alpn`、`client-fingerprint`、`skip-cert-verify`、`ech-opts` |
@@ -330,7 +333,7 @@ V2 上传的自定义规则集会保存为用户隔离的内容哈希版本，�
 
 - 节点必须包含 `name`、`type`、`server`、`port`。
 - 端口必须在 `1-65535` 范围内。
-- 重名节点会跳过，避免覆盖已有配置。
+- 重名节点默认跳过；勾选“覆盖同名节点”后就地替换。
 - 对部分 OpenClash 内核可能不支持的协议字段只提示警告，不擅自删除。
 
 ### TCP Brutal 与多路复用 (smux) 使用指引
@@ -339,7 +342,7 @@ V2 上传的自定义规则集会保存为用户隔离的内容哈希版本，�
   - **无需 smux 与客户端配置**：TCP Brutal V2 属于纯服务端 Linux 内核级单边拥塞控制算法，服务端部署后对所有入站 TCP 连接自动生效，客户端**无需且不应开启 `smux.brutal-opts`**。
   - **推荐原生多连接协议**：在 TCP Brutal V2 服务端环境下，强烈推荐优先使用原生多连接协议（如 **VLESS Reality**、**Trojan**、**Shadowsocks** 等）。原生多 TCP 连接可由服务端内核 Brutal 独立高效调度发包，既享有极端弱网抗丢包加速，又规避了应用层 smux 多路复用带来的队头阻塞（HOL Blocking）与单连接性能损耗。
 - **客户端 smux Brutal 握手（仅限特殊场景）**：
-  - 仅限客户端为 Linux 且装有对应 TCP Brutal 内核模块、同时服务端开启了 smux brutal 速率握手协商的极少数场景。普通平台（Windows / macOS / iOS / Android）若误开会导致握手失败或连接异常报错。
+  - 仅限客户端为 Linux 且装有对应 TCP Brutal 内核模块、同时服务端开启了 smux brutal 速率握手协商的极少数场景。普通平台（Windows / macOS / iOS / Android）没有该内核模块，实测（mihomo v1.19.33，macOS 客户端）开启后连接正常，只留一条 debug 日志，Brutal 不生效，开了也没有意义。
   - 因此，本项目已将所有协议表单中 `smux_brutal_enabled` 默认值统一定为 `false`，保障跨平台稳定可用。普通用户保持默认关闭即可。
 
 ## GitHub Actions

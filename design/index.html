@@ -76,6 +76,7 @@
             <button class="btn btn-ghost" id="clearImportBtn" type="button">清空</button>
             <button class="btn btn-ghost" id="uploadConfigBtn" type="button" title="读取本工具导出的旧配置文件并恢复其中的节点">上传配置文件恢复</button>
             <input type="file" id="uploadConfigInput" accept=".yaml,.yml,.json" hidden>
+            <label class="status-note" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer" title="名称相同的节点就地更新，顺序和策略组引用不变"><input type="checkbox" id="importReplace"> 覆盖同名节点</label>
             <span class="status-note" id="importSummary">尚未导入节点</span>
           </div>
           <div id="importMessages" class="phase2-empty" hidden></div>

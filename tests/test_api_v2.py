@@ -282,6 +282,43 @@ class APITest(unittest.TestCase):
         data = response.json()
         self.assertEqual(1, len(data["proxies"]))
 
+    def test_import_on_conflict_skip_is_default_and_replace_is_explicit(self):
+        self._login()
+        content = """proxies:
+  - {name: same, type: ss, server: new.example.com, port: 443, cipher: aes-128-gcm, password: p}
+  - {name: fresh, type: ss, server: new.example.com, port: 444, cipher: aes-128-gcm, password: p}
+  - {name: same, type: ss, server: dup.example.com, port: 445, cipher: aes-128-gcm, password: p}
+"""
+        existing = [{"name": "same", "type": "ss", "server": "old.example.com", "port": 1, "cipher": "aes-128-gcm", "password": "p"}]
+        data = self.client.post(
+            "/api/import",
+            json={"mode": "yaml", "content": content, "existing_proxies": existing},
+            headers=self._headers(),
+        ).json()
+        self.assertEqual(["fresh"], [item["name"] for item in data["proxies"]])
+        self.assertEqual([], data["replaced"])
+        self.assertEqual(["same"], data["skipped"])
+
+        data = self.client.post(
+            "/api/import",
+            json={"mode": "yaml", "content": content, "existing_proxies": existing, "on_conflict": "replace"},
+            headers=self._headers(),
+        ).json()
+        self.assertEqual(["fresh"], [item["name"] for item in data["proxies"]])
+        self.assertEqual(["same"], data["replaced"])
+        # 内容自身重名只取第一个
+        self.assertEqual("new.example.com", data["replaced_proxies"][0]["server"])
+        self.assertEqual([], data["skipped"])
+        self.assertEqual(data["source"]["id"], data["replaced_proxies"][0]["_source_id"])
+        self.assertEqual(2, data["source"]["node_count"])
+
+        response = self.client.post(
+            "/api/import",
+            json={"mode": "yaml", "content": content, "existing_proxies": [], "on_conflict": "merge"},
+            headers=self._headers(),
+        )
+        self.assertEqual(400, response.status_code)
+
     def test_import_share_link(self):
         self._login()
         response = self.client.post(

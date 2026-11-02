@@ -663,12 +663,33 @@ def _parse_vless(parsed) -> dict[str, Any]:
         "server": server,
         "port": port,
         "uuid": uuid,
-        "network": "tcp",
-        "tls": params.get("security") == "reality",
+        "network": params.get("type") or "tcp",
+        "tls": params.get("security") in {"reality", "tls"},
         "udp": True,
     }
     if "flow" in params:
         proxy["flow"] = params["flow"]
+    # encryption=none 是 VLESS 分享链接的默认写法，不算启用加密。
+    encryption = params.get("encryption", "")
+    if encryption and encryption != "none":
+        proxy["encryption"] = encryption
+    if params.get("alpn"):
+        proxy["alpn"] = [item for item in params["alpn"].split(",") if item]
+    network = proxy["network"]
+    if network == "xhttp":
+        xhttp_opts = {"path": params.get("path") or "/"}
+        if params.get("host"):
+            xhttp_opts["host"] = params["host"]
+        if params.get("mode"):
+            xhttp_opts["mode"] = params["mode"]
+        proxy["xhttp-opts"] = xhttp_opts
+    elif network == "ws":
+        ws_opts = {"path": params.get("path") or "/"}
+        if params.get("host"):
+            ws_opts["headers"] = {"Host": params["host"]}
+        proxy["ws-opts"] = ws_opts
+    elif network == "grpc" and params.get("serviceName"):
+        proxy["grpc-opts"] = {"grpc-service-name": params["serviceName"]}
     if "sni" in params:
         proxy["servername"] = params["sni"]
     if "fp" in params:

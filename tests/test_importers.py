@@ -186,6 +186,59 @@ class ImportSecurityTest(unittest.TestCase):
         self.assertEqual("example.test", connection.assert_hostname)
         self.assertEqual("example.test", request.headers.get("Host", "example.test"))
 
+    def test_vless_xhttp_share_link_keeps_transport_and_encryption(self):
+        proxy = importers.parse_share_link(
+            "vless://11111111-2222-3333-4444-555555555555@203.0.113.7:9531"
+            "?encryption=mlkem768x25519plus.native.0rtt.a%2Bb%2Fc&security=reality&sni=www.apple.com"
+            "&fp=chrome&pbk=PBK&sid=0011&type=xhttp&path=%2Fabc&mode=stream-one&alpn=h2#HK-vless-xhttp"
+        )
+        self.assertEqual("xhttp", proxy["network"])
+        self.assertTrue(proxy["tls"])
+        # + 和 / 经百分号编码后必须原样还原，否则客户端握手失败
+        self.assertEqual("mlkem768x25519plus.native.0rtt.a+b/c", proxy["encryption"])
+        self.assertEqual({"path": "/abc", "mode": "stream-one"}, proxy["xhttp-opts"])
+        self.assertEqual(["h2"], proxy["alpn"])
+        self.assertEqual({"public-key": "PBK", "short-id": "0011"}, proxy["reality-opts"])
+
+    def test_vless_share_link_encryption_none_is_not_kept(self):
+        proxy = importers.parse_share_link(
+            "vless://11111111-2222-3333-4444-555555555555@203.0.113.7:443?encryption=none&security=reality&type=tcp#a"
+        )
+        self.assertEqual("tcp", proxy["network"])
+        self.assertNotIn("encryption", proxy)
+        self.assertNotIn("xhttp-opts", proxy)
+
+    def test_onekey_export_yaml_keeps_xhttp_fields(self):
+        content = """# onekey-export schema=1 core=v1.19.33
+proxies:
+  - name: "HK-vless-xhttp"
+    type: vless
+    server: "203.0.113.7"
+    port: 9531
+    uuid: 11111111-2222-3333-4444-555555555555
+    network: xhttp
+    tls: true
+    udp: true
+    alpn:
+      - h2
+    servername: "www.apple.com"
+    client-fingerprint: chrome
+    encryption: "mlkem768x25519plus.native.0rtt.abc"
+    reality-opts:
+      public-key: PBK
+      short-id: "0011"
+    xhttp-opts:
+      path: "/abc"
+      mode: stream-one
+"""
+        proxies, _ = importers.parse_proxy_yaml(content)
+        self.assertEqual(1, len(proxies))
+        node = proxies[0]
+        self.assertEqual("xhttp", node["network"])
+        self.assertEqual("mlkem768x25519plus.native.0rtt.abc", node["encryption"])
+        self.assertEqual({"path": "/abc", "mode": "stream-one"}, node["xhttp-opts"])
+        self.assertEqual("0011", node["reality-opts"]["short-id"])
+
     def test_ruleset_alias_rejects_traversal(self):
         for value in ("..", "../secret", r"..\\secret"):
             with self.subTest(value=value):

@@ -1087,6 +1087,9 @@ def _api_import_sync(body: dict) -> dict:
     existing = body.get("existing_proxies")
     if not isinstance(existing, list) or any(not isinstance(item, dict) for item in existing):
         raise HTTPException(status_code=400, detail="existing_proxies 必须是节点对象数组")
+    on_conflict = str(body.get("on_conflict") or "skip").strip().lower()
+    if on_conflict not in {"skip", "replace"}:
+        raise HTTPException(status_code=400, detail="on_conflict 只能是 skip 或 replace")
 
     if mode in {"url", "remote", "subscription"}:
         if not url.strip():
@@ -1130,19 +1133,31 @@ def _api_import_sync(body: dict) -> dict:
         if str(proxy.get("name") or "")
     }
     new_proxies = []
+    replacing_proxies = []
     skipped = []
+    seen_names = set()
     for proxy in input_proxies:
         name_value = str(proxy.get("name") or "")
-        if name_value in existing_names:
+        # 本次内容自身重名时只取第一个，覆盖模式也不例外。
+        if name_value in seen_names:
             skipped.append(name_value)
             continue
+        seen_names.add(name_value)
+        if name_value in existing_names:
+            if on_conflict == "replace":
+                replacing_proxies.append(proxy)
+            else:
+                skipped.append(name_value)
+            continue
         new_proxies.append(proxy)
-        existing_names.add(name_value)
 
-    tagged_proxies, source_dict = tag_import_source(name, source_type, new_proxies)
+    tagged_proxies, source_dict = tag_import_source(name, source_type, new_proxies + replacing_proxies)
     return {
         "ok": True,
-        "proxies": tagged_proxies,
+        "proxies": tagged_proxies[: len(new_proxies)],
+        # 同名节点由前端就地替换，节点顺序和策略组引用都不变。
+        "replaced_proxies": tagged_proxies[len(new_proxies) :],
+        "replaced": [str(proxy.get("name") or "") for proxy in replacing_proxies],
         "source": source_dict,
         "skipped": skipped,
         "warnings": import_warnings,
