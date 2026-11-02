@@ -25,7 +25,7 @@
 ## 兼容范围
 
 - **协议**：可视化录入 Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC；YAML 导入支持 WireGuard。项目明确拒绝 `type: masque` 节点。
-- **内核**：镜像固定 Mihomo Meta `v1.19.29`，配置发布前执行真实 `mihomo -t`；镜像支持 AMD64、ARM64。
+- **内核**：镜像固定 Mihomo Meta `v1.19.33`，配置发布前执行真实 `mihomo -t`；镜像支持 AMD64、ARM64。
 - **客户端**：OpenClash、Nikki、Clash Verge Rev、FlClash，以及其他支持对应 Mihomo 配置格式的客户端。
 
 ## 一键部署
@@ -254,7 +254,7 @@ Streamlit 回滚后端不需要额外的公网 location。确认它只绑定本�
 
 ## mihomo 内核校验
 
-Docker 镜像内置 `mihomo v1.19.29`。点击“生成并检查配置文件”时，系统会先生成 YAML，再执行真实 mihomo 配置测试；只有测试通过才会写入数据库并对外发布订阅。Dockerfile 对 AMD64 和 ARM64 官方发布包分别执行固定 SHA256 校验。
+Docker 镜像内置 `mihomo v1.19.33`。点击“生成并检查配置文件”时，系统会先生成 YAML，再执行真实 mihomo 配置测试；只有测试通过才会写入数据库并对外发布订阅。Dockerfile 对 AMD64 和 ARM64 官方发布包分别执行固定 SHA256 校验。
 
 本地开发如果暂时没有安装 mihomo，可以显式关闭内核校验：
 

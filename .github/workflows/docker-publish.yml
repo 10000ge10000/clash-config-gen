@@ -84,8 +84,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="v1.19.29"
-          sha256="60de76a35a6cbf7b4fa4a20f5c257c24345d1d635ab1aa3877022a1997ef413c"
+          version="v1.19.33"
+          sha256="132f6f3edf9a65e62f04853aed3358472e0b2b7666daa8419edfa2ddf5bb6323"
           curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/${version}/mihomo-linux-amd64-${version}.gz" -o /tmp/mihomo.gz
           echo "${sha256}  /tmp/mihomo.gz" | sha256sum -c -
           gunzip /tmp/mihomo.gz

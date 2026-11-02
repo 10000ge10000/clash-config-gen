@@ -41,7 +41,7 @@ test('节点工作流和响应式契约保持可用', async ({ page }) => {
     'AnyTLS',
     'Hysteria2',
     'TUIC',
-    'Mihomo Meta v1.19.29',
+    'Mihomo Meta v1.19.33',
     'OpenClash',
     'Nikki',
     'Clash Verge Rev',

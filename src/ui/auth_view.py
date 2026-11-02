@@ -16,7 +16,7 @@ def render_auth_gate(brand_mark_svg: str, project_url: str, documentation_url: s
     title = "创建新账号" if register_mode else "欢迎回来"
     subtitle = "建立你的专属配置空间" if register_mode else "登录以继续管理节点与订阅"
     csrf_token = html.escape(create_csrf_token("auth"), quote=True)
-    mihomo_version = html.escape(os.getenv("MIHOMO_VERSION", "v1.19.29"))
+    mihomo_version = html.escape(os.getenv("MIHOMO_VERSION", "v1.19.33"))
 
     if register_mode and registration_enabled:
         form_html = dedent(
