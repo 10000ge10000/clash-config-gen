@@ -33,12 +33,24 @@
     </nav>
     <h1 class="topbar-slogan"><span class="slogan-lead">从节点导入到订阅生效，</span><span class="grad">一套流程直接闭环</span></h1>
     <div class="topbar-right">
+      <div class="sub-wrap" id="subMenu">
+        <button class="sub-trigger" id="subMenuBtn" type="button" title="订阅链接" aria-label="订阅链接" aria-haspopup="true" aria-expanded="false" aria-controls="subPopover">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 007.07 0l3-3a5 5 0 00-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 00-7.07 0l-3 3a5 5 0 007.07 7.07l1.5-1.5"/></svg>
+          <span class="sub-trigger-label">订阅链接</span>
+          <span class="sub-dot" id="subDot" aria-hidden="true"></span>
+        </button>
+        <div class="sub-popover" id="subPopover">
+          <div class="sp-title">订阅链接<span id="subscriptionCardStatus" class="sub-popover-status">● 未发布</span></div>
+          <div class="sub-link-card"><code id="subUrl">尚未发布订阅</code><button class="copy-btn" id="subCopyBtn" type="button" title="复制订阅链接" aria-label="复制订阅链接">⧉</button></div>
+          <button class="btn btn-ghost btn-block" id="resetTokenBtn" type="button">重置订阅 Token</button>
+        </div>
+      </div>
       <div class="sub-status" aria-live="polite"><span class="dot"></span><span class="st-text" id="serviceStatus">正在加载</span></div>
       <button class="btn-icon" id="themeToggle" type="button" title="切换浅色 / 暗色主题" aria-label="切换浅色 / 暗色主题">
         <svg class="ico-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
         <svg class="ico-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
       </button>
-      <button class="btn-icon" id="sidebarToggle" type="button" title="折叠设置面板" aria-label="折叠设置面板">
+      <button class="btn-icon" id="sidebarToggle" type="button" title="折叠管理员面板" aria-label="折叠管理员面板" hidden>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h16"/></svg>
       </button>
       <div class="user-wrap" id="userMenu">
@@ -48,7 +60,7 @@
     </div>
   </header>
 
-  <div class="layout" id="layout">
+  <div class="layout no-sidebar" id="layout">
     <main class="main-col">
       <section class="step-section active" id="step1" role="tabpanel" aria-labelledby="step-tab-1" tabindex="0">
         <div class="step-banner" style="--bc:34,211,238"><div class="sb-ico">↓</div><div class="sb-body"><div class="sb-eyebrow">Step 01 · Import</div><h2 class="sb-title">导入节点</h2><p class="sb-desc">YAML、订阅链接和多行分享链接统一进入后端解析管线。</p></div><div class="sb-num">01</div></div>
@@ -149,11 +161,6 @@
     </main>
 
     <aside class="settings-panel">
-      <div class="sp-card">
-        <div class="sp-title">订阅链接<span id="subscriptionCardStatus" style="font-size:10px;letter-spacing:.5px;color:var(--text-faint)">● 未发布</span></div>
-        <div class="sub-link-card"><code id="subUrl">尚未发布订阅</code><button class="copy-btn" id="subCopyBtn" type="button" title="复制订阅链接" aria-label="复制订阅链接">⧉</button></div>
-        <button class="btn btn-ghost btn-block" id="resetTokenBtn" type="button" style="font-size:12px;padding:8px">重置订阅 Token</button>
-      </div>
       <div id="adminPanelHost"></div>
     </aside>
   </div>

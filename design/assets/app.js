@@ -841,9 +841,18 @@
     dropdown.appendChild(makeButton("退出登录", "danger", logout));
   }
 
+  function setSubMenuOpen(open) {
+    var popover = $("subPopover");
+    var trigger = $("subMenuBtn");
+    if (popover) popover.classList.toggle("open", open);
+    if (trigger) trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) closeUserDropdown();
+  }
+
   function setUserDropdownOpen(open) {
     var dropdown = $("userDropdown");
     var avatar = $("userAvatar");
+    if (open) setSubMenuOpen(false);
     if (dropdown) dropdown.classList.toggle("open", open);
     if (avatar) avatar.setAttribute("aria-expanded", open ? "true" : "false");
   }
@@ -868,6 +877,7 @@
       window.clearTimeout(nodeSearchTimer);
       nodeSearchTimer = null;
     }
+    setSubMenuOpen(false);
     state.config = emptyDraft();
     state.serverConfig = emptyDraft();
     state.subscription = {};
@@ -1170,7 +1180,11 @@
     if (title) {
       title.textContent = subscription.status === "published" ? "● 已发布" : (subscription.status === "draft" ? "● 草稿" : "● 未发布");
       title.style.color = subscription.status === "published" ? "var(--success)" : "var(--warn)";
+      var trigger = $("subMenuBtn");
+      if (trigger) trigger.title = "订阅链接：" + title.textContent.replace("● ", "");
     }
+    var dot = $("subDot");
+    if (dot) dot.dataset.status = String(subscription.status || "");
     var copy = $("subCopyBtn");
     if (copy) copy.disabled = !url;
   }
@@ -3920,6 +3934,9 @@
     clearElement(host);
     var isAdmin = Boolean(state.user && state.user.is_admin === true);
     host.hidden = !isAdmin;
+    // 侧栏现在只放管理员面板：普通用户没有侧栏，主内容占满整行。
+    if ($("layout")) $("layout").classList.toggle("no-sidebar", !isAdmin);
+    if ($("sidebarToggle")) $("sidebarToggle").hidden = !isAdmin;
     if (!isAdmin) {
       blockRendered("admin");
       return;
@@ -4221,6 +4238,17 @@
     document.addEventListener("click", function (event) {
       var dropdown = $("userDropdown");
       if (dropdown && dropdown.classList.contains("open") && !dropdown.contains(event.target) && event.target !== avatar) closeUserDropdown();
+      var subMenu = $("subMenu");
+      if (subMenu && !subMenu.contains(event.target)) setSubMenuOpen(false);
+    });
+    var subTrigger = $("subMenuBtn");
+    if (subTrigger) subTrigger.addEventListener("click", function () {
+      setSubMenuOpen(subTrigger.getAttribute("aria-expanded") !== "true");
+    });
+    $("subMenu") && $("subMenu").addEventListener("keydown", function (event) {
+      if (event.key !== "Escape" || !subTrigger || subTrigger.getAttribute("aria-expanded") !== "true") return;
+      setSubMenuOpen(false);
+      subTrigger.focus();
     });
     $("userMenu") && $("userMenu").addEventListener("keydown", function (event) {
       var dropdown = $("userDropdown");

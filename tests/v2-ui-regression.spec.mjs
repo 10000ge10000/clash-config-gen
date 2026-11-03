@@ -571,6 +571,7 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
 
   const oldSubscriptionUrl = publishedUrl;
   page.once('dialog', (dialog) => dialog.accept());
+  await page.locator('#subMenuBtn').click();
   await page.locator('#resetTokenBtn').click();
   await expect.poll(() => page.locator('#subUrl').textContent(), { timeout: 15_000 }).not.toBe(oldSubscriptionUrl);
   const newSubscriptionUrl = await page.locator('#subUrl').textContent();
@@ -653,7 +654,16 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
   await expect(page.locator('#workspaceNav')).toBeVisible();
   await expect(page.locator('#validateBtn')).toBeVisible();
+  // 订阅入口在顶栏：窄屏弹层不得溢出视口，点外部收起。
+  await expect(page.locator('#resetTokenBtn')).toBeHidden();
+  await page.locator('#subMenuBtn').click();
   await expect(page.locator('#resetTokenBtn')).toBeVisible();
+  const popoverBox = await page.locator('#subPopover').boundingBox();
+  expect(popoverBox.x).toBeGreaterThanOrEqual(0);
+  expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(dimensions.clientWidth);
+  await page.locator('#validateBtn').click({ trial: true });
+  await page.mouse.click(5, 500);
+  await expect(page.locator('#resetTokenBtn')).toBeHidden();
 
   tracker.assertClean();
 });
@@ -1950,6 +1960,22 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
   // Hero 已移除，标语带渐变进入顶栏。
   await expect(page.locator('.hero')).toHaveCount(0);
   await expect(page.locator('.topbar .topbar-slogan .grad')).toHaveText('一套流程直接闭环');
+
+  // 订阅入口在顶栏；普通用户没有侧栏，主内容占满整行。
+  await expect(page.locator('.settings-panel')).toBeHidden();
+  await expect(page.locator('#sidebarToggle')).toBeHidden();
+  const subTrigger = page.locator('#subMenuBtn');
+  await subTrigger.click();
+  await expect(subTrigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#subUrl')).toContainText('/sub/');
+  await expect(page.locator('#subCopyBtn')).toBeVisible();
+  await page.locator('#userAvatar').click();
+  await expect(page.locator('#subPopover')).toBeHidden();
+  await page.locator('#userAvatar').click();
+  await subTrigger.click();
+  await page.keyboard.press('Escape');
+  await expect(subTrigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(subTrigger).toBeFocused();
 
   await page.locator('#step-tab-3').click();
   await page.locator('#ruleSource').selectOption('dustinwin规则');
