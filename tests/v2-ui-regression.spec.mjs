@@ -413,35 +413,14 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
 
   const providerTargets = page.locator('#providerTargetsPanel');
   await expect(providerTargets).toBeVisible();
-  const dustinTarget = providerTargets.locator('select').first();
-  // 目标下拉为懒填充：获得焦点后才填入全部候选。
-  await dustinTarget.focus();
-  const dustinOptions = await dustinTarget.locator('option').evaluateAll((options) => options.map((option) => option.value));
-  const dustinDefault = await dustinTarget.inputValue();
-  const dustinReplacement = dustinOptions.find((value) => value !== dustinDefault);
-  expect(dustinReplacement).toBeTruthy();
-  await dustinTarget.selectOption(dustinReplacement);
-  await waitForSaved(page);
-  expect(Object.keys(await state(page, () => window.v2State.config.global_config.dustinwin_provider_targets))).toHaveLength(1);
-  await providerTargets.getByRole('button', { name: '恢复当前规则源默认目标' }).click();
-  await waitForSaved(page);
-  expect(await state(page, () => window.v2State.config.global_config.dustinwin_provider_targets)).toEqual({});
-
+  // 基础规则只读预览：不提供逐条修改，切换规则源后内容和省略条数随之变化。
+  await expect(providerTargets.locator('select')).toHaveCount(0);
+  await expect(providerTargets.locator('.target-row')).toHaveCount(4);
+  await expect(providerTargets.locator('.flow-omitted')).toContainText('28');
   await ruleSource.selectOption('lhie1规则');
   await waitForSaved(page);
-  await expect(providerTargets).toBeVisible();
-  const lhieTarget = providerTargets.locator('select').first();
-  await lhieTarget.focus();
-  const lhieOptions = await lhieTarget.locator('option').evaluateAll((options) => options.map((option) => option.value));
-  const lhieDefault = await lhieTarget.inputValue();
-  const lhieReplacement = lhieOptions.find((value) => value !== lhieDefault);
-  expect(lhieReplacement).toBeTruthy();
-  await lhieTarget.selectOption(lhieReplacement);
-  await waitForSaved(page);
-  expect(Object.keys(await state(page, () => window.v2State.config.global_config.lhie1_provider_targets))).toHaveLength(1);
-  await providerTargets.getByRole('button', { name: '恢复当前规则源默认目标' }).click();
-  await waitForSaved(page);
-  expect(await state(page, () => window.v2State.config.global_config.lhie1_provider_targets)).toEqual({});
+  await expect(providerTargets.locator('.target-row')).toHaveCount(4);
+  await expect(providerTargets.locator('.flow-omitted')).toContainText('61');
 
   expect(await page.locator('#ruleTarget option').evaluateAll((options) => options.map((option) => option.value))).not.toContain('no-resolve');
   expect(await page.locator('#rulesetTarget option').evaluateAll((options) => options.map((option) => option.value))).not.toContain('no-resolve');
@@ -1734,32 +1713,25 @@ test('V2 渲染性能回归：保存回包复用卡片、筛选只隐藏、全�
   await waitForSaved(page);
   expect(await state(page, () => window.v2State.config.global_config.url_test_url)).toBe(originalTestUrl);
 
-  // --- 4. 规则源目标下拉：初始只含当前值，交互后懒填充，可选择节点并正确写回 ---
+  // --- 4. 旧草稿里已有的目标覆盖：预览按实际目标显示并提示，可一键恢复 ---
   await page.locator('#ruleSource').selectOption('dustinwin规则');
   await waitForSaved(page);
   const providerTargets = page.locator('#providerTargetsPanel');
-  await expect(providerTargets).toBeVisible();
-  const firstTarget = providerTargets.locator('select').first();
-  await expect(firstTarget.locator('option')).toHaveCount(1);
-  const providerName = await firstTarget.evaluate((select) => select.closest('.target-row').querySelector('.target-name').textContent);
-  const initialValue = await firstTarget.inputValue();
-  await firstTarget.focus();
-  const lazyOptions = await firstTarget.locator('option').evaluateAll((options) => options.map((option) => option.value));
-  expect(lazyOptions.length).toBeGreaterThan(1);
-  expect(lazyOptions).toContain('Perf-B');
-  expect(lazyOptions).not.toContain('no-resolve');
-  expect(new Set(lazyOptions).size).toBe(lazyOptions.length);
-  await expect(firstTarget).toHaveValue(initialValue);
-  await firstTarget.evaluate((select) => { select.__perfMark = 'target-select'; });
-  await firstTarget.selectOption('Perf-B');
+  await expect(providerTargets.getByRole('button', { name: '恢复当前规则源默认目标' })).toHaveCount(0);
+  await page.evaluate(() => { window.v2State.config.global_config.dustinwin_provider_targets = { ai: 'Perf-B', cnip: 'DIRECT' }; });
+  await tolerance.fill('56');
+  await tolerance.press('Tab');
   await waitForSaved(page);
-  expect(await state(page, () => window.v2State.config.global_config.dustinwin_provider_targets)).toEqual({ [providerName]: 'Perf-B' });
-  await expect(firstTarget).toHaveValue('Perf-B');
-  expect(await firstTarget.evaluate((select) => select.__perfMark || null)).toBe('target-select');
+  // 真实场景是加载旧草稿，刷新后由服务端数据渲染。
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.v2State && window.v2State.authenticated && !window.v2State.loading);
+  await page.locator('#step-tab-3').click();
+  await expect(providerTargets.locator('.target-row').filter({ hasText: 'AI 服务' }).locator('.rule-target')).toHaveText('→ Perf-B');
+  await expect(providerTargets.locator('.flow-override-note')).toContainText('2 条');
   await providerTargets.getByRole('button', { name: '恢复当前规则源默认目标' }).click();
   await waitForSaved(page);
   expect(await state(page, () => window.v2State.config.global_config.dustinwin_provider_targets)).toEqual({});
-  await expect(providerTargets.locator('select').first()).toHaveValue(initialValue);
+  await expect(providerTargets.locator('.flow-override-note')).toHaveCount(0);
 
   tracker.assertClean();
 });
@@ -1981,7 +1953,7 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
   await page.locator('#ruleSource').selectOption('dustinwin规则');
   await waitForSaved(page);
 
-  // 规则目标面板按实际顺序列出，含内置规则，序号连续。
+  // 基础规则预览从实际第一条开始，含内置规则。
   const flowRows = page.locator('#ruleFlow [data-rule-seq]');
   await expect(page.locator('#providerTargetsPanel .target-name').first()).toHaveText('xn--ngstr-lra8j.com');
 
@@ -2026,17 +1998,14 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
   await expect(page.locator('#rulesetFirstFlow .target-name')).toHaveText('flow-first');
   await expect(page.locator('#rulesetLastFlow .target-name')).toHaveText('flow-last');
 
-  // 目标覆盖与自定义兜底。
-  const firstOverridable = page.locator('#providerTargetsPanel select').first();
-  await firstOverridable.focus();
-  await firstOverridable.selectOption('Flow-Node');
+  // 自定义兜底。
   await page.locator('#ruleFallbackTarget').selectOption('DIRECT');
   await waitForSaved(page);
   expect(await state(page, () => window.v2State.config.custom_rules)).toContain('MATCH,DIRECT');
   await expect(page.locator('#ruleList .rule-item')).toHaveCount(2);
   await expect(page.locator('#ruleCount')).toHaveText('2');
 
-  // 序号连续，且每一行与校验返回的 rules 完全一致。
+  // 显示的每一行与校验返回的 rules 对应，序号把省略的基础规则算在内。
   const shownRules = await flowRows.evaluateAll((rows) => rows.map((row, index) => {
     const seq = row.querySelector('.rule-idx').textContent;
     const type = row.querySelector('.rule-type').textContent;
@@ -2048,22 +2017,25 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
     const noResolve = Boolean(row.querySelector('.rule-tag'));
     return { seq, index, rule: [type, value, target].filter(Boolean).join(',') + (noResolve ? ',no-resolve' : '') };
   }));
-  shownRules.forEach((item) => expect(item.seq).toBe(String(item.index + 1).padStart(2, '0')));
   await page.locator('#step-tab-4').click();
   await page.locator('#validateBtn').click();
   await expect.poll(() => state(page, () => Boolean(window.v2State.validation && window.v2State.validation.yaml)), { timeout: 30_000 }).toBe(true);
   const yamlText = await state(page, () => window.v2State.validation.yaml);
   const rulesBlock = yamlText.split(/^rules:\n/m)[1].split(/^[^\s-]/m)[0];
   const yamlRules = rulesBlock.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('- ')).map((line) => line.slice(2).replace(/^['"]|['"]$/g, ''));
-  expect(shownRules.map((item) => item.rule)).toEqual(yamlRules);
+  // 自定义 2 条 + 优先规则集 1 条 + 基础规则预览 4 条在前，追加规则集和兜底在后。
+  const shownHead = shownRules.slice(0, 7);
+  const shownTail = shownRules.slice(7);
+  expect(shownHead.map((item) => item.rule)).toEqual(yamlRules.slice(0, 7));
+  expect(shownTail.map((item) => item.rule)).toEqual(yamlRules.slice(-2));
+  shownHead.forEach((item, index) => expect(item.seq).toBe(String(index + 1).padStart(2, '0')));
+  shownTail.forEach((item, index) => expect(item.seq).toBe(String(yamlRules.length - 1 + index).padStart(2, '0')));
+  await expect(page.locator('#ruleSourceStatus')).toHaveText(`共 ${yamlRules.length} 条规则`);
   expect(yamlRules[yamlRules.length - 1]).toBe('MATCH,DIRECT');
   expect(yamlRules[0]).toBe('IP-CIDR,10.2.0.0/16,DIRECT,no-resolve');
 
-  // 筛选只隐藏行，不改变序号；无基础规则时默认没有兜底并提示。
+  // 无基础规则时默认没有兜底并提示。
   await page.locator('#step-tab-3').click();
-  await page.locator('#providerTargetsPanel .flow-filter').fill('netflix');
-  await expect(page.locator('#ruleFilterCount')).toContainText('匹配');
-  await expect(page.locator('#providerTargetsPanel .target-row:visible')).not.toHaveCount(0);
   await page.locator('#ruleFallbackTarget').selectOption('Others');
   await page.locator('#ruleSource').selectOption('none');
   await waitForSaved(page);

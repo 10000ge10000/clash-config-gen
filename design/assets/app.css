@@ -560,8 +560,12 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 .flow-count { color: var(--accent); font-family: var(--mono); }
 .flow-hint { font-size: 11.5px; color: var(--text-faint); }
 .flow-head .btn { margin-left: auto; padding: 5px 10px; font-size: 12px; }
-.flow-filter { width: 100%; margin-bottom: 8px; }
-.flow-scroll { max-height: 560px; overflow-y: auto; padding-right: 4px; }
+.flow-preview { gap: 4px; }
+.flow-preview .target-row { padding: 5px 10px; }
+.flow-preview .target-name { font-weight: 500; }
+.flow-preview .target-text .target-default { display: inline; margin-left: 8px; }
+.flow-omitted { padding: 2px 10px; font-size: 11.5px; color: var(--text-faint); }
+.flow-override-note { display: block; margin-bottom: 8px; }
 .rule-form { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr) minmax(150px, 1.2fr) auto; gap: 10px; align-items: end; margin-bottom: 12px; }
 .rule-form .field { margin-bottom: 0; min-width: 0; }
 .rule-form-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -584,7 +588,7 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 7px; letter-spacing: .3px; }
-.field input, .field select, .flow-filter, .target-row select {
+.field input, .field select, .target-row select {
   width: 100%; padding: 10px 13px; border-radius: 10px;
   background: var(--input-bg); border: 1px solid var(--border);
   color: var(--text); font-size: 13px; font-family: var(--font);
@@ -597,11 +601,11 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238b98ad' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 13px center;
 }
-.field input:focus, .field select:focus, .flow-filter:focus, .target-row select:focus {
+.field input:focus, .field select:focus, .target-row select:focus {
   border-color: rgba(34,211,238,.55);
   box-shadow: 0 0 0 3px rgba(34,211,238,.1);
 }
-.field input::placeholder, .flow-filter::placeholder { color: var(--text-faint); }
+.field input::placeholder { color: var(--text-faint); }
 
 .rule-item {
   display: flex; align-items: center; gap: 12px;
@@ -926,6 +930,11 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
   .target-row .rule-target, .rule-item .rule-target { order: 4; }
   .rule-item .rule-warn { order: 5; }
   .rule-item .chip-btn, .rule-item .rule-del { order: 6; }
+  /* 基础规则预览在窄屏也保持单行，隐藏类型标签省出空间 */
+  .flow-preview .target-row { flex-wrap: nowrap; }
+  .flow-preview .rule-type { display: none; }
+  .flow-preview .target-text { flex: 1 1 auto; order: 0; }
+  .flow-preview .target-row .rule-target { order: 0; }
 }
 
 /* ============ 用户下拉菜单 ============ */

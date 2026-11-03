@@ -24,7 +24,6 @@
     dnsPresets: {},
     providerDefaults: {},
     ruleCatalog: {},
-    ruleFilter: "",
     ruleEditIndex: null,
     allTargets: [],
     counts: {},
@@ -887,7 +886,6 @@
     state.nodeQuery = "";
     state.nodeProtocol = "";
     state.nodeForm = { open: false, index: null, protocol: "", raw: false };
-    state.ruleFilter = "";
     state.ruleEditIndex = null;
     state.dirtyGeneration = 0;
     state.savedGeneration = 0;
@@ -1264,12 +1262,17 @@
 
   // 各分区独立渲染，序号统一在这里按 DOM 顺序重排，保证与实际匹配顺序连续一致。
   function renumberRuleFlow() {
-    var rows = document.querySelectorAll("#ruleFlow [data-rule-seq]");
-    rows.forEach(function (row, index) {
+    var total = 0;
+    document.querySelectorAll("#ruleFlow [data-rule-seq], #ruleFlow [data-rule-omitted]").forEach(function (row) {
+      if (row.dataset.ruleOmitted) {
+        total += Number(row.dataset.ruleOmitted);
+        return;
+      }
+      total += 1;
       var seq = row.querySelector(".rule-idx");
-      if (seq) seq.textContent = String(index + 1).padStart(2, "0");
+      if (seq) seq.textContent = String(total).padStart(2, "0");
     });
-    setText("ruleSourceStatus", "共 " + rows.length + " 条规则");
+    setText("ruleSourceStatus", "共 " + total + " 条规则");
   }
 
   function flowHead(parent, titleText, hintText) {
@@ -1331,30 +1334,8 @@
     });
   }
 
-  // 规则源目标下拉懒填充：初始只放当前值，首次获得焦点/按下鼠标/按键时才填入全部候选，
-  // 填充后保持原选中值不变；选项变化（allTargets 更新）由区块重建处理。
-  function fillProviderTargetSelect(select) {
-    if (!select || select.dataset.filled === "true") return;
-    var selected = select.value || select.dataset.selected || "";
-    clearElement(select);
-    appendTargetOptions(select, selected);
-    select.value = selected;
-    select.dataset.filled = "true";
-  }
-
-  function applyRuleFilter() {
-    var panel = $("providerTargetsPanel");
-    if (!panel) return;
-    var query = String(state.ruleFilter || "").trim().toLowerCase();
-    var rows = panel.querySelectorAll(".target-row");
-    var shown = 0;
-    rows.forEach(function (row) {
-      var match = !query || row.dataset.search.indexOf(query) >= 0 || String(row.dataset.target || "").toLowerCase().indexOf(query) >= 0;
-      row.hidden = !match;
-      if (match) shown += 1;
-    });
-    setText("ruleFilterCount", query ? "匹配 " + shown + " / " + rows.length + " 条" : "", "");
-  }
+  // 基础规则默认交给客户端分流，这里只读展示前几条让用户了解规则源，其余折算进序号。
+  var RULE_PREVIEW_COUNT = 4;
 
   function renderProviderTargets() {
     var panel = $("providerTargetsPanel");
@@ -1371,102 +1352,52 @@
     var rules = Array.isArray(catalog.rules) ? catalog.rules : [];
     var overrideKey = sourceKey + "_provider_targets";
     var overrides = isObject(state.config.global_config[overrideKey]) ? state.config.global_config[overrideKey] : {};
-    var head = flowHead(panel, (catalog.label || sourceKey) + " 基础规则", "实际匹配顺序，可修改每条的目标");
-    var restore = makeButton("恢复默认目标", "btn btn-ghost", function () {
-      state.config.global_config[overrideKey] = {};
-      if (!markDirty()) return;
-      renderProviderTargets();
-      showToast("已恢复当前规则源默认目标，正在排队保存", "info");
-    });
-    restore.setAttribute("aria-label", "恢复当前规则源默认目标");
-    head.appendChild(restore);
-    var filter = document.createElement("input");
-    filter.type = "search";
-    filter.className = "flow-filter";
-    filter.placeholder = "按规则名、说明或目标筛选，如 Proxy、netflix";
-    filter.setAttribute("aria-label", "筛选基础规则");
-    filter.value = state.ruleFilter || "";
-    filter.addEventListener("input", function () {
-      state.ruleFilter = filter.value;
-      applyRuleFilter();
-    });
-    panel.appendChild(filter);
-    var count = document.createElement("div");
-    count.id = "ruleFilterCount";
-    count.className = "status-note";
-    panel.appendChild(count);
+    function isOverridden(rule) {
+      return rule.overridable && Object.prototype.hasOwnProperty.call(overrides, rule.value);
+    }
+    var head = flowHead(panel, (catalog.label || sourceKey) + " 基础规则", "共 " + rules.length + " 条，都会写入配置，这里只展示前 " + Math.min(RULE_PREVIEW_COUNT, rules.length) + " 条");
+    // 旧草稿可能改过目标，这些修改仍会生成到配置里，不能让它在界面上消失。
+    var overriddenCount = rules.filter(isOverridden).length;
+    if (overriddenCount) {
+      var restore = makeButton("恢复默认目标", "btn btn-ghost", function () {
+        state.config.global_config[overrideKey] = {};
+        if (!markDirty()) return;
+        renderProviderTargets();
+        showToast("已恢复当前规则源默认目标，正在排队保存", "info");
+      });
+      restore.setAttribute("aria-label", "恢复当前规则源默认目标");
+      head.appendChild(restore);
+      appendText(panel, "有 " + overriddenCount + " 条规则的目标被改过，生成时仍会生效。", "rule-warn flow-override-note");
+    }
     var editor = document.createElement("div");
-    editor.className = "target-editor flow-scroll";
+    editor.className = "target-editor flow-preview";
     if (!rules.length) {
       var empty = document.createElement("div");
       empty.className = "phase2-empty";
       empty.textContent = "服务端尚未提供该规则源的规则列表。";
       editor.appendChild(empty);
     }
-    var fragment = document.createDocumentFragment();
-    rules.forEach(function (rule, index) {
-      var defaultTarget = String(rule.target || "");
-      var overridden = rule.overridable && Object.prototype.hasOwnProperty.call(overrides, rule.value);
-      var selected = String(overridden ? overrides[rule.value] : defaultTarget);
-      if (selected === "no-resolve") selected = "Proxy";
+    rules.slice(0, RULE_PREVIEW_COUNT).forEach(function (rule) {
+      var overridden = isOverridden(rule);
       var row = document.createElement("div");
       row.className = "target-row" + (overridden ? " is-overridden" : "");
       row.dataset.ruleSeq = "";
-      row.dataset.target = selected;
-      row.dataset.search = [rule.type, rule.value, rule.label].join(" ").toLowerCase();
       appendText(row, "", "rule-idx");
       appendText(row, rule.type, "rule-type");
       var text = document.createElement("span");
       text.className = "target-text";
-      var name = document.createElement("span");
-      name.className = "target-name";
-      name.textContent = rule.value;
-      text.appendChild(name);
+      appendText(text, rule.value, "target-name");
       if (rule.no_resolve) appendText(text, "no-resolve", "rule-tag");
-      var noteText = [rule.label];
-      if (rule.overridable) noteText.push("默认 " + defaultTarget);
-      var note = document.createElement("span");
-      note.className = "target-default";
-      note.textContent = noteText.filter(Boolean).join(" · ");
-      text.appendChild(note);
-      var warn = document.createElement("span");
-      warn.className = "rule-warn";
-      warn.hidden = isKnownTarget(selected);
-      warn.textContent = "目标不存在，请重新选择";
-      text.appendChild(warn);
+      appendText(text, [rule.label, overridden ? "默认 " + rule.target : ""].filter(Boolean).join(" · "), "target-default");
       row.appendChild(text);
-      if (!rule.overridable) {
-        appendText(row, "→ " + defaultTarget, "rule-target");
-        fragment.appendChild(row);
-        return;
-      }
-      var select = document.createElement("select");
-      select.id = "provider-target-" + sourceKey + "-" + index;
-      select.setAttribute("aria-label", rule.value + " 目标策略");
-      // 初始只放当前值；全部候选在交互时由 fillProviderTargetSelect 懒填充（见 initializeEvents 的委托）。
-      select.dataset.lazyTargets = "true";
-      select.dataset.selected = selected;
-      if (selected) appendOptions(select, [selected]);
-      select.value = selected;
-      select.addEventListener("change", function () {
-        var next = isObject(state.config.global_config[overrideKey]) ? clone(state.config.global_config[overrideKey]) : {};
-        if (select.value === defaultTarget) delete next[rule.value];
-        else next[rule.value] = select.value;
-        select.dataset.selected = select.value;
-        row.dataset.target = select.value;
-        row.classList.toggle("is-overridden", select.value !== defaultTarget);
-        warn.hidden = true;
-        state.config.global_config[overrideKey] = next;
-        if (!markDirty()) return;
-        // DOM 已反映最新选择，同步区块签名，保存回包后不再重建这一面板。
-        blockRendered("ruleSource");
-      });
-      row.appendChild(select);
-      fragment.appendChild(row);
+      appendText(row, "→ " + String(overridden ? overrides[rule.value] : rule.target), "rule-target");
+      editor.appendChild(row);
     });
-    editor.appendChild(fragment);
+    if (rules.length > RULE_PREVIEW_COUNT) {
+      var omitted = appendText(editor, "… 其余 " + (rules.length - RULE_PREVIEW_COUNT) + " 条已省略", "flow-omitted");
+      omitted.dataset.ruleOmitted = String(rules.length - RULE_PREVIEW_COUNT);
+    }
     panel.appendChild(editor);
-    applyRuleFilter();
     renumberRuleFlow();
     blockRendered("ruleSource");
   }
@@ -3454,7 +3385,6 @@
 
   function changeRuleSource(value) {
     state.config.selected_rule_type = value;
-    state.ruleFilter = "";
     if (!markDirty()) return;
     renderRuleSource();
   }
@@ -4335,18 +4265,6 @@
       }, 120);
     });
     initNodeDragEvents();
-    // 规则源目标下拉在首次交互时懒填充全部候选（委托在常驻容器上，面板重建后仍有效）。
-    var providerPanel = $("providerTargetsPanel");
-    if (providerPanel) {
-      var fillLazyTarget = function (event) {
-        var select = event.target && event.target.closest ? event.target.closest("select[data-lazy-targets]") : null;
-        if (select) fillProviderTargetSelect(select);
-      };
-      providerPanel.addEventListener("focusin", fillLazyTarget);
-      providerPanel.addEventListener("mousedown", fillLazyTarget);
-      providerPanel.addEventListener("keydown", fillLazyTarget);
-      providerPanel.addEventListener("touchstart", fillLazyTarget, { passive: true });
-    }
     $("protocolPills") && $("protocolPills").addEventListener("click", function (event) {
       var pill = event.target.closest("[data-protocol]");
       if (!pill) return;
