@@ -219,11 +219,11 @@ body {
   font-size: 13.5px; font-weight: 700; color: var(--text-dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.topbar-slogan .grad {
+.topbar-slogan .grad, .method-card h4 {
   background: linear-gradient(90deg, #0e7490, #4f46e5, #7c3aed);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
-html.dark .topbar-slogan .grad {
+html.dark .topbar-slogan .grad, html.dark .method-card h4 {
   background: linear-gradient(90deg, #22d3ee, #818cf8, #c084fc);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
@@ -421,13 +421,14 @@ html.dark #themeToggle .ico-moon { display: block; }
 }
 .method-card.active .m-icon { background: var(--grad-main); color: var(--on-accent); box-shadow: 0 0 16px rgba(34,211,238,.4); }
 .m-icon {
-  width: 38px; height: 38px; border-radius: 11px;
+  width: 48px; height: 38px; border-radius: 11px; font-size: 13px; font-weight: 700;
   background: rgba(148,163,184,.1); color: var(--text-dim);
-  display: grid; place-items: center; margin-bottom: 12px;
+  display: grid; place-items: center; margin: 0 auto 12px;
   transition: color .3s, background-color .3s, box-shadow .3s;
 }
-.method-card h4 { font-size: 14px; font-weight: 650; margin-bottom: 5px; }
-.method-card p { font-size: 12px; color: var(--text-faint); line-height: 1.6; }
+/* 宽度贴合文字，渐变才会完整落在标题上，而不是只取整行中间的一段 */
+.method-card h4 { width: fit-content; margin: 0 auto 7px; font-size: 18px; font-weight: 700; }
+.method-card p { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
 
 .paste-zone {
   margin-top: 16px; position: relative;
