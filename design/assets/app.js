@@ -1314,26 +1314,6 @@
     select.appendChild(fragment);
   }
 
-  // 目标候选按“策略组 / 节点”分组；当前值已不在候选里时单独保留，避免下拉把它吞掉。
-  function appendTargetOptions(select, selected) {
-    var list = targetOptions().list;
-    if (selected && list.indexOf(selected) < 0) appendOptions(select, [selected]);
-    var nodeNames = new Set((Array.isArray(state.config.proxies) ? state.config.proxies : []).map(function (node) { return String(node && node.name || ""); }));
-    var nodes = list.filter(function (value) { return nodeNames.has(value); });
-    var groups = list.filter(function (value) { return !nodeNames.has(value); });
-    if (!nodes.length) {
-      appendOptions(select, groups);
-      return;
-    }
-    [["策略组", groups], ["节点", nodes]].forEach(function (item) {
-      if (!item[1].length) return;
-      var group = document.createElement("optgroup");
-      group.label = item[0];
-      appendOptions(group, item[1]);
-      select.appendChild(group);
-    });
-  }
-
   // 基础规则默认交给客户端分流，这里只读展示前几条让用户了解规则源，其余折算进序号。
   var RULE_PREVIEW_COUNT = 4;
 
@@ -1402,17 +1382,25 @@
     blockRendered("ruleSource");
   }
 
-  // 兜底规则始终是列表最后一条：自定义 MATCH 覆盖规则源默认，生成时也固定排在最后。
+  // 规则源默认兜底不展示也不提供设置，只计入总数。用户自己加了 MATCH 或没有任何兜底时才显示：
+  // 前者会替换默认兜底，后者会让未命中流量直连，都需要让用户看得到。
   function renderRuleFallback() {
     var box = $("ruleFallback");
     if (!box) return;
-    var hadFocus = Boolean(document.activeElement) && document.activeElement.id === "ruleFallbackTarget";
     clearElement(box);
+    delete box.dataset.ruleOmitted;
     var defaultTarget = String(selectedRuleCatalog().fallback || "");
     var rules = Array.isArray(state.config.custom_rules) ? state.config.custom_rules : [];
     var custom = rules.find(isMatchRule);
-    var current = custom !== undefined ? parseRule(custom).target : defaultTarget;
-    flowHead(box, "兜底规则", "前面都没命中时走这里");
+    if (custom === undefined) {
+      box.hidden = Boolean(defaultTarget);
+      if (defaultTarget) box.dataset.ruleOmitted = "1";
+      else appendText(box, "没有兜底规则，未命中的流量会直连。需要时可在上方添加 MATCH 规则。", "rule-warn");
+      return;
+    }
+    box.hidden = false;
+    var target = parseRule(custom).target;
+    flowHead(box, "自定义兜底", defaultTarget ? "替换规则源默认的兜底" : "前面都没命中时走这里");
     var row = document.createElement("div");
     row.className = "target-row";
     row.dataset.ruleSeq = "";
@@ -1420,43 +1408,17 @@
     appendText(row, "MATCH", "rule-type");
     var text = document.createElement("span");
     text.className = "target-text";
-    var name = document.createElement("span");
-    name.className = "target-name";
-    name.textContent = "其余全部流量";
-    text.appendChild(name);
-    var note = document.createElement("span");
-    note.className = "target-default";
-    note.textContent = defaultTarget ? "默认 " + defaultTarget : "当前规则源没有默认兜底";
-    text.appendChild(note);
-    if (!current) appendText(text, "未设置兜底时，没命中规则的流量会直连", "rule-warn");
-    else if (!isKnownTarget(current)) appendText(text, "目标不存在，请重新选择", "rule-warn");
+    appendText(text, "其余全部流量", "target-name");
+    if (!isKnownTarget(target)) appendText(text, "目标不存在", "rule-warn rule-tag");
     row.appendChild(text);
-    var select = document.createElement("select");
-    select.id = "ruleFallbackTarget";
-    select.setAttribute("aria-label", "兜底规则目标策略");
-    if (!defaultTarget) {
-      var unset = document.createElement("option");
-      unset.value = "";
-      unset.textContent = "未设置（直连）";
-      select.appendChild(unset);
-    }
-    appendTargetOptions(select, current);
-    select.value = current;
-    select.addEventListener("change", function () {
-      var next = state.config.custom_rules.filter(function (raw) { return !isMatchRule(raw); });
-      if (select.value && select.value !== defaultTarget) next.push("MATCH," + select.value);
-      state.config.custom_rules = next;
+    appendText(row, "→ " + target, "rule-target");
+    row.appendChild(makeButton("删除", "rule-del", function () {
+      state.config.custom_rules = state.config.custom_rules.filter(function (raw) { return !isMatchRule(raw); });
       if (!markDirty()) return;
-      renderRuleFallback();
-      renumberRuleFlow();
+      renderRules();
       renderStats();
-      blockRendered("rules");
-    });
-    row.appendChild(select);
+    }));
     box.appendChild(row);
-    if (hadFocus) {
-      try { select.focus({ preventScroll: true }); } catch (_) { select.focus(); }
-    }
   }
 
   // 规则目标 datalist：只在候选列表变化时重建。
@@ -4012,7 +3974,7 @@
     },
     ruleSource: {
       step: 3,
-      containers: ["providerTargetsPanel", "ruleSource", "ruleFallback"],
+      containers: ["providerTargetsPanel", "ruleSource"],
       signature: function () {
         var sourceKey = selectedProviderSource();
         var overrides = sourceKey ? state.config.global_config[sourceKey + "_provider_targets"] : null;

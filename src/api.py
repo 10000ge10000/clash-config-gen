@@ -206,10 +206,12 @@ UI_ASSET_DIR_CANDIDATES = [
     Path(__file__).resolve().parent.parent / "design" / "assets",
     Path(__file__).with_name("design") / "assets",
 ]
-# /ui/ 只放行这两个静态文件，不接受路径参数，杜绝目录遍历。
+# /ui/ 只放行这些静态文件，不接受路径参数，杜绝目录遍历。
 UI_ASSET_MEDIA_TYPES = {
     "app.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
+    "favicon.svg": "image/svg+xml",
+    "favicon.png": "image/png",
 }
 
 # /api 变更类请求统一使用这个 CSRF action，前端从 /api/session 领取。
@@ -384,6 +386,16 @@ def ui_app_css():
 @app.get("/ui/app.js")
 def ui_app_js():
     return _ui_asset_response("app.js")
+
+
+@app.get("/ui/favicon.svg")
+def ui_favicon_svg():
+    return _ui_asset_response("favicon.svg")
+
+
+@app.get("/ui/favicon.png")
+def ui_favicon_png():
+    return _ui_asset_response("favicon.png")
 
 
 @app.get("/health")

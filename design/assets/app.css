@@ -588,7 +588,7 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 7px; letter-spacing: .3px; }
-.field input, .field select, .target-row select {
+.field input, .field select {
   width: 100%; padding: 10px 13px; border-radius: 10px;
   background: var(--input-bg); border: 1px solid var(--border);
   color: var(--text); font-size: 13px; font-family: var(--font);
@@ -597,11 +597,11 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 /* 复选框不能继承整行宽与大内边距：checkbox 的可勾选区域只有自身小方框，
    拉宽后点击文字附近区域不会切换状态。 */
 .field input[type="checkbox"] { width: 16px; height: 16px; padding: 0; flex: none; cursor: pointer; accent-color: #22d3ee; }
-.field select, .target-row select { cursor: pointer; appearance: none; -webkit-appearance: none;
+.field select { cursor: pointer; appearance: none; -webkit-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238b98ad' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 13px center;
 }
-.field input:focus, .field select:focus, .target-row select:focus {
+.field input:focus, .field select:focus {
   border-color: rgba(34,211,238,.55);
   box-shadow: 0 0 0 3px rgba(34,211,238,.1);
 }
@@ -869,7 +869,6 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 .target-text, .ruleset-row-main, .admin-row-main { min-width:0; flex:1; }
 .target-name, .ruleset-name, .admin-name { color:var(--text); font-size:12px; font-weight:600; overflow-wrap:anywhere; }
 .target-default, .ruleset-meta, .admin-meta { color:var(--text-faint); font-size:10.5px; line-height:1.5; overflow-wrap:anywhere; }
-.target-row select { width:clamp(130px, 34%, 240px); min-width:0; flex:none; padding:7px 28px 7px 10px; font-size:12px; }
 .target-text .target-default { display:block; }
 .ruleset-row { align-items:flex-start; }
 .ruleset-row-actions, .admin-row-actions { display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end; }
@@ -926,7 +925,6 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
   /* 窄屏分行：序号和类型一行，规则内容独占一行，目标和操作放在最后 */
   .target-row, .rule-item { flex-wrap: wrap; }
   .target-text, .rule-value { flex: 1 1 100%; order: 3; white-space: normal; overflow-wrap: anywhere; }
-  .target-row select { width: 100%; order: 4; }
   .target-row .rule-target, .rule-item .rule-target { order: 4; }
   .rule-item .rule-warn { order: 5; }
   .rule-item .chip-btn, .rule-item .rule-del { order: 6; }

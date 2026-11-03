@@ -962,7 +962,7 @@ test('V2 修补回归：新增节点默认值、smux/链式代理、MATCH 规则
   await page.locator('#addRuleBtn').click();
   // MATCH 不进普通规则列表，固定显示在兜底分区。
   await expect(page.locator('#ruleList .rule-item').filter({ hasText: 'MATCH' })).toHaveCount(0);
-  await expect(page.locator('#ruleFallbackTarget')).toHaveValue('Proxy');
+  await expect(page.locator('#ruleFallback .rule-target')).toHaveText('→ Proxy');
   await waitForSaved(page);
   expect(await state(page, () => window.v2State.config.custom_rules)).toContain('MATCH,Proxy');
 
@@ -1933,6 +1933,19 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
   await expect(page.locator('.hero')).toHaveCount(0);
   await expect(page.locator('.topbar .topbar-slogan .grad')).toHaveText('一套流程直接闭环');
 
+  // 标签页图标可加载，且不被 CSP 拦截（tracker 会捕获控制台错误）。
+  const iconLinks = await page.locator('link[rel="icon"]').evaluateAll((links) => links.map((link) => link.href));
+  expect(iconLinks).toHaveLength(2);
+  for (const href of iconLinks) {
+    const icon = await page.evaluate(async (url) => {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      return image.naturalWidth;
+    }, href);
+    expect(icon).toBeGreaterThan(0);
+  }
+
   // 订阅入口在顶栏；普通用户没有侧栏，主内容占满整行。
   await expect(page.locator('.settings-panel')).toBeHidden();
   await expect(page.locator('#sidebarToggle')).toBeHidden();
@@ -1998,8 +2011,12 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
   await expect(page.locator('#rulesetFirstFlow .target-name')).toHaveText('flow-first');
   await expect(page.locator('#rulesetLastFlow .target-name')).toHaveText('flow-last');
 
-  // 自定义兜底。
-  await page.locator('#ruleFallbackTarget').selectOption('DIRECT');
+  // 默认兜底不展示；通过 MATCH 规则自定义后才出现在列表末尾。
+  await expect(page.locator('#ruleFallback')).toBeHidden();
+  await page.locator('#ruleType').selectOption('MATCH');
+  await page.locator('#ruleTarget').fill('DIRECT');
+  await page.locator('#addRuleBtn').click();
+  await expect(page.locator('#ruleFallback .rule-target')).toHaveText('→ DIRECT');
   await waitForSaved(page);
   expect(await state(page, () => window.v2State.config.custom_rules)).toContain('MATCH,DIRECT');
   await expect(page.locator('#ruleList .rule-item')).toHaveCount(2);
@@ -2036,11 +2053,11 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
 
   // 无基础规则时默认没有兜底并提示。
   await page.locator('#step-tab-3').click();
-  await page.locator('#ruleFallbackTarget').selectOption('Others');
+  await page.locator('#ruleFallback').getByRole('button', { name: '删除' }).click();
+  await expect(page.locator('#ruleFallback')).toBeHidden();
   await page.locator('#ruleSource').selectOption('none');
   await waitForSaved(page);
   await expect(page.locator('#providerTargetsPanel')).toBeHidden();
-  await expect(page.locator('#ruleFallbackTarget')).toHaveValue('');
   await expect(page.locator('#ruleFallback .rule-warn')).toContainText('直连');
 
   // 已废弃或重复的字段不再暴露；软路由模式隐藏不会写入 YAML 的分组（含依赖开关的子字段）。

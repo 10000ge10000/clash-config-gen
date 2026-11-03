@@ -51,6 +51,8 @@ class StaticAssetsTest(unittest.TestCase):
         )
         (self.assets_dir / "app.css").write_text("body{color:#fff}", encoding="utf-8")
         (self.assets_dir / "app.js").write_text("console.log('主页');", encoding="utf-8")
+        (self.assets_dir / "favicon.svg").write_text("<svg/>", encoding="utf-8")
+        (self.assets_dir / "favicon.png").write_bytes(b"\x89PNG")
         (self.assets_dir / "secret.txt").write_text("not-public", encoding="utf-8")
         missing_dir = Path(self.tmpdir.name, "missing")
         self.patches = [
@@ -87,6 +89,8 @@ class StaticAssetsTest(unittest.TestCase):
         cases = {
             "/ui/app.css": ("text/css; charset=utf-8", b"body{color:#fff}"),
             "/ui/app.js": ("text/javascript; charset=utf-8", "console.log('主页');".encode("utf-8")),
+            "/ui/favicon.svg": ("image/svg+xml", b"<svg/>"),
+            "/ui/favicon.png": ("image/png", b"\x89PNG"),
         }
         for path, (media_type, body) in cases.items():
             with self.subTest(path=path):
