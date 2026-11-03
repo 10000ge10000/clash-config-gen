@@ -17,6 +17,7 @@ from config_builder import (
     SUBSCRIPTION_PROJECT_URL,
     SUBSCRIPTION_USAGE,
     build_config,
+    build_rule_catalog,
     build_rules,
     build_yaml,
     validate_config,
@@ -24,6 +25,53 @@ from config_builder import (
 from clash_meta_gen import generate_proxy_groups
 from importers import parse_proxy_yaml, parse_share_link
 from normalizer import normalize_proxy_for_mihomo
+
+
+class RuleOrderTest(unittest.TestCase):
+    def test_custom_match_goes_last_and_replaces_preset_fallback(self):
+        rules, _ = build_rules("dustinwin规则", ["MATCH,A", "DOMAIN,x.com,B", "match,C"], {})
+        self.assertEqual(rules[0], "DOMAIN,x.com,B")
+        self.assertEqual(rules[-1], "MATCH,A")
+        self.assertEqual(sum(rule.upper().startswith("MATCH,") for rule in rules), 1)
+
+    def test_rulesets_stay_between_custom_rules_and_fallback(self):
+        providers = {
+            "first": {"type": "http", "url": "https://example.com/a.yaml", "target": "A", "order": "优先 (覆盖)"},
+            "last": {"type": "http", "url": "https://example.com/b.yaml", "target": "B", "order": "追加"},
+        }
+        rules, _ = build_rules("dustinwin规则", ["DOMAIN,x.com,C", "MATCH,D"], providers)
+        self.assertEqual(rules[:2], ["DOMAIN,x.com,C", "RULE-SET,first,A"])
+        self.assertEqual(rules[-2:], ["RULE-SET,last,B", "MATCH,D"])
+
+    def test_no_base_source_keeps_only_user_rules(self):
+        self.assertEqual(build_rules("none", ["DOMAIN,x.com,C"], {})[0], ["DOMAIN,x.com,C"])
+
+
+class RuleCatalogTest(unittest.TestCase):
+    def _rebuild(self, entry):
+        parts = [entry["type"], entry["value"], entry["target"]]
+        if entry["no_resolve"]:
+            parts.append("no-resolve")
+        return ",".join(parts)
+
+    def test_catalog_matches_generated_rule_order(self):
+        catalog = build_rule_catalog()
+        for rule_type in ("dustinwin规则", "lhie1规则"):
+            rules, _ = build_rules(rule_type, [], {})
+            shown = [self._rebuild(entry) for entry in catalog[rule_type]["rules"]]
+            shown.append("MATCH," + catalog[rule_type]["fallback"])
+            self.assertEqual(shown, rules)
+
+    def test_only_mapped_providers_are_overridable(self):
+        catalog = build_rule_catalog()
+        lhie1 = {entry["value"]: entry for entry in catalog["lhie1规则"]["rules"]}
+        self.assertTrue(lhie1["AI Suite"]["overridable"])
+        self.assertFalse(lhie1["google"]["overridable"])
+        self.assertFalse(lhie1["CN"]["overridable"])
+
+    def test_no_base_source_has_no_fallback(self):
+        self.assertEqual(build_rule_catalog()["none"]["rules"], [])
+        self.assertIsNone(build_rule_catalog()["none"]["fallback"])
 
 
 class ValidateConfigTest(unittest.TestCase):

@@ -23,6 +23,9 @@
     presets: {},
     dnsPresets: {},
     providerDefaults: {},
+    ruleCatalog: {},
+    ruleFilter: "",
+    ruleEditIndex: null,
     allTargets: [],
     counts: {},
     warnings: [],
@@ -520,6 +523,7 @@
     if (isObject(payload.dns_presets)) replaceServerField("dnsPresets", payload.dns_presets);
     else state.dnsPresets = state.presets;
     replaceServerField("providerDefaults", isObject(payload.provider_defaults) ? payload.provider_defaults : {});
+    replaceServerField("ruleCatalog", isObject(payload.rule_catalog) ? payload.rule_catalog : {});
     state.loading = false;
     state.saveError = null;
     if (resetGeneration) {
@@ -873,6 +877,8 @@
     state.nodeQuery = "";
     state.nodeProtocol = "";
     state.nodeForm = { open: false, index: null, protocol: "", raw: false };
+    state.ruleFilter = "";
+    state.ruleEditIndex = null;
     state.dirtyGeneration = 0;
     state.savedGeneration = 0;
     state.saveError = null;
@@ -894,6 +900,8 @@
     if ($("importInput")) $("importInput").value = "";
     if ($("ruleValue")) $("ruleValue").value = "";
     if ($("ruleTarget")) $("ruleTarget").value = "";
+    if ($("ruleNoResolve")) $("ruleNoResolve").checked = false;
+    updateRuleForm();
     var dialerList = $("dialerNodeList");
     if (dialerList && dialerList.parentNode) dialerList.parentNode.removeChild(dialerList);
     if ($("importMessages")) { clearElement($("importMessages")); $("importMessages").hidden = true; }
@@ -1148,7 +1156,7 @@
     var ready = !state.loading && state.authenticated;
     var nodeCount = ready && Array.isArray(state.config.proxies) ? state.config.proxies.length : undefined;
     setText("nodeSummary", ready ? String(nodeCount) + " 个节点" : "正在加载");
-    setText("ruleCount", ready ? state.config.custom_rules.length : undefined, "—");
+    setText("ruleCount", ready ? state.config.custom_rules.filter(function (raw) { return !isMatchRule(raw); }).length : undefined, "—");
     setText("footerNodeCount", nodeCount, "—");
     setText("footerRuleCount", ready ? counts.rules : undefined, "—");
     if (counts.mihomo) setText("runtimeMihomo", counts.mihomo);
@@ -1189,9 +1197,9 @@
     var select = $("ruleSource");
     if (!select) return;
     var options = [
-      ["dustinwin规则", "DustinWin 规则源"],
-      ["lhie1规则", "lhie1 规则源"],
-      ["none", "无基础规则（仅使用自定义规则）"]
+      ["dustinwin规则", "DustinWin"],
+      ["lhie1规则", "lhie1"],
+      ["none", "无基础规则（完全自己写）"]
     ];
     clearElement(select);
     options.forEach(function (item) {
@@ -1204,14 +1212,59 @@
       select.value = state.config.selected_rule_type === "自定义规则" ? "none" : state.config.selected_rule_type;
     }
     if (!select.value) select.value = options[0][0];
-    setText("ruleSourceStatus", "当前规则源：" + select.options[select.selectedIndex].textContent);
     renderProviderTargets();
+    renderRuleFallback();
+    renumberRuleFlow();
   }
 
   function selectedProviderSource() {
     if (state.config.selected_rule_type === "dustinwin规则") return "dustinwin";
     if (state.config.selected_rule_type === "lhie1规则") return "lhie1";
     return "";
+  }
+
+  // 当前规则源的基础规则（来自服务端 build_rule_catalog，顺序与生成结果一致）。
+  function selectedRuleCatalog() {
+    var catalog = isObject(state.ruleCatalog) ? state.ruleCatalog[state.config.selected_rule_type] : null;
+    return isObject(catalog) ? catalog : { key: "", label: "", rules: [], fallback: null };
+  }
+
+  function isMatchRule(raw) {
+    return String(raw).split(",", 1)[0].trim().toUpperCase() === "MATCH";
+  }
+
+  // 规则格式：类型,值,目标[,no-resolve]；MATCH 没有值；AND/OR 这类规则的值里本身带逗号，取中间全部。
+  function parseRule(raw) {
+    var parts = String(raw).split(",");
+    var noResolve = parts.length > 2 && parts[parts.length - 1].trim() === "no-resolve";
+    if (noResolve) parts.pop();
+    if (isMatchRule(raw)) return { type: "MATCH", value: "", target: parts.slice(1).join(","), noResolve: false };
+    return { type: parts[0] || "", value: parts.slice(1, -1).join(","), target: parts.length > 1 ? parts[parts.length - 1] : "", noResolve: noResolve };
+  }
+
+  var BUILTIN_RULE_TARGETS = ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"];
+  function isKnownTarget(target) {
+    var list = targetOptions().list;
+    return !list.length || list.indexOf(target) >= 0 || BUILTIN_RULE_TARGETS.indexOf(target) >= 0;
+  }
+
+  // 各分区独立渲染，序号统一在这里按 DOM 顺序重排，保证与实际匹配顺序连续一致。
+  function renumberRuleFlow() {
+    var rows = document.querySelectorAll("#ruleFlow [data-rule-seq]");
+    rows.forEach(function (row, index) {
+      var seq = row.querySelector(".rule-idx");
+      if (seq) seq.textContent = String(index + 1).padStart(2, "0");
+    });
+    setText("ruleSourceStatus", "共 " + rows.length + " 条规则");
+  }
+
+  function flowHead(parent, titleText, hintText) {
+    var head = document.createElement("div");
+    head.className = "flow-head";
+    appendText(head, titleText, "flow-title");
+    if (hintText) appendText(head, hintText, "flow-hint");
+    parent.appendChild(head);
+    return head;
   }
 
   // 规则目标候选（去掉 no-resolve、空值并去重）：按 allTargets 引用缓存，每次变化只用 Set 计算一次，
@@ -1244,17 +1297,49 @@
     select.appendChild(fragment);
   }
 
+  // 目标候选按“策略组 / 节点”分组；当前值已不在候选里时单独保留，避免下拉把它吞掉。
+  function appendTargetOptions(select, selected) {
+    var list = targetOptions().list;
+    if (selected && list.indexOf(selected) < 0) appendOptions(select, [selected]);
+    var nodeNames = new Set((Array.isArray(state.config.proxies) ? state.config.proxies : []).map(function (node) { return String(node && node.name || ""); }));
+    var nodes = list.filter(function (value) { return nodeNames.has(value); });
+    var groups = list.filter(function (value) { return !nodeNames.has(value); });
+    if (!nodes.length) {
+      appendOptions(select, groups);
+      return;
+    }
+    [["策略组", groups], ["节点", nodes]].forEach(function (item) {
+      if (!item[1].length) return;
+      var group = document.createElement("optgroup");
+      group.label = item[0];
+      appendOptions(group, item[1]);
+      select.appendChild(group);
+    });
+  }
+
   // 规则源目标下拉懒填充：初始只放当前值，首次获得焦点/按下鼠标/按键时才填入全部候选，
   // 填充后保持原选中值不变；选项变化（allTargets 更新）由区块重建处理。
   function fillProviderTargetSelect(select) {
     if (!select || select.dataset.filled === "true") return;
     var selected = select.value || select.dataset.selected || "";
-    var list = targetOptions().list;
-    var values = selected && list.indexOf(selected) < 0 ? [selected].concat(list) : list;
     clearElement(select);
-    appendOptions(select, values.length ? values : (selected ? [selected] : []));
+    appendTargetOptions(select, selected);
     select.value = selected;
     select.dataset.filled = "true";
+  }
+
+  function applyRuleFilter() {
+    var panel = $("providerTargetsPanel");
+    if (!panel) return;
+    var query = String(state.ruleFilter || "").trim().toLowerCase();
+    var rows = panel.querySelectorAll(".target-row");
+    var shown = 0;
+    rows.forEach(function (row) {
+      var match = !query || row.dataset.search.indexOf(query) >= 0 || String(row.dataset.target || "").toLowerCase().indexOf(query) >= 0;
+      row.hidden = !match;
+      if (match) shown += 1;
+    });
+    setText("ruleFilterCount", query ? "匹配 " + shown + " / " + rows.length + " 条" : "", "");
   }
 
   function renderProviderTargets() {
@@ -1264,19 +1349,16 @@
     var sourceKey = selectedProviderSource();
     panel.hidden = !sourceKey;
     if (!sourceKey) {
+      renumberRuleFlow();
       blockRendered("ruleSource");
       return;
     }
-    var defaults = isObject(state.providerDefaults[sourceKey]) ? state.providerDefaults[sourceKey] : {};
+    var catalog = selectedRuleCatalog();
+    var rules = Array.isArray(catalog.rules) ? catalog.rules : [];
     var overrideKey = sourceKey + "_provider_targets";
     var overrides = isObject(state.config.global_config[overrideKey]) ? state.config.global_config[overrideKey] : {};
-    var head = document.createElement("div");
-    head.className = "panel-head";
-    var title = document.createElement("div");
-    title.className = "panel-title";
-    title.textContent = sourceKey === "dustinwin" ? "DustinWin 规则目标" : "lhie1 规则目标";
-    head.appendChild(title);
-    var restore = makeButton("恢复当前源默认", "btn btn-ghost", function () {
+    var head = flowHead(panel, (catalog.label || sourceKey) + " 基础规则", "实际匹配顺序，可修改每条的目标");
+    var restore = makeButton("恢复默认目标", "btn btn-ghost", function () {
       state.config.global_config[overrideKey] = {};
       if (!markDirty()) return;
       renderProviderTargets();
@@ -1284,40 +1366,69 @@
     });
     restore.setAttribute("aria-label", "恢复当前规则源默认目标");
     head.appendChild(restore);
-    panel.appendChild(head);
-    var hint = document.createElement("div");
-    hint.className = "status-note";
-    hint.textContent = "仅修改当前规则源；切换到另一源不会覆盖其独立覆盖表。";
-    panel.appendChild(hint);
+    var filter = document.createElement("input");
+    filter.type = "search";
+    filter.className = "flow-filter";
+    filter.placeholder = "按规则名、说明或目标筛选，如 Proxy、netflix";
+    filter.setAttribute("aria-label", "筛选基础规则");
+    filter.value = state.ruleFilter || "";
+    filter.addEventListener("input", function () {
+      state.ruleFilter = filter.value;
+      applyRuleFilter();
+    });
+    panel.appendChild(filter);
+    var count = document.createElement("div");
+    count.id = "ruleFilterCount";
+    count.className = "status-note";
+    panel.appendChild(count);
     var editor = document.createElement("div");
-    editor.className = "target-editor";
-    var providerNames = Object.keys(defaults);
-    if (!providerNames.length) {
+    editor.className = "target-editor flow-scroll";
+    if (!rules.length) {
       var empty = document.createElement("div");
       empty.className = "phase2-empty";
-      empty.textContent = "服务端尚未提供该规则源的默认目标策略。";
+      empty.textContent = "服务端尚未提供该规则源的规则列表。";
       editor.appendChild(empty);
     }
     var fragment = document.createDocumentFragment();
-    providerNames.forEach(function (providerName, index) {
-      var defaultTarget = String(defaults[providerName] === undefined ? "" : defaults[providerName]);
-      var selected = String(Object.prototype.hasOwnProperty.call(overrides, providerName) ? overrides[providerName] : defaultTarget);
+    rules.forEach(function (rule, index) {
+      var defaultTarget = String(rule.target || "");
+      var overridden = rule.overridable && Object.prototype.hasOwnProperty.call(overrides, rule.value);
+      var selected = String(overridden ? overrides[rule.value] : defaultTarget);
       if (selected === "no-resolve") selected = "Proxy";
       var row = document.createElement("div");
-      row.className = "target-row";
+      row.className = "target-row" + (overridden ? " is-overridden" : "");
+      row.dataset.ruleSeq = "";
+      row.dataset.target = selected;
+      row.dataset.search = [rule.type, rule.value, rule.label].join(" ").toLowerCase();
+      appendText(row, "", "rule-idx");
+      appendText(row, rule.type, "rule-type");
       var text = document.createElement("span");
+      text.className = "target-text";
       var name = document.createElement("span");
       name.className = "target-name";
-      name.textContent = providerName;
+      name.textContent = rule.value;
+      text.appendChild(name);
+      if (rule.no_resolve) appendText(text, "no-resolve", "rule-tag");
+      var noteText = [rule.label];
+      if (rule.overridable) noteText.push("默认 " + defaultTarget);
       var note = document.createElement("span");
       note.className = "target-default";
-      note.textContent = "默认：" + defaultTarget;
-      text.appendChild(name);
+      note.textContent = noteText.filter(Boolean).join(" · ");
       text.appendChild(note);
+      var warn = document.createElement("span");
+      warn.className = "rule-warn";
+      warn.hidden = isKnownTarget(selected);
+      warn.textContent = "目标不存在，请重新选择";
+      text.appendChild(warn);
       row.appendChild(text);
+      if (!rule.overridable) {
+        appendText(row, "→ " + defaultTarget, "rule-target");
+        fragment.appendChild(row);
+        return;
+      }
       var select = document.createElement("select");
       select.id = "provider-target-" + sourceKey + "-" + index;
-      select.setAttribute("aria-label", providerName + " 目标策略");
+      select.setAttribute("aria-label", rule.value + " 目标策略");
       // 初始只放当前值；全部候选在交互时由 fillProviderTargetSelect 懒填充（见 initializeEvents 的委托）。
       select.dataset.lazyTargets = "true";
       select.dataset.selected = selected;
@@ -1325,9 +1436,12 @@
       select.value = selected;
       select.addEventListener("change", function () {
         var next = isObject(state.config.global_config[overrideKey]) ? clone(state.config.global_config[overrideKey]) : {};
-        if (select.value === defaultTarget) delete next[providerName];
-        else next[providerName] = select.value;
+        if (select.value === defaultTarget) delete next[rule.value];
+        else next[rule.value] = select.value;
         select.dataset.selected = select.value;
+        row.dataset.target = select.value;
+        row.classList.toggle("is-overridden", select.value !== defaultTarget);
+        warn.hidden = true;
         state.config.global_config[overrideKey] = next;
         if (!markDirty()) return;
         // DOM 已反映最新选择，同步区块签名，保存回包后不再重建这一面板。
@@ -1338,7 +1452,66 @@
     });
     editor.appendChild(fragment);
     panel.appendChild(editor);
+    applyRuleFilter();
+    renumberRuleFlow();
     blockRendered("ruleSource");
+  }
+
+  // 兜底规则始终是列表最后一条：自定义 MATCH 覆盖规则源默认，生成时也固定排在最后。
+  function renderRuleFallback() {
+    var box = $("ruleFallback");
+    if (!box) return;
+    var hadFocus = Boolean(document.activeElement) && document.activeElement.id === "ruleFallbackTarget";
+    clearElement(box);
+    var defaultTarget = String(selectedRuleCatalog().fallback || "");
+    var rules = Array.isArray(state.config.custom_rules) ? state.config.custom_rules : [];
+    var custom = rules.find(isMatchRule);
+    var current = custom !== undefined ? parseRule(custom).target : defaultTarget;
+    flowHead(box, "兜底规则", "前面都没命中时走这里");
+    var row = document.createElement("div");
+    row.className = "target-row";
+    row.dataset.ruleSeq = "";
+    appendText(row, "", "rule-idx");
+    appendText(row, "MATCH", "rule-type");
+    var text = document.createElement("span");
+    text.className = "target-text";
+    var name = document.createElement("span");
+    name.className = "target-name";
+    name.textContent = "其余全部流量";
+    text.appendChild(name);
+    var note = document.createElement("span");
+    note.className = "target-default";
+    note.textContent = defaultTarget ? "默认 " + defaultTarget : "当前规则源没有默认兜底";
+    text.appendChild(note);
+    if (!current) appendText(text, "未设置兜底时，没命中规则的流量会直连", "rule-warn");
+    else if (!isKnownTarget(current)) appendText(text, "目标不存在，请重新选择", "rule-warn");
+    row.appendChild(text);
+    var select = document.createElement("select");
+    select.id = "ruleFallbackTarget";
+    select.setAttribute("aria-label", "兜底规则目标策略");
+    if (!defaultTarget) {
+      var unset = document.createElement("option");
+      unset.value = "";
+      unset.textContent = "未设置（直连）";
+      select.appendChild(unset);
+    }
+    appendTargetOptions(select, current);
+    select.value = current;
+    select.addEventListener("change", function () {
+      var next = state.config.custom_rules.filter(function (raw) { return !isMatchRule(raw); });
+      if (select.value && select.value !== defaultTarget) next.push("MATCH," + select.value);
+      state.config.custom_rules = next;
+      if (!markDirty()) return;
+      renderRuleFallback();
+      renumberRuleFlow();
+      renderStats();
+      blockRendered("rules");
+    });
+    row.appendChild(select);
+    box.appendChild(row);
+    if (hadFocus) {
+      try { select.focus({ preventScroll: true }); } catch (_) { select.focus(); }
+    }
   }
 
   // 规则目标 datalist：只在候选列表变化时重建。
@@ -1378,44 +1551,49 @@
     if (!list) return;
     clearElement(list);
     var rules = Array.isArray(state.config.custom_rules) ? state.config.custom_rules : [];
+    // MATCH 单独显示在兜底分区；这里保留在 custom_rules 中的原下标，移动和删除都按原下标操作。
+    var entries = [];
+    rules.forEach(function (raw, index) {
+      if (!isMatchRule(raw)) entries.push({ raw: String(raw), index: index });
+    });
     var previousCounts = new Map();
     (renderedRuleList || []).forEach(function (raw) { previousCounts.set(raw, (previousCounts.get(raw) || 0) + 1); });
-    renderedRuleList = rules.map(String);
+    renderedRuleList = entries.map(function (entry) { return entry.raw; });
     var entering = 0;
-    if (!rules.length) {
+    if (!entries.length) {
       var empty = document.createElement("div");
       empty.className = "check-empty";
       empty.textContent = "暂无自定义规则";
       list.appendChild(empty);
-      blockRendered("rules");
-      return;
     }
     var fragment = document.createDocumentFragment();
-    rules.forEach(function (raw, index) {
-      var parts = String(raw).split(",");
+    entries.forEach(function (entry, position) {
+      var parsed = parseRule(entry.raw);
       var item = document.createElement("div");
-      item.className = "rule-item";
-      var seen = previousCounts.get(String(raw)) || 0;
-      if (seen > 0) previousCounts.set(String(raw), seen - 1);
+      item.className = "rule-item" + (state.ruleEditIndex === entry.index ? " is-editing" : "");
+      item.dataset.ruleSeq = "";
+      var seen = previousCounts.get(entry.raw) || 0;
+      if (seen > 0) previousCounts.set(entry.raw, seen - 1);
       else if (entering < ENTER_ANIMATION_LIMIT) {
         markEntering(item);
         entering += 1;
       }
-      appendText(item, String(index + 1).padStart(2, "0"), "rule-idx");
-      appendText(item, parts[0] || "", "rule-type");
-      appendText(item, parts[1] || "", "rule-value");
-      var route = document.createElement("span");
-      route.className = "rule-target";
-      route.textContent = "→ " + (parts.slice(2).join(",") || "");
-      item.appendChild(route);
-      var moveUp = makeButton("上移", "chip-btn", function () { moveRule(index, -1); });
-      moveUp.disabled = index === 0;
-      var moveDown = makeButton("下移", "chip-btn", function () { moveRule(index, 1); });
-      moveDown.disabled = index === rules.length - 1;
+      appendText(item, "", "rule-idx");
+      appendText(item, parsed.type, "rule-type");
+      var value = appendText(item, parsed.value, "rule-value");
+      if (parsed.noResolve && value) appendText(value, "no-resolve", "rule-tag");
+      appendText(item, "→ " + parsed.target, "rule-target");
+      if (!isKnownTarget(parsed.target)) appendText(item, "目标不存在", "rule-warn");
+      item.appendChild(makeButton("编辑", "chip-btn", function () { beginRuleEdit(entry.index); }));
+      var moveUp = makeButton("上移", "chip-btn", function () { moveRule(position, -1); });
+      moveUp.disabled = position === 0;
+      var moveDown = makeButton("下移", "chip-btn", function () { moveRule(position, 1); });
+      moveDown.disabled = position === entries.length - 1;
       item.appendChild(moveUp);
       item.appendChild(moveDown);
       var remove = makeButton("删除", "rule-del", function () {
-        state.config.custom_rules.splice(index, 1);
+        state.config.custom_rules.splice(entry.index, 1);
+        clearRuleEdit();
         if (!markDirty()) return;
         renderRules();
         renderStats();
@@ -1424,19 +1602,88 @@
       fragment.appendChild(item);
     });
     list.appendChild(fragment);
+    renderRuleFallback();
+    renumberRuleFlow();
     blockRendered("rules");
   }
 
-  function moveRule(index, direction) {
+  // position 是在“非 MATCH 规则”列表中的位置，交换时换回 custom_rules 的原下标。
+  function moveRule(position, direction) {
     var rules = state.config.custom_rules;
-    var next = index + direction;
-    if (!Array.isArray(rules) || next < 0 || next >= rules.length) return;
-    var current = rules[index];
-    rules[index] = rules[next];
-    rules[next] = current;
+    if (!Array.isArray(rules)) return;
+    var indices = [];
+    rules.forEach(function (raw, index) { if (!isMatchRule(raw)) indices.push(index); });
+    var from = indices[position];
+    var to = indices[position + direction];
+    if (from === undefined || to === undefined) return;
+    var current = rules[from];
+    rules[from] = rules[to];
+    rules[to] = current;
+    clearRuleEdit();
     if (!markDirty()) return;
     renderRules();
     renderStats();
+  }
+
+  var RULE_PLACEHOLDERS = {
+    "DOMAIN-SUFFIX": "example.com",
+    "DOMAIN": "www.example.com",
+    "DOMAIN-KEYWORD": "example",
+    "DOMAIN-REGEX": "^.*\\.example\\.com$",
+    "GEOSITE": "category-ads-all",
+    "IP-CIDR": "192.168.0.0/16",
+    "IP-CIDR6": "2001:db8::/32",
+    "GEOIP": "CN",
+    "DST-PORT": "443",
+    "PROCESS-NAME": "chrome.exe",
+    "MATCH": "MATCH 为兜底规则，无需填写值"
+  };
+  var NO_RESOLVE_RULE_TYPES = ["IP-CIDR", "IP-CIDR6", "GEOIP"];
+
+  function updateRuleForm() {
+    var type = $("ruleType");
+    if (!type) return;
+    var isMatch = type.value === "MATCH";
+    var value = $("ruleValue");
+    if (value) {
+      value.disabled = isMatch;
+      value.placeholder = RULE_PLACEHOLDERS[type.value] || "";
+    }
+    var supportsNoResolve = NO_RESOLVE_RULE_TYPES.indexOf(type.value) >= 0;
+    if ($("ruleNoResolveWrap")) $("ruleNoResolveWrap").hidden = !supportsNoResolve;
+    if (!supportsNoResolve && $("ruleNoResolve")) $("ruleNoResolve").checked = false;
+    var editing = state.ruleEditIndex !== null;
+    setText("addRuleBtn", editing ? "保存修改" : (isMatch ? "设为兜底" : "添加规则"));
+    if ($("cancelRuleEditBtn")) $("cancelRuleEditBtn").hidden = !editing;
+  }
+
+  function clearRuleEdit() {
+    if (state.ruleEditIndex === null) return;
+    state.ruleEditIndex = null;
+    if ($("ruleValue")) $("ruleValue").value = "";
+    if ($("ruleNoResolve")) $("ruleNoResolve").checked = false;
+    updateRuleForm();
+  }
+
+  function beginRuleEdit(index) {
+    var raw = state.config.custom_rules[index];
+    if (raw === undefined) return;
+    var parsed = parseRule(raw);
+    var type = $("ruleType");
+    // 导入来的规则可能是表单未列出的类型（如 AND、IP-ASN），补一个选项以便原样编辑。
+    if (!Array.prototype.some.call(type.options, function (option) { return option.value === parsed.type; })) {
+      appendOptions(type, [parsed.type]);
+    }
+    type.value = parsed.type;
+    $("ruleValue").value = parsed.value;
+    $("ruleTarget").value = parsed.target;
+    if ($("ruleNoResolve")) $("ruleNoResolve").checked = parsed.noResolve;
+    state.ruleEditIndex = index;
+    updateRuleForm();
+    if ($("ruleNoResolveWrap") && parsed.noResolve) $("ruleNoResolveWrap").hidden = false;
+    if ($("ruleNoResolve")) $("ruleNoResolve").checked = parsed.noResolve;
+    renderRules();
+    $("ruleValue").focus();
   }
 
   function rulesetField(parent, id, labelText, type, value, options) {
@@ -1451,10 +1698,12 @@
     control.name = id;
     if (type !== "select") control.type = type;
     if (type === "select") {
+      // 选项可写成 [值, 显示文本]，值与展示不同时使用。
       (options || []).forEach(function (optionValue) {
+        var pair = Array.isArray(optionValue) ? optionValue : [optionValue, optionValue];
         var option = document.createElement("option");
-        option.value = String(optionValue);
-        option.textContent = String(optionValue);
+        option.value = String(pair[0]);
+        option.textContent = String(pair[1]);
         control.appendChild(option);
       });
     }
@@ -1485,6 +1734,43 @@
     select.dataset.targetsKey = key;
   }
 
+  var RULESET_FIRST_ORDER = "优先 (覆盖)";
+
+  // 规则集在分流列表中的只读展示；增删在下方“自定义规则集”面板。
+  function renderRulesetFlow() {
+    var providers = isObject(state.config.custom_rule_providers) ? state.config.custom_rule_providers : {};
+    var names = Object.keys(providers);
+    function fill(id, title, hint, sectionNames) {
+      var section = $(id);
+      if (!section) return;
+      clearElement(section);
+      section.hidden = !sectionNames.length;
+      if (!sectionNames.length) return;
+      flowHead(section, title, hint);
+      var rows = document.createElement("div");
+      rows.className = "target-editor";
+      sectionNames.forEach(function (name) {
+        var provider = isObject(providers[name]) ? providers[name] : {};
+        var row = document.createElement("div");
+        row.className = "target-row";
+        row.dataset.ruleSeq = "";
+        appendText(row, "", "rule-idx");
+        appendText(row, "RULE-SET", "rule-type");
+        var text = document.createElement("span");
+        text.className = "target-text";
+        appendText(text, name, "target-name");
+        row.appendChild(text);
+        appendText(row, "→ " + String(provider.target || "Proxy"), "rule-target");
+        rows.appendChild(row);
+      });
+      section.appendChild(rows);
+    }
+    function isFirst(name) { return isObject(providers[name]) && providers[name].order === RULESET_FIRST_ORDER; }
+    fill("rulesetFirstFlow", "优先规则集", "排在基础规则之前", names.filter(isFirst));
+    fill("rulesetLastFlow", "追加规则集", "排在基础规则之后", names.filter(function (name) { return !isFirst(name); }));
+    renumberRuleFlow();
+  }
+
   function renderRulesets() {
     var panel = $("rulesetPanel");
     if (!panel) return;
@@ -1511,7 +1797,7 @@
     listHead.appendChild(listTitle);
     var listHint = document.createElement("div");
     listHint.className = "phase2-section-hint";
-    listHint.textContent = "生成时按各规则集的“匹配顺序”排列";
+    listHint.textContent = "在上方分流规则中的位置由“匹配顺序”决定";
     listHead.appendChild(listHint);
     listSection.appendChild(listHead);
     var list = document.createElement("div");
@@ -1536,7 +1822,7 @@
       var meta = document.createElement("div");
       meta.className = "ruleset-meta";
       var source = provider.type === "http" ? (provider.url || "HTTP") : (provider.path || "本地文件");
-      meta.textContent = String(provider.type || "file") + " · " + String(provider.behavior || "classical") + " · " + String(provider.format || "") + " · " + String(provider.order || "追加") + " · 目标：" + String(provider.target || "Proxy") + " · " + String(source);
+      meta.textContent = String(provider.type || "file") + " · " + String(provider.behavior || "classical") + " · " + String(provider.format || "") + " · " + (provider.order === RULESET_FIRST_ORDER ? "优先" : "追加") + " · 目标：" + String(provider.target || "Proxy") + " · " + String(source);
       main.appendChild(meta);
       row.appendChild(main);
       var actions = document.createElement("div");
@@ -1594,7 +1880,7 @@
     var interval = rulesetField(form, "rulesetInterval", "更新间隔（秒）", "number", "86400");
     interval.min = "1";
     interval.max = "31536000";
-    var order = rulesetField(form, "rulesetOrder", "匹配顺序", "select", "追加", ["优先 (覆盖)", "默认 (追加)", "追加"]);
+    var order = rulesetField(form, "rulesetOrder", "匹配顺序", "select", "追加", [[RULESET_FIRST_ORDER, "优先：排在基础规则之前"], ["追加", "追加：排在基础规则之后"]]);
     order.setAttribute("aria-describedby", "rulesetOrderHelp");
     var target = rulesetField(form, "rulesetTarget", "目标策略", "select", "Proxy", rulesetTargetOptions("Proxy"));
     target.setAttribute("aria-label", "规则集目标策略");
@@ -1603,7 +1889,7 @@
     var orderHelp = document.createElement("div");
     orderHelp.id = "rulesetOrderHelp";
     orderHelp.className = "schema-note";
-    orderHelp.textContent = "优先 (覆盖) 会把规则集放在基础规则之前；追加会放在基础规则之后。";
+    orderHelp.textContent = "想让规则集抢在基础规则前生效选“优先”，只补充基础规则没覆盖的内容选“追加”。";
     formSection.appendChild(orderHelp);
     var actions = document.createElement("div");
     actions.className = "ruleset-actions";
@@ -1622,6 +1908,7 @@
     message.textContent = state.rulesetMessage || "";
     formSection.appendChild(message);
     panel.appendChild(formSection);
+    renderRulesetFlow();
     blockRendered("rulesets");
   }
 
@@ -1819,11 +2106,37 @@
 
   function updateSchemaVisibility(root) {
     if (!root) return;
-    var values = controlValues(root);
+    var isGlobal = root.id === "globalSchemaPanel";
+    // 全局设置的部分条件字段（is_desktop）没有控件，由生成模式开关写入草稿，需要从草稿取值。
+    var values = isGlobal ? Object.assign({}, state.config.global_config, controlValues(root)) : controlValues(root);
+    var conditional = [];
     root.querySelectorAll("[data-condition]").forEach(function (field) {
       var condition;
       try { condition = JSON.parse(field.dataset.condition); } catch (_) { condition = null; }
-      field.classList.toggle("schema-field-hidden", !conditionMatches(condition, values));
+      var hidden = !conditionMatches(condition, values);
+      field.classList.toggle("schema-field-hidden", hidden);
+      conditional.push({ field: field, key: condition && condition.key, hidden: hidden });
+    });
+    if (!isGlobal) return;
+    // 条件依赖的开关自身被隐藏时，子字段也隐藏（软路由模式下“启用 DNS”隐藏，DNS 子项不能留着）。
+    var hiddenKeys = {};
+    var changed = true;
+    while (changed) {
+      changed = false;
+      conditional.forEach(function (item) {
+        if (!item.hidden && hiddenKeys[item.key]) {
+          item.hidden = true;
+          item.field.classList.add("schema-field-hidden");
+        }
+        var control = item.field.querySelector("[data-field-key]");
+        if (item.hidden && control && !hiddenKeys[control.dataset.fieldKey]) {
+          hiddenKeys[control.dataset.fieldKey] = true;
+          changed = true;
+        }
+      });
+    }
+    root.querySelectorAll("details[data-group]").forEach(function (details) {
+      details.hidden = !details.querySelector(".schema-field:not(.schema-field-hidden)");
     });
   }
 
@@ -1939,7 +2252,7 @@
   }
 
   var GLOBAL_GROUPS = [
-    { id: "basic", label: "基础与模式", keys: ["optional_globals_v2", "generation_profile", "is_desktop", "include_inbound_ports", "include_global_compat", "include_router_options", "enable_core_options", "port", "socks_port", "mixed_port", "allow_lan", "bind_address", "mode", "log_level", "ipv6_support", "openclash_preset"] },
+    { id: "basic", label: "基础与端口", keys: ["include_inbound_ports", "include_global_compat", "include_router_options", "enable_core_options", "port", "socks_port", "mixed_port", "allow_lan", "bind_address", "mode", "log_level", "ipv6_support"] },
     { id: "controller", label: "控制器", keys: ["include_controller", "external_controller", "secret", "external_ui", "external_ui_name", "external_ui_url"] },
     { id: "speed", label: "测速与性能", keys: ["find_process_mode", "url_test_url", "url_test_interval", "url_test_tolerance", "tcp_concurrent", "unified_delay", "geodata_mode", "geodata_loader", "keep_alive_interval", "keep_alive_idle"] },
     { id: "tun", label: "TUN 与路由", keys: ["enable_tun", "tun_stack", "tun_device", "tun_auto_route", "tun_auto_detect_interface", "tun_dns_hijack", "tun_dns_hijack_value", "tun_endpoint_independent_nat", "tun_auto_redirect", "tun_strict_route", "redir_port", "tproxy_port", "interface_name"] },
@@ -1952,8 +2265,11 @@
   // values 记录每个字段最近一次写入控件的值（稳定序列化），用于判断哪些控件需要刷新。
   var globalRender = { schema: null, built: false, values: {}, pendingRebuild: false };
 
+  // 不作为普通字段展示：目标覆盖在分流规则中编辑；模式由生成模式开关写入；
+  // optional_globals_v2 被后端强制为 true；openclash_preset 由推荐配置写入。
+  var GLOBAL_HIDDEN_KEYS = { lhie1_provider_targets: true, dustinwin_provider_targets: true, generation_profile: true, is_desktop: true, optional_globals_v2: true, openclash_preset: true };
   function isProviderTargetKey(key) {
-    return key === "lhie1_provider_targets" || key === "dustinwin_provider_targets";
+    return GLOBAL_HIDDEN_KEYS[key] === true;
   }
 
   function globalFieldFor(schema, key) {
@@ -1983,7 +2299,6 @@
   // 就地刷新：只改动值发生变化且当前未聚焦的控件；返回 false 表示需要整体重建（如下拉缺少新值的选项）。
   function patchGlobalConfigValues(container, schema, values) {
     var active = document.activeElement;
-    var changed = false;
     var needRebuild = false;
     container.querySelectorAll("[data-field-key]").forEach(function (control) {
       if (needRebuild) return;
@@ -1994,28 +2309,22 @@
       if (control === active) return;
       var display = schemaDisplayValue(globalFieldFor(schema, key), values);
       if (control.type === "checkbox") {
-        if (control.checked !== display) {
-          control.checked = display;
-          changed = true;
-        }
+        control.checked = display;
       } else if (control.tagName === "SELECT") {
         var hasOption = Array.prototype.some.call(control.options, function (option) { return option.value === display; });
         if (!hasOption && display !== "") {
           needRebuild = true;
           return;
         }
-        if (control.value !== display) {
-          control.value = display;
-          changed = true;
-        }
+        control.value = display;
       } else if (control.value !== display) {
         control.value = display;
-        changed = true;
       }
       globalRender.values[key] = stamp;
     });
     if (needRebuild) return false;
-    if (changed) updateSchemaVisibility(container);
+    // 生成模式没有对应控件，上面的循环感知不到，所以每次都重算可见性。
+    updateSchemaVisibility(container);
     return true;
   }
 
@@ -3089,24 +3398,49 @@
       showToast("请填写目标策略", "error");
       return;
     }
-    // MATCH 是兜底规则，固定两段 MATCH,target，没有也不需要规则值。
+    if (targetValue.indexOf(",") >= 0) {
+      showToast("目标策略不能包含逗号", "error");
+      return;
+    }
+    var editing = state.ruleEditIndex;
+    var rules = state.config.custom_rules;
+    // MATCH 是兜底规则，固定两段 MATCH,target，没有也不需要规则值；只保留一条，由新值替换旧值。
     if (type.value === "MATCH") {
-      state.config.custom_rules.push("MATCH," + targetValue);
+      var kept = rules.filter(function (raw, index) { return index !== editing && !isMatchRule(raw); });
+      kept.push("MATCH," + targetValue);
+      state.config.custom_rules = kept;
     } else {
-      if (!value || !value.value.trim()) {
+      var ruleValue = value ? value.value.trim() : "";
+      if (!ruleValue) {
         showToast("请填写规则值", "error");
         return;
       }
-      state.config.custom_rules.push(type.value + "," + value.value.trim() + "," + targetValue);
+      // AND/OR/NOT 这类逻辑规则的值本身带逗号，其余类型出现逗号会被拆错字段。
+      if (ruleValue.indexOf(",") >= 0 && !/^(AND|OR|NOT|SUB-RULE)$/.test(type.value)) {
+        showToast("规则值不能包含逗号", "error");
+        return;
+      }
+      var noResolve = $("ruleNoResolve");
+      var raw = type.value + "," + ruleValue + "," + targetValue + (noResolve && noResolve.checked ? ",no-resolve" : "");
+      if (rules.some(function (item, index) { return index !== editing && String(item) === raw; })) {
+        showToast("这条规则已经存在", "error");
+        return;
+      }
+      if (editing !== null) rules[editing] = raw;
+      else rules.push(raw);
     }
+    state.ruleEditIndex = null;
     if (!markDirty()) return;
     if (value) value.value = "";
+    if ($("ruleNoResolve")) $("ruleNoResolve").checked = false;
+    updateRuleForm();
     renderRules();
     renderStats();
   }
 
   function changeRuleSource(value) {
     state.config.selected_rule_type = value;
+    state.ruleFilter = "";
     if (!markDirty()) return;
     renderRuleSource();
   }
@@ -3149,7 +3483,7 @@
     var router = config.generation_profile === "openclash-router" || config.is_desktop === false;
     var modeSwitch = $("modeSwitch");
     if (modeSwitch) modeSwitch.classList.toggle("router", router);
-    setText("modeDesc", router ? "由 OpenClash 接管 DNS / TUN，仅输出节点与规则。" : "由 YAML 输出客户端 DNS / TUN 设置。");
+    setText("modeDesc", router ? "DNS、TUN、嗅探由 OpenClash 接管，YAML 只输出节点、策略组和规则，相关设置已隐藏。" : "YAML 自带 DNS、TUN、嗅探等完整设置，导入客户端即可使用。");
   }
 
   async function applyPreset(key) {
@@ -3185,9 +3519,9 @@
     updateModeView();
     try {
       await flushDraftSave();
-      if (!isStale(epoch)) showToast("DNS 预设已保存", "info");
+      if (!isStale(epoch)) showToast("推荐配置已应用", "info");
     } catch (error) {
-      if (!isStale(epoch)) displayApiError(error, "DNS 预设保存失败");
+      if (!isStale(epoch)) displayApiError(error, "推荐配置保存失败");
     } finally {
       if (!isStale(epoch)) state.globalSaving = false;
       updateGlobalActionButtons();
@@ -3731,13 +4065,13 @@
     },
     ruleSource: {
       step: 3,
-      containers: ["providerTargetsPanel", "ruleSource"],
+      containers: ["providerTargetsPanel", "ruleSource", "ruleFallback"],
       signature: function () {
         var sourceKey = selectedProviderSource();
         var overrides = sourceKey ? state.config.global_config[sourceKey + "_provider_targets"] : null;
         return [
           state.config.selected_rule_type,
-          objectId(state.providerDefaults),
+          objectId(state.ruleCatalog),
           JSON.stringify(overrides === undefined ? null : overrides),
           targetOptions().key
         ].join("|");
@@ -4013,13 +4347,12 @@
     $("saveNodeBtn") && $("saveNodeBtn").addEventListener("click", saveNodeForm);
     $("cancelNodeBtn") && $("cancelNodeBtn").addEventListener("click", closeNodeForm);
     $("addRuleBtn") && $("addRuleBtn").addEventListener("click", addRule);
-    $("ruleType") && $("ruleType").addEventListener("change", function (event) {
-      var ruleValue = $("ruleValue");
-      if (!ruleValue) return;
-      var isMatch = event.target.value === "MATCH";
-      ruleValue.disabled = isMatch;
-      ruleValue.placeholder = isMatch ? "MATCH 为兜底规则，无需填写值" : "example.com / 192.168.0.0/16";
+    $("ruleType") && $("ruleType").addEventListener("change", updateRuleForm);
+    $("cancelRuleEditBtn") && $("cancelRuleEditBtn").addEventListener("click", function () {
+      clearRuleEdit();
+      renderRules();
     });
+    updateRuleForm();
     $("ruleSource") && $("ruleSource").addEventListener("change", function (event) { changeRuleSource(event.target.value); });
     $("validateBtn") && $("validateBtn").addEventListener("click", validateDraft);
     $("publishBtn") && $("publishBtn").addEventListener("click", publishDraft);

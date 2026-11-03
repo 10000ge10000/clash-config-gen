@@ -194,6 +194,25 @@ DUSTINWIN_PROVIDERS_MAP = {
 }
 
 
+# 规则集的中文说明，只用于界面展示。
+DUSTINWIN_RULE_LABELS = {
+    "private": "私有网络域名", "ads": "广告域名", "applications": "下载类应用", "microsoft-cn": "微软国内域名",
+    "apple-cn": "苹果国内域名", "google": "Google 服务", "google-cn": "Google 国内域名", "games-cn": "游戏国内域名",
+    "games": "游戏平台", "netflix": "Netflix", "disney": "Disney+", "max": "HBO Max", "primevideo": "Prime Video",
+    "appletv": "Apple TV", "youtube": "YouTube", "tiktok": "TikTok", "bilibili": "哔哩哔哩", "spotify": "Spotify",
+    "media": "其他流媒体", "ai": "AI 服务", "networktest": "测速站点", "tld-proxy": "境外顶级域名",
+    "gfw": "GFW 名单", "proxy": "代理域名", "cn": "国内域名", "privateip": "私有网络 IP", "cnip": "国内 IP",
+    "telegramip": "Telegram IP", "netflixip": "Netflix IP", "mediaip": "流媒体 IP",
+}
+LHIE1_RULE_LABELS = {
+    "AdBlock": "广告拦截", "HTTPDNS": "HTTPDNS 拦截", "Special": "特殊直连", "PROXY": "代理域名",
+    "Domestic": "国内域名", "Domestic IPs": "国内 IP", "LAN": "局域网", "AI Suite": "AI 服务",
+    "Crypto": "加密货币", "Scholar": "学术站点", "Speedtest": "测速站点", "google": "Google 服务",
+    "IQ": "爱奇艺海外", "IQIYI": "爱奇艺", "Letv": "乐视", "Netease Music": "网易云音乐",
+    "Tencent Video": "腾讯视频", "Youku": "优酷", "Bilibili": "哔哩哔哩", "Google FCM": "Google 推送",
+}
+
+
 def priority_ordered_items(
     mapping: dict[str, Any],
     priority_names: tuple[str, ...],
@@ -629,6 +648,10 @@ def validate_config(
     return errors, warnings
 
 
+def _is_match_rule(rule: object) -> bool:
+    return str(rule).split(",", 1)[0].strip().upper() == "MATCH"
+
+
 def build_rules(
     selected_rule_type: str,
     custom_rules: list[str],
@@ -735,12 +758,57 @@ def build_rules(
         else:
             provider_rules_append.append(f"RULE-SET,{name},{target}")
 
-    preset_normal = [rule for rule in rule_list if not rule.startswith("MATCH,")]
-    preset_match = [rule for rule in rule_list if rule.startswith("MATCH,")]
-    final_rules = list(custom_rules) + provider_rules_prepend + preset_normal + provider_rules_append + preset_match
+    preset_normal = [rule for rule in rule_list if not _is_match_rule(rule)]
+    preset_match = [rule for rule in rule_list if _is_match_rule(rule)]
+    # MATCH 命中后不再继续匹配：自定义 MATCH 只能作为兜底放在最后（替换基础规则源的兜底），
+    # 否则排在它后面的规则集和基础规则全部失效。多条时第一条生效，其余本就不可达。
+    custom_normal = [rule for rule in custom_rules if not _is_match_rule(rule)]
+    custom_match = [rule for rule in custom_rules if _is_match_rule(rule)]
+    final_match = custom_match[:1] or preset_match
+    final_rules = custom_normal + provider_rules_prepend + preset_normal + provider_rules_append + final_match
     if not is_no_base_rule_type(selected_rule_type) and not any(rule.startswith("MATCH,") for rule in final_rules):
         final_rules.append("MATCH,Proxy")
     return final_rules, rule_providers
+
+
+def _catalog_entry(rule: str, overridable: set[str], labels: dict[str, str]) -> dict[str, Any]:
+    parts = rule.split(",")
+    no_resolve = parts[-1] == "no-resolve"
+    if no_resolve:
+        parts = parts[:-1]
+    rule_type, value, target = parts[0], ",".join(parts[1:-1]), parts[-1]
+    is_provider = rule_type == "RULE-SET"
+    return {
+        "type": rule_type,
+        "value": value,
+        "target": target,
+        "no_resolve": no_resolve,
+        "overridable": is_provider and value in overridable,
+        "label": labels.get(value, "") if is_provider else "内置规则",
+    }
+
+
+def build_rule_catalog() -> dict[str, dict[str, Any]]:
+    """各规则源的真实基础规则（按生成顺序），前端据此展示实际分流列表。
+
+    直接取 build_rules 的输出而不是另写一份顺序，保证界面与生成结果一致。
+    """
+    sources = (
+        ("dustinwin规则", "dustinwin", "DustinWin", set(DUSTINWIN_PROVIDERS_MAP), DUSTINWIN_RULE_LABELS),
+        ("lhie1规则", "lhie1", "lhie1", set(LHIE1_PROVIDERS_MAP), LHIE1_RULE_LABELS),
+    )
+    catalog: dict[str, dict[str, Any]] = {}
+    for rule_type, key, label, overridable, labels in sources:
+        rules, _ = build_rules(rule_type, [], {})
+        fallback = next((rule.split(",", 1)[1] for rule in rules if _is_match_rule(rule)), None)
+        catalog[rule_type] = {
+            "key": key,
+            "label": label,
+            "rules": [_catalog_entry(rule, overridable, labels) for rule in rules if not _is_match_rule(rule)],
+            "fallback": fallback,
+        }
+    catalog["none"] = {"key": "", "label": "无基础规则", "rules": [], "fallback": None}
+    return catalog
 
 
 def _parse_nameserver_policy(raw_policy: str) -> dict[str, str]:

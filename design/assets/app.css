@@ -213,6 +213,23 @@ body {
   transition: color .25s, background-color .25s;
 }
 
+/* 顶栏标语：宽度不足时先收起前半句，再整体隐藏，导航和状态始终优先 */
+.topbar-slogan {
+  flex: 1 1 auto; min-width: 0; margin: 0; text-align: center;
+  font-size: 13.5px; font-weight: 700; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.topbar-slogan .grad {
+  background: linear-gradient(90deg, #0e7490, #4f46e5, #7c3aed);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+html.dark .topbar-slogan .grad {
+  background: linear-gradient(90deg, #22d3ee, #818cf8, #c084fc);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+@media (max-width: 1400px) { .slogan-lead { display: none; } }
+@media (max-width: 900px) { .topbar-slogan { display: none; } }
+
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
 
 .sub-status {
@@ -268,32 +285,6 @@ html.dark #themeToggle .ico-moon { display: block; }
 /* ============ 主内容 ============ */
 .main-col { min-width: 0; order: 2; }
 
-/* Hero */
-.hero { padding: 26px 4px 24px; }
-.hero-eyebrow {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 11.5px; font-weight: 600; letter-spacing: 2.5px; text-transform: uppercase;
-  color: var(--accent); margin-bottom: 14px;
-  animation: fadeUp .2s var(--ease-out) both;
-}
-.hero-eyebrow::before { content: ""; width: 26px; height: 1px; background: linear-gradient(90deg, var(--accent), transparent); }
-.hero h1 {
-  font-size: clamp(26px, 3.4vw, 38px); font-weight: 800; line-height: 1.22;
-  letter-spacing: -.5px; animation: fadeUp .2s var(--ease-out) .02s both;
-}
-.hero h1 .grad {
-  background: linear-gradient(90deg, #0e7490, #4f46e5, #7c3aed);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-html.dark .hero h1 .grad {
-  background: linear-gradient(90deg, #22d3ee, #818cf8, #c084fc);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.hero p {
-  margin-top: 12px; max-width: 640px; color: var(--text-dim);
-  font-size: 14.5px; line-height: 1.75;
-  animation: fadeUp .2s var(--ease-out) .04s both;
-}
 
 
 /* 面板 */
@@ -524,12 +515,40 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 }
 
 /* ============ Step3 规则 ============ */
-.rules-layout { display: grid; grid-template-columns: 5fr 7fr; gap: 18px; }
-@media (max-width: 1100px) { .rules-layout { grid-template-columns: 1fr; } }
+/* 分流规则：各分区的 DOM 顺序就是实际匹配顺序，序号由 renumberRuleFlow 连续编排 */
+.rule-flow { display: flex; flex-direction: column; gap: 18px; margin-top: 14px; }
+.flow-section { padding: 2px 0 2px 14px; border-left: 2px solid rgba(148,163,184,.22); }
+.flow-section[hidden] { display: none; }
+.flow-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 10px; }
+.flow-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.flow-count { color: var(--accent); font-family: var(--mono); }
+.flow-hint { font-size: 11.5px; color: var(--text-faint); }
+.flow-head .btn { margin-left: auto; padding: 5px 10px; font-size: 12px; }
+.flow-filter { width: 100%; margin-bottom: 8px; }
+.flow-scroll { max-height: 560px; overflow-y: auto; padding-right: 4px; }
+.rule-form { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr) minmax(150px, 1.2fr) auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+.rule-form .field { margin-bottom: 0; min-width: 0; }
+.rule-form-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rule-no-resolve { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+.rule-no-resolve[hidden] { display: none; }
+.rule-form-actions .btn[hidden] { display: none; }
+@media (max-width: 1100px) { .rule-form { grid-template-columns: 1fr 1fr; } .rule-form-actions { grid-column: 1 / -1; } }
+@media (max-width: 720px) { .rule-form { grid-template-columns: 1fr; } }
+.rule-item.is-editing { border-color: var(--accent); }
+.rule-tag { font-family: var(--mono); font-size: 10px; color: var(--text-faint); margin-left: 6px; }
+.rule-warn { font-size: 11px; color: var(--warn); }
+.target-row[hidden] { display: none; }
+.target-row.is-overridden { border-color: rgba(34,211,238,.4); }
+.config-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.config-mode-item { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.preset-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.preset-row .preset-btn { margin-bottom: 0; }
+.schema-group[hidden] { display: none; }
+@media (max-width: 860px) { .config-mode, .preset-row { grid-template-columns: 1fr; } }
 
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 7px; letter-spacing: .3px; }
-.field input, .field select {
+.field input, .field select, .flow-filter, .target-row select {
   width: 100%; padding: 10px 13px; border-radius: 10px;
   background: var(--input-bg); border: 1px solid var(--border);
   color: var(--text); font-size: 13px; font-family: var(--font);
@@ -538,15 +557,15 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 /* 复选框不能继承整行宽与大内边距：checkbox 的可勾选区域只有自身小方框，
    拉宽后点击文字附近区域不会切换状态。 */
 .field input[type="checkbox"] { width: 16px; height: 16px; padding: 0; flex: none; cursor: pointer; accent-color: #22d3ee; }
-.field select { cursor: pointer; appearance: none; -webkit-appearance: none;
+.field select, .target-row select { cursor: pointer; appearance: none; -webkit-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238b98ad' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 13px center;
 }
-.field input:focus, .field select:focus {
+.field input:focus, .field select:focus, .flow-filter:focus, .target-row select:focus {
   border-color: rgba(34,211,238,.55);
   box-shadow: 0 0 0 3px rgba(34,211,238,.1);
 }
-.field input::placeholder { color: var(--text-faint); }
+.field input::placeholder, .flow-filter::placeholder { color: var(--text-faint); }
 
 .rule-item {
   display: flex; align-items: center; gap: 12px;
@@ -571,7 +590,7 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 }
 .rule-target .arrow { color: var(--accent); }
 .rule-del {
-  width: 24px; height: 24px; border-radius: 7px; cursor: pointer;
+  min-width: 24px; height: 24px; padding: 0 6px; border-radius: 7px; cursor: pointer; white-space: nowrap;
   display: grid; place-items: center; color: var(--text-faint);
   background: transparent; border: none; transition: color .22s, background-color .22s; flex-shrink: 0;
 }
@@ -762,7 +781,7 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 }
 
 /* ============ V2 core controls ============ */
-.wnav-item { appearance: none; font-family: var(--font); }
+.wnav-item { appearance: none; background: transparent; font-family: var(--font); }
 .wnav-item:focus-visible, .btn:focus-visible, .chip-btn:focus-visible, .pill:focus-visible,
 .method-card:focus-visible, .login-tab:focus-visible, .preset-btn:focus-visible,
 .copy-btn:focus-visible, .btn-icon:focus-visible, .avatar:focus-visible,
@@ -807,10 +826,11 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 .phase2-section-hint { font-size:10.5px; color:var(--text-faint); }
 .target-editor, .ruleset-list, .admin-list { display:flex; flex-direction:column; gap:8px; }
 .target-row, .ruleset-row, .admin-row { display:flex; align-items:center; gap:8px; min-width:0; padding:9px 10px; border:1px solid var(--border); border-radius:10px; background:rgba(148,163,184,.035); }
-.target-row > span:first-child, .ruleset-row-main, .admin-row-main { min-width:0; flex:1; }
+.target-text, .ruleset-row-main, .admin-row-main { min-width:0; flex:1; }
 .target-name, .ruleset-name, .admin-name { color:var(--text); font-size:12px; font-weight:600; overflow-wrap:anywhere; }
 .target-default, .ruleset-meta, .admin-meta { color:var(--text-faint); font-size:10.5px; line-height:1.5; overflow-wrap:anywhere; }
-.target-row select { width:clamp(130px, 42%, 240px); min-width:0; }
+.target-row select { width:clamp(130px, 34%, 240px); min-width:0; flex:none; padding:7px 28px 7px 10px; font-size:12px; }
+.target-text .target-default { display:block; }
 .ruleset-row { align-items:flex-start; }
 .ruleset-row-actions, .admin-row-actions { display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end; }
 .ruleset-form, .admin-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; }
@@ -852,17 +872,24 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
   .topbar-right { gap:6px; }
   .btn-icon, .avatar { width:30px; height:30px; }
   .layout { padding-left:10px; padding-right:10px; gap:10px; }
-  .hero { padding-left:0; padding-right:0; }
-  .hero h1 { font-size:25px; }
   .panel { padding:16px; border-radius:14px; }
   .step-banner { padding:20px 16px; }
   .method-card { padding:13px; }
   .paste-zone textarea { min-height:190px; padding:12px; }
   .btn-lg { padding:12px 16px; }
-  .target-row, .ruleset-row, .admin-row { align-items:flex-start; flex-wrap:wrap; }
-  .target-row select { width:100%; }
+  .ruleset-row, .admin-row { align-items:flex-start; flex-wrap:wrap; }
   .ruleset-row-actions, .admin-row-actions { width:100%; justify-content:flex-start; }
   .schema-group-grid { padding-left:10px; padding-right:10px; }
+}
+
+@media (max-width: 720px) {
+  /* 窄屏分行：序号和类型一行，规则内容独占一行，目标和操作放在最后 */
+  .target-row, .rule-item { flex-wrap: wrap; }
+  .target-text, .rule-value { flex: 1 1 100%; order: 3; white-space: normal; overflow-wrap: anywhere; }
+  .target-row select { width: 100%; order: 4; }
+  .target-row .rule-target, .rule-item .rule-target { order: 4; }
+  .rule-item .rule-warn { order: 5; }
+  .rule-item .chip-btn, .rule-item .rule-del { order: 6; }
 }
 
 /* ============ 用户下拉菜单 ============ */

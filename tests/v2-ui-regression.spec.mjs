@@ -971,7 +971,9 @@ test('V2 修补回归：新增节点默认值、smux/链式代理、MATCH 规则
   await expect(page.locator('#ruleValue')).toBeDisabled();
   await page.locator('#ruleTarget').fill('Proxy');
   await page.locator('#addRuleBtn').click();
-  await expect(page.locator('#ruleList .rule-item').filter({ hasText: 'MATCH' })).toHaveCount(1);
+  // MATCH 不进普通规则列表，固定显示在兜底分区。
+  await expect(page.locator('#ruleList .rule-item').filter({ hasText: 'MATCH' })).toHaveCount(0);
+  await expect(page.locator('#ruleFallbackTarget')).toHaveValue('Proxy');
   await waitForSaved(page);
   expect(await state(page, () => window.v2State.config.custom_rules)).toContain('MATCH,Proxy');
 
@@ -1928,5 +1930,135 @@ test('V2 onekey 表单回显：smux Brutal 与 TFO 勾选，Hy2 不写入默认�
   await field('enable_smux').uncheck();
   await saveForm();
   expect((await node('Echo-Vision')).smux).toBeUndefined();
+  tracker.assertClean();
+});
+
+test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定最后，模式切换隐藏无效设置', async ({ page }) => {
+  test.setTimeout(120_000);
+  const tracker = trackPageFailures(page);
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+  const username = `flow-${Date.now()}`;
+  await createPlainUser(page, username, temporaryUserPassword);
+  await page.locator('#userAvatar').click();
+  await page.locator('#userDropdown').getByRole('button', { name: /退出/ }).click();
+  await signInViaForm(page, username, temporaryUserPassword);
+  const imported = await importMethod(page, 'yaml', 'proxies:\n  - name: Flow-Node\n    type: ss\n    server: flow.example.com\n    port: 443\n    cipher: aes-128-gcm\n    password: flow-secret\n');
+  expect(imported.status(), await imported.text()).toBe(200);
+  await waitForSaved(page);
+
+  // Hero 已移除，标语带渐变进入顶栏。
+  await expect(page.locator('.hero')).toHaveCount(0);
+  await expect(page.locator('.topbar .topbar-slogan .grad')).toHaveText('一套流程直接闭环');
+
+  await page.locator('#step-tab-3').click();
+  await page.locator('#ruleSource').selectOption('dustinwin规则');
+  await waitForSaved(page);
+
+  // 规则目标面板按实际顺序列出，含内置规则，序号连续。
+  const flowRows = page.locator('#ruleFlow [data-rule-seq]');
+  await expect(page.locator('#providerTargetsPanel .target-name').first()).toHaveText('xn--ngstr-lra8j.com');
+
+  await expect(page.locator('#cancelRuleEditBtn')).toBeHidden();
+  await page.locator('#ruleType').selectOption('IP-CIDR');
+  await expect(page.locator('#ruleNoResolveWrap')).toBeVisible();
+  await page.locator('#ruleValue').fill('10.1.0.0/16');
+  await page.locator('#ruleNoResolve').check();
+  await page.locator('#ruleTarget').fill('DIRECT');
+  await page.locator('#addRuleBtn').click();
+  await expect(page.locator('#ruleList .rule-item')).toHaveCount(1);
+  // 重复规则被拦截。
+  await page.locator('#ruleValue').fill('10.1.0.0/16');
+  await page.locator('#ruleNoResolve').check();
+  await page.locator('#addRuleBtn').click();
+  await expect(page.locator('#ruleList .rule-item')).toHaveCount(1);
+  // 编辑就地替换，不改变条数。
+  await page.locator('#ruleList .rule-item').getByRole('button', { name: '编辑' }).click();
+  await expect(page.locator('#ruleValue')).toHaveValue('10.1.0.0/16');
+  await expect(page.locator('#cancelRuleEditBtn')).toBeVisible();
+  await expect(page.locator('#ruleNoResolve')).toBeChecked();
+  await page.locator('#ruleValue').fill('10.2.0.0/16');
+  await page.locator('#addRuleBtn').click();
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.custom_rules)).toEqual(['IP-CIDR,10.2.0.0/16,DIRECT,no-resolve']);
+
+  // 两种顺序的规则集分别落到基础规则前后（只读展示）。
+  for (const [alias, order, target] of [['flow-first', '优先 (覆盖)', 'Proxy'], ['flow-last', '追加', 'DIRECT']]) {
+    await page.locator('#rulesetAlias').fill(alias);
+    await page.locator('#rulesetUrl').fill(`http://127.0.0.1:9/${alias}.yaml`);
+    await page.locator('#rulesetOrder').selectOption(order);
+    await page.locator('#rulesetTarget').selectOption(target);
+    await page.locator('#rulesetSaveBtn').click();
+    await waitForSaved(page);
+    await expect(page.locator('#rulesetPanel .ruleset-name').filter({ hasText: alias })).toHaveCount(1);
+  }
+  await page.locator('#ruleTarget').fill('Proxy');
+  await page.locator('#ruleType').selectOption('DOMAIN');
+  await page.locator('#ruleValue').fill('flow.example.com');
+  await page.locator('#addRuleBtn').click();
+  await waitForSaved(page);
+  await expect(page.locator('#rulesetFirstFlow .target-name')).toHaveText('flow-first');
+  await expect(page.locator('#rulesetLastFlow .target-name')).toHaveText('flow-last');
+
+  // 目标覆盖与自定义兜底。
+  const firstOverridable = page.locator('#providerTargetsPanel select').first();
+  await firstOverridable.focus();
+  await firstOverridable.selectOption('Flow-Node');
+  await page.locator('#ruleFallbackTarget').selectOption('DIRECT');
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.custom_rules)).toContain('MATCH,DIRECT');
+  await expect(page.locator('#ruleList .rule-item')).toHaveCount(2);
+  await expect(page.locator('#ruleCount')).toHaveText('2');
+
+  // 序号连续，且每一行与校验返回的 rules 完全一致。
+  const shownRules = await flowRows.evaluateAll((rows) => rows.map((row, index) => {
+    const seq = row.querySelector('.rule-idx').textContent;
+    const type = row.querySelector('.rule-type').textContent;
+    const select = row.querySelector('select');
+    const target = select ? select.value : row.querySelector('.rule-target').textContent.replace('→ ', '');
+    const nameNode = row.querySelector('.target-name');
+    const valueNode = row.querySelector('.rule-value');
+    const value = type === 'MATCH' ? '' : (nameNode ? nameNode.textContent : valueNode.firstChild.textContent);
+    const noResolve = Boolean(row.querySelector('.rule-tag'));
+    return { seq, index, rule: [type, value, target].filter(Boolean).join(',') + (noResolve ? ',no-resolve' : '') };
+  }));
+  shownRules.forEach((item) => expect(item.seq).toBe(String(item.index + 1).padStart(2, '0')));
+  await page.locator('#step-tab-4').click();
+  await page.locator('#validateBtn').click();
+  await expect.poll(() => state(page, () => Boolean(window.v2State.validation && window.v2State.validation.yaml)), { timeout: 30_000 }).toBe(true);
+  const yamlText = await state(page, () => window.v2State.validation.yaml);
+  const rulesBlock = yamlText.split(/^rules:\n/m)[1].split(/^[^\s-]/m)[0];
+  const yamlRules = rulesBlock.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('- ')).map((line) => line.slice(2).replace(/^['"]|['"]$/g, ''));
+  expect(shownRules.map((item) => item.rule)).toEqual(yamlRules);
+  expect(yamlRules[yamlRules.length - 1]).toBe('MATCH,DIRECT');
+  expect(yamlRules[0]).toBe('IP-CIDR,10.2.0.0/16,DIRECT,no-resolve');
+
+  // 筛选只隐藏行，不改变序号；无基础规则时默认没有兜底并提示。
+  await page.locator('#step-tab-3').click();
+  await page.locator('#providerTargetsPanel .flow-filter').fill('netflix');
+  await expect(page.locator('#ruleFilterCount')).toContainText('匹配');
+  await expect(page.locator('#providerTargetsPanel .target-row:visible')).not.toHaveCount(0);
+  await page.locator('#ruleFallbackTarget').selectOption('Others');
+  await page.locator('#ruleSource').selectOption('none');
+  await waitForSaved(page);
+  await expect(page.locator('#providerTargetsPanel')).toBeHidden();
+  await expect(page.locator('#ruleFallbackTarget')).toHaveValue('');
+  await expect(page.locator('#ruleFallback .rule-warn')).toContainText('直连');
+
+  // 已废弃或重复的字段不再暴露；软路由模式隐藏不会写入 YAML 的分组（含依赖开关的子字段）。
+  for (const key of ['generation_profile', 'is_desktop', 'optional_globals_v2', 'openclash_preset']) {
+    await expect(page.locator(`#globalSchemaPanel [data-field-key="${key}"]`)).toHaveCount(0);
+  }
+  await page.locator('#modeDesktopBtn').click();
+  await waitForSaved(page);
+  await expect(page.locator('#globalSchemaPanel details[data-group="dns"]')).toBeVisible();
+  await page.locator('#modeRouterBtn').click();
+  await waitForSaved(page);
+  for (const group of ['basic', 'tun', 'dns', 'sniffer']) {
+    await expect(page.locator(`#globalSchemaPanel details[data-group="${group}"]`)).toBeHidden();
+  }
+  await page.locator('#modeDesktopBtn').click();
+  await waitForSaved(page);
+  await expect(page.locator('#globalSchemaPanel details[data-group="dns"]')).toBeVisible();
   tracker.assertClean();
 });

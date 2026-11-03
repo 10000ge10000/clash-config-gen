@@ -31,6 +31,7 @@
       <button class="wnav-item" id="step-tab-3" type="button" role="tab" data-step="3" aria-controls="step3" aria-selected="false" tabindex="-1" aria-label="步骤 3：规则与全局"><span class="wnum">03</span><span class="wlabel">规则与全局</span></button>
       <button class="wnav-item" id="step-tab-4" type="button" role="tab" data-step="4" aria-controls="step4" aria-selected="false" tabindex="-1" aria-label="步骤 4：校验与发布"><span class="wnum">04</span><span class="wlabel">校验与发布</span></button>
     </nav>
+    <h1 class="topbar-slogan"><span class="slogan-lead">从节点导入到订阅生效，</span><span class="grad">一套流程直接闭环</span></h1>
     <div class="topbar-right">
       <div class="sub-status" aria-live="polite"><span class="dot"></span><span class="st-text" id="serviceStatus">正在加载</span></div>
       <button class="btn-icon" id="themeToggle" type="button" title="切换浅色 / 暗色主题" aria-label="切换浅色 / 暗色主题">
@@ -49,12 +50,6 @@
 
   <div class="layout" id="layout">
     <main class="main-col">
-      <section class="hero">
-        <div class="hero-eyebrow">Subscription Workspace</div>
-        <h1>从节点导入到订阅生效，<span class="grad">一套流程直接闭环</span></h1>
-        <p>面向 Docker 自部署、OpenClash 软路由与 mihomo 客户端的订阅生成工具。导入节点、编辑规则、生成订阅、校验 YAML —— 全程用户隔离，Token 订阅即时生效。</p>
-      </section>
-
       <section class="step-section active" id="step1" role="tabpanel" aria-labelledby="step-tab-1" tabindex="0">
         <div class="step-banner" style="--bc:34,211,238"><div class="sb-ico">↓</div><div class="sb-body"><div class="sb-eyebrow">Step 01 · Import</div><h2 class="sb-title">导入节点</h2><p class="sb-desc">YAML、订阅链接和多行分享链接统一进入后端解析管线。</p></div><div class="sb-num">01</div></div>
         <div class="panel stagger">
@@ -94,28 +89,45 @@
       </section>
 
       <section class="step-section" id="step3" role="tabpanel" aria-labelledby="step-tab-3" tabindex="0">
-        <div class="step-banner" style="--bc:167,139,250"><div class="sb-ico">≋</div><div class="sb-body"><div class="sb-eyebrow">Step 03 · Rules & Global</div><h2 class="sb-title">规则与全局设置</h2><p class="sb-desc">在这里维护自定义规则、规则集和全局设置；全局设置项由服务端字段定义生成，服务端未提供的设置不会显示。</p></div><div class="sb-num">03</div></div>
+        <div class="step-banner" style="--bc:167,139,250"><div class="sb-ico">≋</div><div class="sb-body"><div class="sb-eyebrow">Step 03 · Rules & Global</div><h2 class="sb-title">规则与全局设置</h2><p class="sb-desc">规则列表的顺序就是最终 YAML 的匹配顺序，全局设置决定其余内容。</p></div><div class="sb-num">03</div></div>
         <div class="panel">
-          <div class="panel-head"><div class="panel-title">基础规则源</div><span class="panel-hint" id="ruleSourceStatus">等待后端配置</span></div>
-          <div class="field"><label for="ruleSource">规则源</label><select id="ruleSource" aria-label="规则源"></select></div>
-          <div class="rules-layout">
-            <div class="panel stagger">
-              <div class="panel-head"><div class="panel-title">单条规则</div></div>
-              <div class="field"><label for="ruleType">规则类型</label><select id="ruleType"><option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX</option><option value="DOMAIN">DOMAIN</option><option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD</option><option value="IP-CIDR">IP-CIDR</option><option value="GEOIP">GEOIP</option><option value="PROCESS-NAME">PROCESS-NAME</option><option value="MATCH">MATCH</option></select></div>
-              <div class="field"><label for="ruleValue">规则值</label><input id="ruleValue" type="text" placeholder="输入域名、IP 或进程名"></div>
-              <div class="field"><label for="ruleTarget">目标策略</label><input id="ruleTarget" type="text" list="ruleTargetOptions" placeholder="选择或输入策略组名称" autocomplete="off"><datalist id="ruleTargetOptions"></datalist></div>
-              <button class="btn btn-primary btn-block" id="addRuleBtn" type="button">添加规则</button>
-            </div>
-            <div class="panel">
-              <div class="panel-head"><div class="panel-title">已添加规则 <span style="color:var(--accent);font-family:var(--mono)" id="ruleCount">—</span></div><span class="panel-hint">按草稿中的顺序</span></div>
+          <div class="panel-head"><div class="panel-title">分流规则</div><span class="panel-hint" id="ruleSourceStatus">等待后端配置</span></div>
+          <div class="field"><label for="ruleSource">基础规则源</label><select id="ruleSource" aria-label="规则源"></select></div>
+          <p class="status-note">规则从上到下依次匹配，命中第一条后不再继续。</p>
+          <div class="rule-flow" id="ruleFlow">
+            <section class="flow-section" aria-labelledby="customRuleTitle">
+              <div class="flow-head"><div class="flow-title" id="customRuleTitle">自定义规则 <span class="flow-count" id="ruleCount">—</span></div><span class="flow-hint">最先匹配，可调整顺序</span></div>
+              <div class="rule-form">
+                <div class="field"><label for="ruleType">规则类型</label><select id="ruleType"><option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX</option><option value="DOMAIN">DOMAIN</option><option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD</option><option value="DOMAIN-REGEX">DOMAIN-REGEX</option><option value="GEOSITE">GEOSITE</option><option value="IP-CIDR">IP-CIDR</option><option value="IP-CIDR6">IP-CIDR6</option><option value="GEOIP">GEOIP</option><option value="DST-PORT">DST-PORT</option><option value="PROCESS-NAME">PROCESS-NAME</option><option value="MATCH">MATCH（兜底）</option></select></div>
+                <div class="field"><label for="ruleValue">规则值</label><input id="ruleValue" type="text" placeholder="example.com"></div>
+                <div class="field"><label for="ruleTarget">目标策略</label><input id="ruleTarget" type="text" list="ruleTargetOptions" placeholder="选择或输入策略组名称" autocomplete="off"><datalist id="ruleTargetOptions"></datalist></div>
+                <div class="rule-form-actions"><label class="status-note rule-no-resolve" id="ruleNoResolveWrap" hidden><input type="checkbox" id="ruleNoResolve"> no-resolve</label><button class="btn btn-primary" id="addRuleBtn" type="button">添加规则</button><button class="btn btn-ghost" id="cancelRuleEditBtn" type="button" hidden>取消</button></div>
+              </div>
               <div id="ruleList"><div class="check-empty">正在加载规则</div></div>
-            </div>
+            </section>
+            <section class="flow-section" id="rulesetFirstFlow" hidden></section>
+            <section class="flow-section" id="providerTargetsPanel" hidden></section>
+            <section class="flow-section" id="rulesetLastFlow" hidden></section>
+            <section class="flow-section" id="ruleFallback"></section>
           </div>
         </div>
-        <div class="panel" id="providerTargetsPanel" hidden></div>
         <div class="panel" id="rulesetPanel"></div>
         <div class="panel">
-          <div class="panel-head"><div class="panel-title">全局设置</div><span class="panel-hint">由服务端字段定义生成</span></div>
+          <div class="panel-head"><div class="panel-title">全局设置</div><span class="panel-hint">决定 YAML 里除节点和规则之外的内容</span></div>
+          <div class="config-mode">
+            <div class="config-mode-item">
+              <div class="flow-title">生成模式</div>
+              <div class="mode-switch" id="modeSwitch"><div class="indicator"></div><button id="modeDesktopBtn" type="button">全平台客户端</button><button id="modeRouterBtn" type="button">OpenClash / 软路由</button></div>
+              <div class="status-note" id="modeDesc">等待后端全局配置</div>
+            </div>
+            <div class="config-mode-item">
+              <div class="flow-title">推荐配置</div>
+              <div class="preset-row">
+                <button class="preset-btn" id="presetDesktopBtn" type="button"><span class="p-ico">◈</span><span>完整客户端<small>切换到全平台客户端并填入推荐值</small></span></button>
+                <button class="preset-btn" id="presetRouterBtn" type="button"><span class="p-ico">□</span><span>OpenClash<small>切换到软路由模式并填入推荐值</small></span></button>
+              </div>
+            </div>
+          </div>
           <div id="globalSchemaPanel"><div class="phase2-empty">正在加载全局设置…</div></div>
         </div>
       </section>
@@ -141,20 +153,6 @@
         <div class="sp-title">订阅链接<span id="subscriptionCardStatus" style="font-size:10px;letter-spacing:.5px;color:var(--text-faint)">● 未发布</span></div>
         <div class="sub-link-card"><code id="subUrl">尚未发布订阅</code><button class="copy-btn" id="subCopyBtn" type="button" title="复制订阅链接" aria-label="复制订阅链接">⧉</button></div>
         <button class="btn btn-ghost btn-block" id="resetTokenBtn" type="button" style="font-size:12px;padding:8px">重置订阅 Token</button>
-      </div>
-      <div class="sp-card">
-        <div class="sp-title">生成模式</div>
-        <div class="mode-switch" id="modeSwitch"><div class="indicator"></div><button id="modeDesktopBtn" type="button">全平台客户端</button><button id="modeRouterBtn" type="button">OpenClash / 软路由</button></div>
-        <div class="status-note" id="modeDesc">等待后端全局配置</div>
-      </div>
-      <div class="sp-card">
-        <div class="sp-title">DNS 预设</div>
-        <button class="preset-btn" id="presetDesktopBtn" type="button"><span class="p-ico">◈</span><span>完整客户端预设<small>由服务端预设提供</small></span></button>
-        <button class="preset-btn" id="presetRouterBtn" type="button"><span class="p-ico">□</span><span>OpenClash 预设<small>由服务端预设提供</small></span></button>
-      </div>
-      <div class="sp-card">
-        <div class="sp-title">全局设置状态</div>
-        <div class="phase2-empty">字段编辑位于“规则与全局”步骤，设置项由服务端字段定义生成。</div>
       </div>
       <div id="adminPanelHost"></div>
     </aside>

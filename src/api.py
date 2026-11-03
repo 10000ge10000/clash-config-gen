@@ -33,6 +33,7 @@ from auth_service import (
 )
 from config_builder import DEFAULT_RULE_TYPE, DUSTINWIN_PROVIDERS_MAP, is_no_base_rule_type
 from config_builder import (
+    build_rule_catalog,
     build_subscription_headers,
     build_yaml,
     validate_config,
@@ -1007,6 +1008,7 @@ def _bootstrap(
         **copy.deepcopy(config),
         "subscription": subscription,
         "provider_defaults": _provider_defaults(),
+        "rule_catalog": build_rule_catalog(),
         "presets": {
             "full_client": FULL_CLIENT_DNS_PRESET,
             "openclash_router": OPENCLASH_ROUTER_SAFE_PRESET,
