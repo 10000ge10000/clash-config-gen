@@ -246,14 +246,30 @@ html.dark .topbar-slogan .grad, html.dark .method-card h4 {
 .sub-dot[data-status="published"] { background: var(--success); }
 .sub-dot[data-status="draft"] { background: var(--warn); }
 .sub-popover {
-  position: absolute; top: 44px; right: 0; width: 340px; display: none; z-index: 300; padding: 16px;
+  position: absolute; top: 44px; right: 0; width: 340px; max-height: calc(100vh - 84px); overflow-y: auto; display: none; z-index: 300; padding: 16px;
   background: var(--toast-bg); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--toast-shadow);
 }
 .sub-popover.open { display: block; }
+/* 弹层比提示消息大得多，半透明底会让背后的页面文字透出来影响阅读 */
+.sub-popover { background: #fff; }
+html.dark .sub-popover { background: #0c1322; }
 .sub-popover .sp-title { margin-bottom: 12px; }
 .sub-popover-status { font-size: 11px; letter-spacing: .5px; text-transform: none; color: var(--text-faint); }
 .sub-popover .sub-link-card code { white-space: normal; word-break: break-all; line-height: 1.6; }
 .sub-popover .btn { font-size: 12px; padding: 8px; }
+.sub-popover .btn + .btn { margin-top: 8px; }
+.sub-popover a.btn { text-align: center; text-decoration: none; }
+.sub-popover a.btn[hidden], .sub-qr-block[hidden], .sub-qr-empty[hidden] { display: none; }
+.sub-qr-block { margin-bottom: 12px; }
+.sub-qr-empty { margin-bottom: 10px; }
+.sub-qr-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; margin-bottom: 12px; border-radius: 9px; background: var(--input-bg-2); border: 1px solid var(--border); }
+.sub-qr-mode button { padding: 6px 4px; border: 0; border-radius: 7px; background: transparent; color: var(--text-dim); font-family: var(--font); font-size: 12px; font-weight: 600; cursor: pointer; }
+.sub-qr-mode button[aria-pressed="true"] { background: var(--grad-main); color: var(--on-accent); }
+.sub-qr-mode button:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+/* 深色主题下也保持白底黑码，否则部分扫码器无法识别 */
+.sub-qr { width: 204px; height: 204px; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #fff; }
+.sub-qr svg { display: block; width: 100%; height: 100%; }
+.sub-qr-hint { margin-top: 10px; color: var(--text-faint); font-size: 11.5px; line-height: 1.6; }
 @media (max-width: 1180px) {
   .sub-trigger-label { display: none; }
   .sub-trigger { padding: 0 9px; }

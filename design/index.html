@@ -43,7 +43,17 @@
         </button>
         <div class="sub-popover" id="subPopover">
           <div class="sp-title">订阅链接<span id="subscriptionCardStatus" class="sub-popover-status">● 未发布</span></div>
+          <div class="sub-qr-block" id="subQrBlock" hidden>
+            <div class="sub-qr-mode" role="group" aria-label="二维码类型">
+              <button type="button" id="subQrAppBtn" aria-pressed="true">客户端内扫码</button>
+              <button type="button" id="subQrCameraBtn" aria-pressed="false">手机相机扫码</button>
+            </div>
+            <div class="sub-qr" id="subQr" role="img" aria-label="订阅链接二维码"></div>
+            <div class="sub-qr-hint" id="subQrHint"></div>
+          </div>
+          <div class="sub-qr-empty status-note" id="subQrEmpty">发布后才能扫码或一键导入。</div>
           <div class="sub-link-card"><code id="subUrl">尚未发布订阅</code><button class="copy-btn" id="subCopyBtn" type="button" title="复制订阅链接" aria-label="复制订阅链接">⧉</button></div>
+          <a class="btn btn-primary btn-block" id="subOpenApp" title="适用于已安装 Clash Verge Rev、Clash Party 等客户端的设备" hidden>导入到本机客户端</a>
           <button class="btn btn-ghost btn-block" id="resetTokenBtn" type="button">重置订阅 Token</button>
         </div>
       </div>
@@ -188,6 +198,7 @@
     </div>
   </div>
 
+<script src="/ui/qrcode.js" defer></script>
 <script src="/ui/app.js" defer></script>
 </body>
 </html>

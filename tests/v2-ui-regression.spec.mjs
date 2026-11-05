@@ -501,6 +501,24 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   await page.locator('#publishBtn').click();
   await expect(page.locator('#subscriptionCardStatus')).toHaveText('● 已发布', { timeout: 30_000 });
   const publishedUrl = await page.locator('#subUrl').textContent();
+
+  // 已发布才有二维码：默认内容为订阅链接，相机模式与一键导入使用 clash:// 深链；关闭弹层后移除。
+  const qrText = () => page.locator('#subQr path').getAttribute('d');
+  const qrFor = (text) => page.evaluate((value) => {
+    const qr = window.ClashQr.encode(value);
+    return qr.modules.flatMap((row, y) => row.flatMap((dark, x) => (dark ? [`M${x + 4} ${y + 4}h1v1h-1z`] : []))).join('');
+  }, text);
+  const deepLink = `clash://install-config?url=${encodeURIComponent(publishedUrl)}&name=Clash%20Config%20Gen`;
+  await page.locator('#subMenuBtn').click();
+  await expect(page.locator('#subQrEmpty')).toBeHidden();
+  expect(await qrText()).toBe(await qrFor(publishedUrl));
+  await expect(page.locator('#subOpenApp')).toHaveAttribute('href', deepLink);
+  await page.locator('#subQrCameraBtn').click();
+  await expect(page.locator('#subQrCameraBtn')).toHaveAttribute('aria-pressed', 'true');
+  expect(await qrText()).toBe(await qrFor(deepLink));
+  await page.locator('#subQrAppBtn').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#subQr svg')).toHaveCount(0);
   expect(publishedUrl).toMatch(new RegExp(`^${baseURL.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}/sub/[^\\s]+$`));
   const publishedSubscription = await page.evaluate(async (url) => {
     const subscriptionResponse = await fetch(url);
@@ -640,7 +658,6 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   const popoverBox = await page.locator('#subPopover').boundingBox();
   expect(popoverBox.x).toBeGreaterThanOrEqual(0);
   expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(dimensions.clientWidth);
-  await page.locator('#validateBtn').click({ trial: true });
   await page.mouse.click(5, 500);
   await expect(page.locator('#resetTokenBtn')).toBeHidden();
 
@@ -1915,6 +1932,27 @@ test('V2 onekey 表单回显：smux Brutal 与 TFO 勾选，Hy2 不写入默认�
   tracker.assertClean();
 });
 
+test('V2 订阅二维码编码器：各容量版本输出稳定，超长内容报错', async ({ page }) => {
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  const result = await page.evaluate(async () => {
+    const digest = async (value) => {
+      const bytes = new TextEncoder().encode(value);
+      const hash = await crypto.subtle.digest('SHA-256', bytes);
+      return Array.from(new Uint8Array(hash).slice(0, 8)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    };
+    const samples = {};
+    for (const length of [10, 72, 130, 412]) {
+      const qr = window.ClashQr.encode('https://example.com/'.repeat(21).slice(0, length));
+      samples[length] = [qr.version, await digest(qr.modules.map((row) => row.map((dark) => (dark ? '1' : '0')).join('')).join('\n'))];
+    }
+    let tooLong = '';
+    try { window.ClashQr.encode('x'.repeat(413)); } catch (error) { tooLong = error.message; }
+    return { samples, tooLong };
+  });
+  expect(result.samples).toEqual({"10":[1,"2df0f0e9f3de8c80"],"72":[5,"729e6a851c19581e"],"130":[8,"d89aa48a3b409c21"],"412":[15,"77aeb9c1e629c047"]});
+  expect(result.tooLong).toContain('内容过长');
+});
+
 test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定最后，模式切换隐藏无效设置', async ({ page }) => {
   test.setTimeout(120_000);
   const tracker = trackPageFailures(page);
@@ -1953,6 +1991,10 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
   await subTrigger.click();
   await expect(subTrigger).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#subUrl')).toContainText('/sub/');
+  // 未发布时订阅接口返回 409，不提供二维码和一键导入。
+  await expect(page.locator('#subQrEmpty')).toBeVisible();
+  await expect(page.locator('#subQrBlock')).toBeHidden();
+  await expect(page.locator('#subOpenApp')).toBeHidden();
   await expect(page.locator('#subCopyBtn')).toBeVisible();
   await page.locator('#userAvatar').click();
   await expect(page.locator('#subPopover')).toBeHidden();

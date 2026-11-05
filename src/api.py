@@ -210,6 +210,7 @@ UI_ASSET_DIR_CANDIDATES = [
 UI_ASSET_MEDIA_TYPES = {
     "app.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
+    "qrcode.js": "text/javascript; charset=utf-8",
     "favicon.svg": "image/svg+xml",
     "favicon.png": "image/png",
 }
@@ -386,6 +387,11 @@ def ui_app_css():
 @app.get("/ui/app.js")
 def ui_app_js():
     return _ui_asset_response("app.js")
+
+
+@app.get("/ui/qrcode.js")
+def ui_qrcode_js():
+    return _ui_asset_response("qrcode.js")
 
 
 @app.get("/ui/favicon.svg")

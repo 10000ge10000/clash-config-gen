@@ -25,6 +25,7 @@
     providerDefaults: {},
     ruleCatalog: {},
     ruleEditIndex: null,
+    subQrMode: "app",
     allTargets: [],
     counts: {},
     warnings: [],
@@ -846,6 +847,7 @@
     if (popover) popover.classList.toggle("open", open);
     if (trigger) trigger.setAttribute("aria-expanded", open ? "true" : "false");
     if (open) closeUserDropdown();
+    renderSubscriptionImport();
   }
 
   function setUserDropdownOpen(open) {
@@ -1185,6 +1187,72 @@
     if (dot) dot.dataset.status = String(subscription.status || "");
     var copy = $("subCopyBtn");
     if (copy) copy.disabled = !url;
+    renderSubscriptionImport();
+  }
+
+  var SUB_QR_HINTS = {
+    app: "在客户端的添加配置页选择扫码，内容就是订阅链接。适用于 Clash Meta for Android、FlClash、Hiddify。",
+    camera: "用手机相机扫码，由已安装的客户端接管导入。适用于 Stash、Clash Meta for Android、FlClash、Hiddify。"
+  };
+
+  // clash://install-config 是 Clash 系客户端通用的导入协议，url 必须完整编码。
+  function subscriptionDeepLink(url) {
+    return "clash://install-config?url=" + encodeURIComponent(url) + "&name=" + encodeURIComponent("Clash Config Gen");
+  }
+
+  function drawSubscriptionQr(host, text) {
+    var qr = window.ClashQr.encode(text);
+    var quiet = 4;
+    var path = "";
+    qr.modules.forEach(function (row, y) {
+      row.forEach(function (dark, x) {
+        if (dark) path += "M" + (x + quiet) + " " + (y + quiet) + "h1v1h-1z";
+      });
+    });
+    var total = qr.size + quiet * 2;
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 " + total + " " + total);
+    svg.setAttribute("shape-rendering", "crispEdges");
+    svg.setAttribute("aria-hidden", "true");
+    var modules = document.createElementNS(ns, "path");
+    modules.setAttribute("d", path);
+    modules.setAttribute("fill", "#000");
+    svg.appendChild(modules);
+    clearElement(host);
+    host.appendChild(svg);
+  }
+
+  // 只有已发布的订阅才能拉取（未发布时接口返回 409）。二维码含 Token，只在弹层打开时生成，关闭即移除。
+  function renderSubscriptionImport() {
+    var subscription = state.subscription || {};
+    var url = typeof subscription.url === "string" ? subscription.url : "";
+    var ready = Boolean(url) && subscription.status === "published";
+    var open = $("subMenuBtn") && $("subMenuBtn").getAttribute("aria-expanded") === "true";
+    var host = $("subQr");
+    var cameraMode = state.subQrMode === "camera";
+    if ($("subQrBlock")) $("subQrBlock").hidden = !ready;
+    if ($("subQrEmpty")) $("subQrEmpty").hidden = ready;
+    var openApp = $("subOpenApp");
+    if (openApp) {
+      openApp.hidden = !ready;
+      if (ready) openApp.setAttribute("href", subscriptionDeepLink(url));
+      else openApp.removeAttribute("href");
+    }
+    if ($("subQrAppBtn")) $("subQrAppBtn").setAttribute("aria-pressed", cameraMode ? "false" : "true");
+    if ($("subQrCameraBtn")) $("subQrCameraBtn").setAttribute("aria-pressed", cameraMode ? "true" : "false");
+    setText("subQrHint", cameraMode ? SUB_QR_HINTS.camera : SUB_QR_HINTS.app);
+    if (!host) return;
+    if (!ready || !open) {
+      clearElement(host);
+      return;
+    }
+    try {
+      drawSubscriptionQr(host, cameraMode ? subscriptionDeepLink(url) : url);
+    } catch (_) {
+      clearElement(host);
+      setText("subQrHint", "二维码生成失败，请复制下方链接手动导入。");
+    }
   }
 
   function renderImport() {
@@ -4136,6 +4204,12 @@
     var subTrigger = $("subMenuBtn");
     if (subTrigger) subTrigger.addEventListener("click", function () {
       setSubMenuOpen(subTrigger.getAttribute("aria-expanded") !== "true");
+    });
+    [["subQrAppBtn", "app"], ["subQrCameraBtn", "camera"]].forEach(function (item) {
+      $(item[0]) && $(item[0]).addEventListener("click", function () {
+        state.subQrMode = item[1];
+        renderSubscriptionImport();
+      });
     });
     $("subMenu") && $("subMenu").addEventListener("keydown", function (event) {
       if (event.key !== "Escape" || !subTrigger || subTrigger.getAttribute("aria-expanded") !== "true") return;
