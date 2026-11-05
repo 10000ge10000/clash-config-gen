@@ -1,6 +1,8 @@
 import base64
 import os
+import re
 from typing import Any
+from urllib.parse import quote
 
 import yaml
 
@@ -567,7 +569,34 @@ def build_yaml(config: dict[str, Any]) -> str:
     )
 
 
-def build_subscription_headers(proxy_count: int, group_count: int) -> dict[str, str]:
+def _subscription_profile_name_headers(profile_name: str | None) -> dict[str, str]:
+    """按配置名称生成 Profile-Title 与 Content-Disposition。
+
+    Hiddify 读 Profile-Title，FlClash 读 Content-Disposition 的文件名且不去扩展名，
+    所以文件名不带 .yaml。名称来自用户名，非白名单字符一律走编码形式，防止响应头注入。
+    """
+    name = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", profile_name or "").strip()[:64]
+    if not name:
+        return {
+            "Profile-Title": SUBSCRIPTION_GENERATOR,
+            "Content-Disposition": 'inline; filename="clash-config.yaml"',
+        }
+    if re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        return {
+            "Profile-Title": name,
+            "Content-Disposition": f'inline; filename="{name}"',
+        }
+    return {
+        "Profile-Title": _base64_utf8(name),
+        "Content-Disposition": f"""inline; filename="clash-config"; filename*=UTF-8''{quote(name, safe='')}""",
+    }
+
+
+def build_subscription_headers(
+    proxy_count: int,
+    group_count: int,
+    profile_name: str | None = None,
+) -> dict[str, str]:
     """构造 Clash/OpenClash 订阅元信息响应头。
 
     Subscription-Userinfo 只能表达流量/到期信息，OpenClash 会固定渲染成
@@ -577,12 +606,11 @@ def build_subscription_headers(proxy_count: int, group_count: int) -> dict[str, 
     """
     return {
         "Profile-Update-Interval": "24",
-        "Profile-Title": SUBSCRIPTION_GENERATOR,
+        **_subscription_profile_name_headers(profile_name),
         "Profile-Web-Page-Url": SUBSCRIPTION_GITHUB_URL,
         "Support-Url": SUBSCRIPTION_PROJECT_URL,
         "Announce": _base64_utf8(SUBSCRIPTION_ANNOUNCE),
         "X-Clash-Config-Project-Url": SUBSCRIPTION_PROJECT_URL,
-        "Content-Disposition": 'inline; filename="clash-config.yaml"',
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
         "X-Clash-Proxy-Count": str(proxy_count),

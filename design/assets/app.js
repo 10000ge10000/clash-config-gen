@@ -1191,13 +1191,13 @@
   }
 
   var SUB_QR_HINTS = {
-    app: "在客户端的添加配置页选择扫码，内容就是订阅链接。适用于 Clash Meta for Android、FlClash、Hiddify。",
+    app: "在客户端的添加配置页选择扫码，内容就是订阅链接。适用于 FlClash、Hiddify；Clash Meta for Android 这样导入需手动填写名称。",
     camera: "用手机相机扫码，由已安装的客户端接管导入。适用于 Stash、Clash Meta for Android、FlClash、Hiddify。"
   };
 
   // clash://install-config 是 Clash 系客户端通用的导入协议，url 必须完整编码。
   function subscriptionDeepLink(url) {
-    return "clash://install-config?url=" + encodeURIComponent(url) + "&name=" + encodeURIComponent("Clash Config Gen");
+    return "clash://install-config?url=" + encodeURIComponent(url) + "&name=" + encodeURIComponent((state.user && state.user.username) || "Clash Config Gen");
   }
 
   function drawSubscriptionQr(host, text) {

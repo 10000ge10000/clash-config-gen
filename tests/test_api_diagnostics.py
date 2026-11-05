@@ -114,6 +114,81 @@ class ApiDiagnosticsTest(unittest.TestCase):
                 else:
                     os.environ["APP_DB_PATH"] = previous_db_path
 
+    def test_subscription_headers_use_safe_profile_name(self):
+        ascii_headers = build_subscription_headers(1, 2, "alice_01")
+        self.assertEqual("alice_01", ascii_headers["Profile-Title"])
+        self.assertEqual('inline; filename="alice_01"', ascii_headers["Content-Disposition"])
+
+        chinese_headers = build_subscription_headers(1, 2, "一万")
+        self.assertEqual(
+            "一万",
+            base64.b64decode(chinese_headers["Profile-Title"].removeprefix("base64:")).decode("utf-8"),
+        )
+        self.assertEqual(
+            "inline; filename=\"clash-config\"; filename*=UTF-8''%E4%B8%80%E4%B8%87",
+            chinese_headers["Content-Disposition"],
+        )
+
+        # 换行、引号不能原样进入响应头。
+        hostile_headers = build_subscription_headers(1, 2, 'a"\r\nSet-Cookie: x=1')
+        for value in hostile_headers.values():
+            self.assertNotIn("\r", value)
+            self.assertNotIn("\n", value)
+        self.assertNotIn('a"', hostile_headers["Content-Disposition"])
+
+        for empty_name in (None, "", " \r\n"):
+            fallback_headers = build_subscription_headers(1, 2, empty_name)
+            self.assertEqual("Clash-Config-Gen", fallback_headers["Profile-Title"])
+            self.assertEqual('inline; filename="clash-config.yaml"', fallback_headers["Content-Disposition"])
+
+    def test_subscription_endpoint_names_profile_after_username(self):
+        try:
+            from api import get_subscription, head_subscription
+        except ModuleNotFoundError:
+            self.skipTest("fastapi 未安装，跳过 API 路由测试")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            previous_db_path = os.environ.get("APP_DB_PATH")
+            os.environ["APP_DB_PATH"] = os.path.join(tmpdir, "app.db")
+            try:
+                init_db()
+                user = create_user("name-user", "password123")
+                config = build_config(
+                    [
+                        {
+                            "name": "sample",
+                            "type": "ss",
+                            "server": "127.0.0.1",
+                            "port": 8388,
+                            "cipher": "aes-128-gcm",
+                            "password": "password",
+                        }
+                    ],
+                    {"generation_profile": "minimal"},
+                )
+                save_user_config(
+                    int(user["id"]),
+                    config["proxies"],
+                    {"generation_profile": "minimal"},
+                    [],
+                    {},
+                    "自定义规则",
+                    build_yaml(config),
+                    validation_status="passed",
+                    validation_message="ok",
+                )
+                token = diagnostics_config_for_user(int(user["id"]))["token"]
+
+                # 依次覆盖 HEAD、首次 GET 和命中缓存的 GET。
+                for response in (head_subscription(token), get_subscription(token), get_subscription(token)):
+                    self.assertEqual("name-user", response.headers["profile-title"])
+                    self.assertEqual('inline; filename="name-user"', response.headers["content-disposition"])
+            finally:
+                if previous_db_path is None:
+                    os.environ.pop("APP_DB_PATH", None)
+                else:
+                    os.environ["APP_DB_PATH"] = previous_db_path
+
     def test_diagnostics_returns_non_sensitive_subscription_stats(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             previous_db_path = os.environ.get("APP_DB_PATH")

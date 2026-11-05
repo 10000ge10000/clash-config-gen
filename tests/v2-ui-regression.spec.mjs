@@ -508,7 +508,7 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
     const qr = window.ClashQr.encode(value);
     return qr.modules.flatMap((row, y) => row.flatMap((dark, x) => (dark ? [`M${x + 4} ${y + 4}h1v1h-1z`] : []))).join('');
   }, text);
-  const deepLink = `clash://install-config?url=${encodeURIComponent(publishedUrl)}&name=Clash%20Config%20Gen`;
+  const deepLink = `clash://install-config?url=${encodeURIComponent(publishedUrl)}&name=e2e-admin`;
   await page.locator('#subMenuBtn').click();
   await expect(page.locator('#subQrEmpty')).toBeHidden();
   expect(await qrText()).toBe(await qrFor(publishedUrl));

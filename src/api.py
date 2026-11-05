@@ -652,7 +652,7 @@ def _build_subscription_response(token: str, include_body: bool = True) -> Respo
         return Response(
             content=body_yaml if include_body else "",
             media_type="application/x-yaml; charset=utf-8",
-            headers=build_subscription_headers(proxy_count, group_count),
+            headers=build_subscription_headers(proxy_count, group_count, config.get("username")),
         )
 
     loaded_config = _load_subscription_yaml(final_yaml)
@@ -682,7 +682,7 @@ def _build_subscription_response(token: str, include_body: bool = True) -> Respo
         return Response(
             content="",
             media_type="application/x-yaml; charset=utf-8",
-            headers=build_subscription_headers(proxy_count, group_count),
+            headers=build_subscription_headers(proxy_count, group_count, config.get("username")),
         )
 
     if needs_rebuild:
@@ -691,7 +691,7 @@ def _build_subscription_response(token: str, include_body: bool = True) -> Respo
     return Response(
         content=final_yaml,
         media_type="application/x-yaml; charset=utf-8",
-        headers=build_subscription_headers(proxy_count, group_count),
+        headers=build_subscription_headers(proxy_count, group_count, config.get("username")),
     )
 
 

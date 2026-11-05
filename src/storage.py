@@ -523,7 +523,7 @@ def get_config_by_token(token: str) -> dict[str, Any] | None:
         ).fetchone()
     if not row or not int(row["is_enabled"]):
         return None
-    return _decode_config_row(row)
+    return {**_decode_config_row(row), "username": row["username"]}
 
 
 def save_user_config(
