@@ -210,7 +210,7 @@
     var wrap = $("toastWrap");
     if (!wrap) return;
     var item = document.createElement("div");
-    item.className = "toast" + (type === "info" ? " info" : "");
+    item.className = "toast" + (type === "info" ? " info" : (type === "error" ? " error" : ""));
     var icon = document.createElement("span");
     icon.className = "t-ico";
     icon.textContent = type === "error" ? "!" : (type === "info" ? "i" : "✓");

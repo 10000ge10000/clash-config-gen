@@ -802,7 +802,8 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 .latency-live { color: var(--accent-text); }
 
 /* ============ Toast ============ */
-.toast-wrap { position: fixed; top: 78px; right: 26px; z-index: 200; display: flex; flex-direction: column; gap: 10px; }
+/* 高于登录层（z-index: 500），否则登录错误提示会被遮罩盖住。 */
+.toast-wrap { position: fixed; top: 78px; right: 26px; z-index: 600; display: flex; flex-direction: column; gap: 10px; }
 .toast {
   display: flex; align-items: center; gap: 11px;
   padding: 13px 18px; border-radius: 13px;
@@ -822,6 +823,8 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 }
 .toast.info { border-color: rgba(34,211,238,.35); }
 .toast.info .t-ico { background: rgba(34,211,238,.13); color: var(--accent); }
+.toast.error { border-color: rgba(248,113,113,.45); }
+.toast.error .t-ico { background: rgba(248,113,113,.15); color: var(--danger); }
 @keyframes toastIn { from { opacity: 0; transform: translateX(60px) scale(.94); } to { opacity: 1; transform: none; } }
 @keyframes toastOut { to { opacity: 0; transform: translateX(60px) scale(.94); } }
 

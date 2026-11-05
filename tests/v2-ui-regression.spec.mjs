@@ -1932,6 +1932,26 @@ test('V2 onekey 表单回显：smux Brutal 与 TFO 勾选，Hy2 不写入默认�
   tracker.assertClean();
 });
 
+test('V2 登录错误提示：显示在登录层之上且使用错误样式', async ({ page }) => {
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#loginForm [name=username]').fill(`e2e-missing-${Date.now()}`);
+  await page.locator('#loginForm [name=password]').fill(temporaryUserPassword);
+  await page.locator('#loginForm button[type=submit]').click();
+
+  const toast = page.locator('#toastWrap .toast').last();
+  await expect(toast).toContainText('用户名或密码错误');
+  await expect(toast).toHaveClass(/\berror\b/);
+  await expect(page.locator('#loginOverlay')).toHaveClass(/active/);
+  // 等入场动画结束后取提示中心点，最上层元素必须是提示本身。
+  await page.waitForTimeout(400);
+  const onTop = await toast.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return Boolean(top) && element.contains(top);
+  });
+  expect(onTop).toBe(true);
+});
+
 test('V2 订阅二维码编码器：各容量版本输出稳定，超长内容报错', async ({ page }) => {
   await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
   const result = await page.evaluate(async () => {
