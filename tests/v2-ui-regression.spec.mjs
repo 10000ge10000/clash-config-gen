@@ -324,7 +324,7 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   await nodeForm.getByLabel('节点名称').fill('Manual-Node');
   await nodeForm.getByLabel('服务器地址').fill('manual.example.com');
   await nodeForm.getByLabel('端口').fill('9443');
-  await nodeForm.getByLabel('密码').fill('manual-password');
+  await nodeForm.getByLabel('密码 *', { exact: true }).fill('manual-password');
   await nodeForm.getByRole('button', { name: '保存节点草稿' }).click();
   await expect(page.locator('#nodeGrid .node-card')).toHaveCount(3, { timeout: 15_000 });
   await expect(page.locator('#nodeGrid')).toContainText('Manual-Node');
@@ -1236,8 +1236,8 @@ test('V2 会话与可访问性回归：375px 视口、节点表单竞态、退�
   await expect(page.locator('.logo-text')).not.toContainText('OpenClash');
   await expect(page.locator('#loginOverlay')).toHaveClass(/active/);
   await expect(page.locator('#loginForm').getByLabel('用户名')).toHaveAttribute('id', 'loginUsername');
-  await expect(page.locator('#loginForm').getByLabel('密码')).toHaveAttribute('id', 'loginPassword');
-  await expect(page.locator('#registerForm').getByLabel('确认密码')).toHaveAttribute('id', 'registerPasswordConfirm');
+  await expect(page.locator('#loginForm').getByLabel('密码', { exact: true })).toHaveAttribute('id', 'loginPassword');
+  await expect(page.locator('#registerForm').getByLabel('确认密码', { exact: true })).toHaveAttribute('id', 'registerPasswordConfirm');
   await expect(page.locator('#loginUsername')).toBeFocused();
   for (let index = 0; index < 8; index += 1) {
     await page.keyboard.press(index % 3 === 2 ? 'Shift+Tab' : 'Tab');
@@ -1950,6 +1950,58 @@ test('V2 登录错误提示：显示在登录层之上且使用错误样式', as
     return Boolean(top) && element.contains(top);
   });
   expect(onTop).toBe(true);
+});
+
+test('V2 密码显示按钮与 BDP 计算器：切换明文不改值，BDP 输入有标签并能填入窗口', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+
+  // 登录层密码框：切换显示后值不变，登录成功后表单重置回隐藏。
+  const loginPassword = page.locator('#loginPassword');
+  const loginToggle = page.locator('#loginForm .pw-toggle');
+  await loginPassword.fill('Secret-123');
+  await expect(loginToggle).toHaveAttribute('aria-label', '显示密码');
+  await loginToggle.click();
+  await expect(loginPassword).toHaveAttribute('type', 'text');
+  await expect(loginToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(loginPassword).toHaveValue('Secret-123');
+  await loginToggle.click();
+  await expect(loginPassword).toHaveAttribute('type', 'password');
+  await expect(page.locator('#registerForm .pw-toggle')).toHaveCount(2);
+  await loginToggle.click();
+  await signInViaForm(page, adminUsername, adminPassword);
+  await expect(loginPassword).toHaveAttribute('type', 'password');
+  await expect(loginPassword).toHaveValue('');
+
+  await page.locator('#step-tab-2').click();
+  await page.locator('#protocolPills [data-protocol="hysteria2"]').click();
+  await page.locator('#addNodeBtn').click();
+  await expect(page.locator('#nodeFormPanel')).toBeVisible();
+  const field = (key) => page.locator(`#nodeSchemaFields [data-field-key="${key}"]`);
+
+  // 节点表单的 schema 密码字段同样带按钮。
+  await field('node_password').fill('node-secret');
+  const nodeToggle = page.locator('#nodeSchemaFields .pw-wrap:has([data-field-key="node_password"]) .pw-toggle');
+  await nodeToggle.click();
+  await expect(field('node_password')).toHaveAttribute('type', 'text');
+  await expect(field('node_password')).toHaveValue('node-secret');
+
+  const tool = page.locator('#quicBdpTool');
+  await expect(tool.getByText('带宽（Mbps）')).toBeVisible();
+  await expect(tool.getByText('延迟 RTT（ms）')).toBeVisible();
+  await expect(page.locator('#quicBdpBandwidth')).toHaveValue('1000');
+  await expect(page.locator('#quicBdpRtt')).toHaveValue('50');
+  await expect(tool).toContainText('只参与计算，不会写入配置');
+  await expect(tool).toContainText('优点');
+  await expect(tool).toContainText('缺点');
+  await page.locator('#quicBdpBandwidth').fill('500');
+  await page.locator('#quicBdpRtt').fill('200');
+  await tool.getByRole('button', { name: '计算并填入' }).click();
+  expect(await field('enable_quic_params').isChecked()).toBe(true);
+  // 500 Mbps × 200 ms × 125 = 12,500,000 字节。
+  await expect(field('initial_stream_receive_window')).toHaveValue('12500000');
+  await expect(field('max_connection_receive_window')).toHaveValue('50000000');
+  await page.locator('#cancelNodeBtn').click();
 });
 
 test('V2 订阅二维码编码器：各容量版本输出稳定，超长内容报错', async ({ page }) => {

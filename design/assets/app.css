@@ -624,6 +624,30 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 }
 .field input::placeholder { color: var(--text-faint); }
 
+/* 密码显示/隐藏按钮：叠在输入框右侧，输入框右内边距让出按钮位置。 */
+.pw-wrap { position: relative; }
+.pw-wrap > input, .field .pw-wrap > input { padding-right: 42px; }
+.pw-toggle {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  width: 30px; height: 30px; display: grid; place-items: center;
+  border: none; border-radius: 8px; background: transparent; color: var(--text-faint); cursor: pointer;
+  transition: color .2s, background .2s;
+}
+.pw-toggle:hover { color: var(--text); background: rgba(34,211,238,.1); }
+.pw-toggle:focus-visible { outline: 2px solid rgba(34,211,238,.6); outline-offset: 1px; }
+.pw-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.pw-toggle[aria-pressed="true"] { color: var(--accent); }
+
+/* Hysteria2 BDP 窗口计算器 */
+.bdp-tool { margin-top: 10px; padding: 12px 14px; border: 1px dashed var(--border); border-radius: 12px; }
+.bdp-title { font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 10px; }
+.bdp-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.bdp-input { flex: 1 1 140px; min-width: 0; }
+.field .bdp-input label { font-weight: 500; margin-bottom: 5px; }
+.bdp-row .bdp-calc { flex: none; height: 40px; }
+.bdp-note { margin-top: 10px; }
+.bdp-note p + p { margin-top: 4px; }
+
 .rule-item {
   display: flex; align-items: center; gap: 12px;
   padding: 11px 14px; border-radius: 11px;

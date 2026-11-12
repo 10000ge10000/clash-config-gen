@@ -227,6 +227,61 @@
 
   window.toast = showToast;
 
+  // 密码框统一加“显示/隐藏”按钮：包一层 .pw-wrap，按钮只切换 input.type，不改值。
+  var PW_ICON_PATHS = {
+    show: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"],
+    hide: ["M3 3l18 18", "M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2", "M6.6 6.6A17.4 17.4 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6", "M9.9 9.9a3 3 0 0 0 4.2 4.2"]
+  };
+
+  function passwordIcon(kind) {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    PW_ICON_PATHS[kind].forEach(function (d) {
+      var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+    });
+    return svg;
+  }
+
+  function setPasswordVisible(input, visible) {
+    if (!input || !input.dataset.pwToggle) return;
+    input.type = visible ? "text" : "password";
+    var button = input.parentNode && input.parentNode.querySelector(".pw-toggle");
+    if (!button) return;
+    var text = visible ? "隐藏密码" : "显示密码";
+    button.setAttribute("aria-pressed", visible ? "true" : "false");
+    button.setAttribute("aria-label", text);
+    button.title = text;
+    clearElement(button);
+    button.appendChild(passwordIcon(visible ? "hide" : "show"));
+  }
+
+  function enhancePasswordInput(input) {
+    if (!input || input.dataset.pwToggle || !input.parentNode) return;
+    input.dataset.pwToggle = "1";
+    var wrap = document.createElement("div");
+    wrap.className = "pw-wrap";
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "pw-toggle";
+    button.addEventListener("click", function () {
+      setPasswordVisible(input, input.type === "password");
+      input.focus();
+    });
+    wrap.appendChild(button);
+    // 表单重置（登录成功、创建用户后）时恢复为隐藏，避免明文停留在界面上。
+    if (input.form) input.form.addEventListener("reset", function () { setPasswordVisible(input, false); });
+    setPasswordVisible(input, false);
+  }
+
+  function enhancePasswordInputs(root) {
+    (root || document).querySelectorAll('input[type="password"]:not([data-pw-toggle])').forEach(enhancePasswordInput);
+  }
+
   function statusLabel(label, tone) {
     var text = $("serviceStatus");
     if (text) text.textContent = label || "—";
@@ -777,7 +832,10 @@
     // 登录层首次出现时清空全部密码框，避免上一用户的明文密码残留在 DOM 中。
     if (!wasActive) {
       ["loginPassword", "registerPassword", "registerPasswordConfirm"].forEach(function (id) {
-        if ($(id)) $(id).value = "";
+        if ($(id)) {
+          $(id).value = "";
+          setPasswordVisible($(id), false);
+        }
       });
     }
     if (overlay) overlay.classList.add("active");
@@ -2201,6 +2259,7 @@
       control.addEventListener("input", function () { updateSchemaVisibility(visibilityRoot); });
     }
     wrapper.appendChild(control);
+    if (control.type === "password") enhancePasswordInput(control);
     if (field.help) {
       var help = document.createElement("div");
       help.className = "schema-note";
@@ -2732,15 +2791,28 @@
     if (!wrapper || schemaRoot.querySelector("#quicBdpTool")) return;
     var tool = document.createElement("div");
     tool.id = "quicBdpTool";
-    tool.className = "schema-note";
-    tool.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px";
-    var bw = document.createElement("input");
-    bw.type = "number"; bw.min = "1"; bw.value = "1000"; bw.title = "带宽 (Mbps)";
-    bw.style.width = "90px"; bw.setAttribute("aria-label", "带宽 Mbps");
-    var rtt = document.createElement("input");
-    rtt.type = "number"; rtt.min = "1"; rtt.value = "50"; rtt.title = "延迟 RTT (ms)";
-    rtt.style.width = "90px"; rtt.setAttribute("aria-label", "延迟 RTT ms");
-    var calc = makeButton("按 BDP 推荐窗口", "btn btn-ghost", function () {
+    tool.className = "bdp-tool";
+    var title = document.createElement("div");
+    title.className = "bdp-title";
+    title.textContent = "按 BDP 推荐窗口（可选）";
+    // 这两个输入只参与计算，不带 data-field-key，不会写入节点配置。
+    function bdpInput(id, labelText, placeholder, value) {
+      var item = document.createElement("div");
+      item.className = "bdp-input";
+      var itemLabel = document.createElement("label");
+      itemLabel.htmlFor = id;
+      itemLabel.textContent = labelText;
+      var input = document.createElement("input");
+      input.id = id; input.type = "number"; input.min = "1"; input.inputMode = "numeric";
+      input.placeholder = placeholder; input.value = value;
+      item.appendChild(itemLabel); item.appendChild(input);
+      return { item: item, input: input };
+    }
+    var bwField = bdpInput("quicBdpBandwidth", "带宽（Mbps）", "如 1000", "1000");
+    var rttField = bdpInput("quicBdpRtt", "延迟 RTT（ms）", "如 50", "50");
+    var bw = bwField.input;
+    var rtt = rttField.input;
+    var calc = makeButton("计算并填入", "btn btn-ghost bdp-calc", function () {
       var bandwidth = Number(bw.value) || 0;
       var latency = Number(rtt.value) || 0;
       if (bandwidth < 1 || latency < 1) { showToast("请填写有效的带宽与 RTT", "error"); return; }
@@ -2759,10 +2831,22 @@
       if (!quicToggle.checked) quicToggle.click();
       showToast("已按 " + bandwidth + "Mbps / " + latency + "ms 推荐窗口（BDP " + (bdp / 1048576).toFixed(2) + " MB）", "info");
     });
-    calc.style.padding = "5px 10px"; calc.style.fontSize = "12px";
-    var label = document.createElement("span");
-    label.textContent = "BDP 推荐：";
-    tool.appendChild(label); tool.appendChild(bw); tool.appendChild(rtt); tool.appendChild(calc);
+    var row = document.createElement("div");
+    row.className = "bdp-row";
+    row.appendChild(bwField.item); row.appendChild(rttField.item); row.appendChild(calc);
+    var note = document.createElement("div");
+    note.className = "schema-note bdp-note";
+    [
+      "BDP = 带宽 × 延迟，用来估算 QUIC 接收窗口。上面两个值只参与计算，不会写入配置；点「计算并填入」会勾选 QUIC 参数并填好四项窗口。",
+      "带宽填你到节点实际能跑到的速度（本地宽带与 VPS 带宽取较小值），延迟填到节点的 ping 值。",
+      "优点：跨洋等高延迟、高带宽线路上，窗口足够大，单连接更容易跑满带宽。",
+      "缺点：窗口越大，每条连接占用的内存越多，路由器等小内存设备要谨慎；带宽或延迟估错，窗口会偏大或偏小。线路一般时不勾选、保持默认即可。"
+    ].forEach(function (line) {
+      var item = document.createElement("p");
+      item.textContent = line;
+      note.appendChild(item);
+    });
+    tool.appendChild(title); tool.appendChild(row); tool.appendChild(note);
     wrapper.appendChild(tool);
   }
 
@@ -3917,6 +4001,7 @@
     username.name = "username";
     var password = rulesetField(form, "adminPassword", "初始密码", "password", "");
     password.name = "password";
+    enhancePasswordInput(password);
     var adminField = document.createElement("div");
     adminField.className = "field field-wide";
     var adminLabel = document.createElement("label");
@@ -4175,6 +4260,7 @@
 
   function initializeEvents() {
     initNavigation();
+    enhancePasswordInputs(document);
     var themeToggle = $("themeToggle");
     if (themeToggle) themeToggle.addEventListener("click", function () {
       var root = document.documentElement;
