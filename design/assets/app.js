@@ -24,6 +24,7 @@
     dnsPresets: {},
     providerDefaults: {},
     ruleCatalog: {},
+    reservedRulesetNames: [],
     ruleEditIndex: null,
     subQrMode: "app",
     allTargets: [],
@@ -579,6 +580,7 @@
     else state.dnsPresets = state.presets;
     replaceServerField("providerDefaults", isObject(payload.provider_defaults) ? payload.provider_defaults : {});
     replaceServerField("ruleCatalog", isObject(payload.rule_catalog) ? payload.rule_catalog : {});
+    if (Array.isArray(payload.reserved_ruleset_names)) state.reservedRulesetNames = payload.reserved_ruleset_names.slice();
     state.loading = false;
     state.saveError = null;
     if (resetGeneration) {
@@ -1335,8 +1337,7 @@
     var select = $("ruleSource");
     if (!select) return;
     var options = [
-      ["dustinwin规则", "DustinWin"],
-      ["lhie1规则", "lhie1"],
+      ["dustinwin规则", "内置规则（DustinWin + MetaCubeX）"],
       ["none", "无基础规则（完全自己写）"]
     ];
     clearElement(select);
@@ -1347,7 +1348,7 @@
       select.appendChild(option);
     });
     if (state.config.selected_rule_type) {
-      select.value = state.config.selected_rule_type === "自定义规则" ? "none" : state.config.selected_rule_type;
+      select.value = state.config.selected_rule_type === "自定义规则" ? "none" : normalizedRuleType(state.config.selected_rule_type);
     }
     if (!select.value) select.value = options[0][0];
     renderProviderTargets();
@@ -1355,15 +1356,19 @@
     renumberRuleFlow();
   }
 
+  // lhie1 规则源已并入内置规则；旧草稿在下次保存前仍可能带着旧值。
+  function normalizedRuleType(value) {
+    return value === "lhie1规则" ? "dustinwin规则" : value;
+  }
+
   function selectedProviderSource() {
-    if (state.config.selected_rule_type === "dustinwin规则") return "dustinwin";
-    if (state.config.selected_rule_type === "lhie1规则") return "lhie1";
+    if (normalizedRuleType(state.config.selected_rule_type) === "dustinwin规则") return "dustinwin";
     return "";
   }
 
   // 当前规则源的基础规则（来自服务端 build_rule_catalog，顺序与生成结果一致）。
   function selectedRuleCatalog() {
-    var catalog = isObject(state.ruleCatalog) ? state.ruleCatalog[state.config.selected_rule_type] : null;
+    var catalog = isObject(state.ruleCatalog) ? state.ruleCatalog[normalizedRuleType(state.config.selected_rule_type)] : null;
     return isObject(catalog) ? catalog : { key: "", label: "", rules: [], fallback: null };
   }
 
@@ -1683,9 +1688,13 @@
       value.placeholder = RULE_PLACEHOLDERS[type.value] || "";
     }
     var supportsNoResolve = NO_RESOLVE_RULE_TYPES.indexOf(type.value) >= 0;
+    var editing = state.ruleEditIndex !== null;
     if ($("ruleNoResolveWrap")) $("ruleNoResolveWrap").hidden = !supportsNoResolve;
     if (!supportsNoResolve && $("ruleNoResolve")) $("ruleNoResolve").checked = false;
-    var editing = state.ruleEditIndex !== null;
+    // IP 规则默认带 no-resolve：自定义规则排在最前，不加的话后面每个域名请求都要先做一次 DNS 解析。
+    // 只在新建规则且类型刚切换时自动勾选，用户手动取消后不再改回。
+    if (supportsNoResolve && !editing && type.dataset.lastType !== type.value && $("ruleNoResolve")) $("ruleNoResolve").checked = true;
+    type.dataset.lastType = type.value;
     setText("addRuleBtn", editing ? "保存修改" : (isMatch ? "设为兜底" : "添加规则"));
     if ($("cancelRuleEditBtn")) $("cancelRuleEditBtn").hidden = !editing;
   }
@@ -1913,7 +1922,7 @@
     var interval = rulesetField(form, "rulesetInterval", "更新间隔（秒）", "number", "86400");
     interval.min = "1";
     interval.max = "31536000";
-    var order = rulesetField(form, "rulesetOrder", "匹配顺序", "select", "追加", [[RULESET_FIRST_ORDER, "优先：排在基础规则之前"], ["追加", "追加：排在基础规则之后"]]);
+    var order = rulesetField(form, "rulesetOrder", "匹配顺序", "select", RULESET_FIRST_ORDER, [[RULESET_FIRST_ORDER, "优先：排在基础规则之前"], ["追加", "追加：排在基础规则之后"]]);
     order.setAttribute("aria-describedby", "rulesetOrderHelp");
     var target = rulesetField(form, "rulesetTarget", "目标策略", "select", "Proxy", rulesetTargetOptions("Proxy"));
     target.setAttribute("aria-label", "规则集目标策略");
@@ -1922,7 +1931,7 @@
     var orderHelp = document.createElement("div");
     orderHelp.id = "rulesetOrderHelp";
     orderHelp.className = "schema-note";
-    orderHelp.textContent = "想让规则集抢在基础规则前生效选“优先”，只补充基础规则没覆盖的内容选“追加”。";
+    orderHelp.textContent = "一般选“优先”。选“追加”时规则集排在国内、国外等大名单之后，已被这些名单收录的域名不会走这里的目标，只有基础规则都没命中的流量才会用到它。";
     formSection.appendChild(orderHelp);
     var actions = document.createElement("div");
     actions.className = "ruleset-actions";
@@ -1956,13 +1965,14 @@
       behavior: value("rulesetBehavior", "domain"),
       format: value("rulesetFormat", "yaml"),
       interval: value("rulesetInterval", "86400"),
-      order: value("rulesetOrder", "追加"),
+      order: value("rulesetOrder", RULESET_FIRST_ORDER),
       target: value("rulesetTarget", "Proxy")
     };
   }
 
   function validateRulesetValues(values, requireUrl) {
     if (!values.alias || !/^[A-Za-z0-9._-]+$/.test(values.alias)) throw new ApiError("规则集别名只能使用字母、数字、点、下划线或短横线", 400);
+    if ((state.reservedRulesetNames || []).indexOf(values.alias) >= 0) throw new ApiError("规则集别名 " + values.alias + " 与内置规则集重名，请换一个名字", 400);
     var interval = Number(values.interval);
     if (!Number.isInteger(interval) || interval < 1 || interval > 31536000) throw new ApiError("更新间隔必须是 1 到 31536000 秒之间的整数", 400);
     if (!values.target) throw new ApiError("请选择规则集目标策略", 400);
@@ -3492,6 +3502,8 @@
     if (!markDirty()) return;
     if (value) value.value = "";
     if ($("ruleNoResolve")) $("ruleNoResolve").checked = false;
+    // 清空 lastType，让同一 IP 类型的下一条规则重新默认勾选 no-resolve。
+    type.dataset.lastType = "";
     updateRuleForm();
     renderRules();
     renderStats();

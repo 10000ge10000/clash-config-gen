@@ -10,7 +10,6 @@ from config_builder import (
     DUSTINWIN_RULESET_INTERVAL,
     GOOGLE_RULESET_FILE,
     GOOGLE_RULESET_URL,
-    LHIE1_PROVIDERS_MAP,
     SUBSCRIPTION_GENERATOR,
     SUBSCRIPTION_GITHUB_URL,
     SUBSCRIPTION_PROJECT,
@@ -56,7 +55,7 @@ class RuleCatalogTest(unittest.TestCase):
 
     def test_catalog_matches_generated_rule_order(self):
         catalog = build_rule_catalog()
-        for rule_type in ("dustinwin规则", "lhie1规则"):
+        for rule_type in ("dustinwin规则",):
             rules, _ = build_rules(rule_type, [], {})
             shown = [self._rebuild(entry) for entry in catalog[rule_type]["rules"]]
             shown.append("MATCH," + catalog[rule_type]["fallback"])
@@ -64,10 +63,11 @@ class RuleCatalogTest(unittest.TestCase):
 
     def test_only_mapped_providers_are_overridable(self):
         catalog = build_rule_catalog()
-        lhie1 = {entry["value"]: entry for entry in catalog["lhie1规则"]["rules"]}
-        self.assertTrue(lhie1["AI Suite"]["overridable"])
-        self.assertFalse(lhie1["google"]["overridable"])
-        self.assertFalse(lhie1["CN"]["overridable"])
+        self.assertEqual({"dustinwin规则", "none"}, set(catalog))
+        entries = {entry["value"]: entry for entry in catalog["dustinwin规则"]["rules"]}
+        self.assertTrue(entries["ai"]["overridable"])
+        self.assertTrue(entries["discord"]["overridable"])
+        self.assertFalse(entries["xn--ngstr-lra8j.com"]["overridable"])
 
     def test_no_base_source_has_no_fallback(self):
         self.assertEqual(build_rule_catalog()["none"]["rules"], [])
@@ -570,42 +570,44 @@ proxies:
         self.assertNotIn("tun", config)
         self.assertNotIn("sniffer", config)
 
-    def test_lhie1_media_defaults_use_specific_policy_groups_when_available(self):
-        """已有独立策略组的媒体规则必须先进独立组，手动选择节点才会生效。"""
-        rules, _providers = build_rules("lhie1规则", [], {})
-        expected_rules = {
-            "RULE-SET,Netflix,Netflix",
-            "RULE-SET,Disney Plus,Disney Plus",
-            "RULE-SET,Max,HBO Max",
-            "RULE-SET,YouTube,Youtube",
-            "RULE-SET,Bilibili,Bilibili",
-            "RULE-SET,IQIYI,CN Mainland TV",
-            "RULE-SET,Abema TV,Asian TV",
-            "RULE-SET,Bahamut,Bahamut",
-            "RULE-SET,Apple TV,Apple TV",
-            "RULE-SET,Telegram,Telegram",
+    def test_legacy_lhie1_rule_type_uses_builtin_rules(self):
+        """lhie1 规则源已并入内置规则：旧草稿里的 lhie1规则 生成与内置规则完全一致。"""
+        self.assertEqual(build_rules("dustinwin规则", [], {}), build_rules("lhie1规则", [], {}))
+
+    def test_every_policy_group_is_reachable(self):
+        """每个策略组都要被规则或其他策略组用到，不能出现选了也没用的组。"""
+        groups = generate_proxy_groups([{"name": "node-1", "type": "ss"}])
+        rules, _providers = build_rules("dustinwin规则", [], {})
+        used = {rule.split(",")[2] for rule in rules if rule.startswith("RULE-SET,")}
+        used |= {rule.split(",")[-1] for rule in rules if not rule.startswith("RULE-SET,")}
+        for group in groups:
+            used |= set(group.get("proxies") or [])
+        unused = [group["name"] for group in groups if group["name"] not in used]
+        self.assertEqual([], unused)
+        self.assertNotIn("HTTPDNS", {group["name"] for group in groups})
+
+    def test_meta_rules_fill_specialty_groups_before_broad_lists(self):
+        """MetaCubeX 补齐的专项规则集要指向各自策略组，并排在 media/gfw/proxy/cn 大名单之前。"""
+        rules, providers = build_rules("dustinwin规则", [], {})
+        expected = {
+            "googlefcm": "Google FCM", "telegram": "Telegram", "discord": "Discord", "paypal": "PayPal",
+            "crypto": "Crypto", "scholar": "Scholar", "mihoyo": "miHoYo", "abema": "Asian TV",
+            "bahamut": "Bahamut", "dazn": "DAZN", "discoveryplus": "Discovery Plus", "pornhub": "Pornhub",
         }
-
-        for expected_rule in expected_rules:
-            self.assertIn(expected_rule, rules)
-
-    def test_lhie1_default_targets_exist_in_generated_proxy_groups(self):
-        """LHIE1 默认目标必须是内置动作或生成器实际存在的策略组。"""
-        proxies = [
-            {
-                "name": "node-1",
-                "type": "ss",
-                "server": "127.0.0.1",
-                "port": 8388,
-                "cipher": "aes-128-gcm",
-                "password": "password",
-            }
-        ]
-        group_names = {group["name"] for group in generate_proxy_groups(proxies)}
-        builtin_targets = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "Proxy"}
-
-        for provider_name, (_suffix, target) in LHIE1_PROVIDERS_MAP.items():
-            self.assertIn(target, group_names | builtin_targets, provider_name)
+        index = {rule.split(",")[1]: i for i, rule in enumerate(rules) if rule.startswith("RULE-SET,")}
+        for name, target in expected.items():
+            self.assertIn(f"RULE-SET,{name},{target}", rules)
+            for broad in ("media", "tld-proxy", "gfw", "proxy", "cn"):
+                self.assertLess(index[name], index[broad], f"{name} vs {broad}")
+            self.assertEqual("domain", providers[name]["behavior"])
+            self.assertEqual(f"./ruleset/dustinwin/{name}.mrs", providers[name]["path"])
+            self.assertTrue(providers[name]["url"].endswith(f"/ruleset/dustinwin/{name}.mrs"))
+        self.assertLess(index["googlefcm"], index["google-cn"])
+        self.assertLess(index["scholar"], index["google"])
+        self.assertEqual(
+            "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-scholar-%21cn.mrs",
+            DUSTINWIN_PROVIDERS_MAP["scholar"]["url"],
+        )
 
     def test_dustinwin_ai_ruleset_targets_ai_suite(self):
         """DustinWin 的 ai.mrs 必须进入 AI Suite，避免 Gemini 等 AI 域名漏分流。"""
@@ -625,35 +627,6 @@ proxies:
         ai_index = rules.index("RULE-SET,ai,AI Suite")
         self.assertLess(ai_index, rules.index("RULE-SET,cn,Domestic"))
         self.assertLess(ai_index, rules.index("RULE-SET,cnip,Domestic,no-resolve"))
-
-    def test_lhie1_ai_suite_rules_precede_domestic_rules(self):
-        """LHIE1 的 AI Suite 必须早于 Domestic / Domestic IPs。"""
-        rules, _providers = build_rules("lhie1规则", [], {})
-
-        ai_index = rules.index("RULE-SET,AI Suite,AI Suite")
-        self.assertLess(ai_index, rules.index("RULE-SET,Domestic,Domestic"))
-        self.assertLess(ai_index, rules.index("RULE-SET,Domestic IPs,Domestic"))
-        self.assertLess(ai_index, rules.index("GEOIP,CN,Domestic,no-resolve"))
-
-    def test_lhie1_specific_service_rules_precede_domestic_fallbacks(self):
-        """LHIE1 专项服务规则必须早于国内域名/IP 兜底。"""
-        rules, _providers = build_rules("lhie1规则", [], {})
-        domestic_index = rules.index("RULE-SET,Domestic,Domestic")
-        domestic_ips_index = rules.index("RULE-SET,Domestic IPs,Domestic")
-
-        for expected_rule in [
-            "RULE-SET,Netflix,Netflix",
-            "RULE-SET,YouTube,Youtube",
-            "RULE-SET,Disney Plus,Disney Plus",
-            "RULE-SET,Telegram,Telegram",
-            "RULE-SET,TikTok,TikTok",
-            "RULE-SET,Microsoft,Microsoft",
-            "RULE-SET,Apple,Apple",
-            "RULE-SET,Google FCM,Google",
-        ]:
-            rule_index = rules.index(expected_rule)
-            self.assertLess(rule_index, domestic_index, expected_rule)
-            self.assertLess(rule_index, domestic_ips_index, expected_rule)
 
     def test_dustinwin_media_rules_target_specific_policy_groups_when_available(self):
         """YouTube/Netflix 等规则应进入同名策略组，未手动选择时由该组默认回落到 Global TV。"""
@@ -706,16 +679,6 @@ proxies:
         with patch.dict("os.environ", {"RULESET_CACHE_ENABLED": "false"}, clear=False):
             _rules, providers = build_rules("dustinwin规则", [], {})
         self.assertEqual(GOOGLE_RULESET_URL, providers["google"]["url"])
-
-    def test_lhie1_google_provider_stays_after_youtube(self):
-        """LHIE1 也要保留 YouTube 优先于通用 Google 的规则顺序。"""
-        rules, providers = build_rules("lhie1规则", [], {})
-
-        youtube_index = rules.index("RULE-SET,YouTube,Youtube")
-        google_index = rules.index("RULE-SET,google,Google")
-        self.assertLess(youtube_index, google_index)
-        self.assertEqual("classical", providers["google"]["behavior"])
-        self.assertEqual("text", providers["google"]["format"])
 
     def test_build_config_defaults_to_dustinwin_ruleset(self):
         """默认生成路径必须使用 DustinWin，避免新用户跳过分流页时漏掉 AI/Gemini。"""
@@ -792,7 +755,7 @@ proxies:
         self.assertIn("RULE-SET,apple-cn,Apple", rules)
         self.assertEqual("DIRECT", groups["Microsoft"]["proxies"][0])
         self.assertEqual("DIRECT", groups["Apple"]["proxies"][0])
-        # Google、Steam 组还承接境外流量，保持代理；它们的国内集合改由 Domestic 承接。
+        # Google、Game 组还承接境外流量，保持代理；它们的国内集合改由 Domestic 承接。
         self.assertIn("RULE-SET,google-cn,Domestic", rules)
         self.assertIn("RULE-SET,games-cn,Domestic", rules)
         self.assertEqual("Proxy", groups["Google"]["proxies"][0])
@@ -812,8 +775,119 @@ proxies:
         self.assertLess(index["google"], index["games"])
         self.assertEqual("cnip", max(index, key=index.get))
 
+    def test_steam_group_renamed_to_game_with_legacy_references(self):
+        """Steam 组已改名 Game：旧的自定义规则、规则集目标和目标覆盖里的 Steam 自动换成 Game。"""
+        groups = {group["name"] for group in generate_proxy_groups([{"name": "node-1", "type": "ss"}])}
+        self.assertIn("Game", groups)
+        self.assertNotIn("Steam", groups)
+
+        rules, _providers = build_rules(
+            "dustinwin规则",
+            ["DOMAIN-SUFFIX,example.com,Steam", "IP-CIDR,1.2.3.0/24,Steam,no-resolve"],
+            {"mygames": {"type": "http", "behavior": "domain", "url": "https://example.com/a.yaml", "target": "Steam"}},
+            dustinwin_provider_targets={"netflix": "Steam"},
+        )
+        self.assertIn("RULE-SET,games,Game", rules)
+        self.assertIn("DOMAIN-SUFFIX,example.com,Game", rules)
+        self.assertIn("IP-CIDR,1.2.3.0/24,Game,no-resolve", rules)
+        self.assertIn("RULE-SET,mygames,Game", rules)
+        self.assertIn("RULE-SET,netflix,Game", rules)
+        self.assertFalse([rule for rule in rules if ",Steam" in rule])
+
+    def test_custom_ipcidr_ruleset_gets_no_resolve_and_prepend_alias(self):
+        """自定义 ipcidr 规则集默认 no-resolve；order 写 prepend 也按优先处理。"""
+        rules, _providers = build_rules(
+            "dustinwin规则",
+            [],
+            {
+                "myip": {"type": "http", "behavior": "ipcidr", "url": "https://example.com/ip.yaml", "order": "prepend", "target": "Proxy"},
+                "mydomain": {"type": "http", "behavior": "domain", "url": "https://example.com/d.yaml", "order": "追加", "target": "Proxy"},
+            },
+        )
+        self.assertIn("RULE-SET,myip,Proxy,no-resolve", rules)
+        self.assertIn("RULE-SET,mydomain,Proxy", rules)
+        self.assertLess(rules.index("RULE-SET,myip,Proxy,no-resolve"), rules.index("RULE-SET,private,DIRECT"))
+        self.assertGreater(rules.index("RULE-SET,mydomain,Proxy"), rules.index("RULE-SET,cnip,Domestic,no-resolve"))
+
+    def test_lowercase_custom_match_replaces_fallback(self):
+        """自定义兜底写成小写 match 时，不能再额外补一条 MATCH。"""
+        rules, _providers = build_rules("dustinwin规则", ["match,DIRECT"], {})
+        self.assertEqual("match,DIRECT", rules[-1])
+        self.assertEqual(1, sum(1 for rule in rules if rule.lower().startswith("match,")))
+
+    def test_validate_config_handles_rule_params_and_references(self):
+        """目标判断要跳过 no-resolve/src 修饰并去空格；SUB-RULE 查子规则；RULE-SET 必须有对应规则集。"""
+        base = {
+            "proxies": [{"name": "node-1", "type": "ss", "server": "127.0.0.1", "port": 8388, "cipher": "aes-128-gcm", "password": "x"}],
+            "proxy-groups": [{"name": "P", "type": "select", "proxies": ["node-1"]}],
+            "rule-providers": {"known": {"type": "http", "behavior": "domain", "url": "https://example.com/a.yaml", "path": "./a.yaml"}},
+            "sub-rules": {"sub1": ["MATCH,P"]},
+        }
+        valid_rules = [
+            "DOMAIN,x.com,P,src",
+            "IP-CIDR,1.0.0.0/8,P,no-resolve,src",
+            "DOMAIN,a.com, P",
+            "SUB-RULE,(NETWORK,TCP),sub1",
+            "RULE-SET,known,P",
+            "DOMAIN,b.com,GLOBAL",
+            "MATCH,P",
+        ]
+        errors, _warnings = validate_config({**base, "rules": valid_rules})
+        self.assertEqual([], errors)
+
+        errors, _warnings = validate_config({**base, "rules": ["RULE-SET,missing,P", "SUB-RULE,(NETWORK,TCP),nope", "MATCH,P"]})
+        self.assertIn("规则 'RULE-SET,missing,P' 引用了不存在的规则集: 'missing'", errors)
+        self.assertIn("规则 'SUB-RULE,(NETWORK,TCP),nope' 引用了不存在的子规则: 'nope'", errors)
+
+    def test_nameserver_policy_keeps_prefixed_keys_and_urls(self):
+        """geosite:cn、rule-set:x 这类键带冒号，值可能是 https 地址，都不能拆错。"""
+        from config_builder import _parse_nameserver_policy
+
+        policy = _parse_nameserver_policy(
+            "geosite:cn: 223.5.5.5\n"
+            "rule-set:my-list: https://dns.alidns.com/dns-query\n"
+            "+.example.com: 119.29.29.29\n"
+            "geosite:gfw:8.8.8.8\n"
+            "plain.com:1.1.1.1\n"
+            "无效行\n"
+        )
+        self.assertEqual(
+            {
+                "geosite:cn": "223.5.5.5",
+                "rule-set:my-list": "https://dns.alidns.com/dns-query",
+                "+.example.com": "119.29.29.29",
+                "geosite:gfw": "8.8.8.8",
+                "plain.com": "1.1.1.1",
+            },
+            policy,
+        )
+
+    def test_draft_rejects_builtin_ruleset_alias_and_bad_overrides(self):
+        """自定义规则集不能和内置规则集重名；目标覆盖必须是字符串映射，旧组名会被迁移。"""
+        from fastapi import HTTPException
+
+        from draft_service import _normalize_draft
+
+        base = {"proxies": [], "custom_rules": ["DOMAIN,a.com,Steam"], "global_config": {}}
+        for alias in ("cn", "discord", "google"):
+            with self.assertRaises(HTTPException) as context:
+                _normalize_draft({**base, "custom_rule_providers": {alias: {"type": "http", "url": "https://example.com/a.yaml"}}})
+            self.assertEqual(400, context.exception.status_code, alias)
+
+        with self.assertRaises(HTTPException):
+            _normalize_draft({**base, "global_config": {"dustinwin_provider_targets": "netflix=Proxy"}})
+
+        draft, _meta = _normalize_draft({
+            **base,
+            "custom_rule_providers": {"my-list": {"type": "http", "url": "https://example.com/a.yaml", "target": "Steam"}},
+            "global_config": {"dustinwin_provider_targets": {"games": "Steam"}},
+        })
+        self.assertEqual(["DOMAIN,a.com,Game"], draft["custom_rules"])
+        self.assertEqual("Game", draft["custom_rule_providers"]["my-list"]["target"])
+        self.assertEqual({"games": "Game"}, draft["global_config"]["dustinwin_provider_targets"])
+
     def test_media_policy_groups_default_to_aggregate_selectors(self):
-        """独立流媒体策略组的默认选中项要和 LHIE1 聚合规则目标一致。"""
+        """独立流媒体策略组默认回落到对应的聚合组（Global TV / Asian TV / CN Mainland TV）。"""
         proxies = [
             {
                 "name": "node-1",
@@ -830,7 +904,7 @@ proxies:
             self.assertEqual("Global TV", groups[group_name]["proxies"][0], group_name)
         self.assertEqual("CN Mainland TV", groups["Bilibili"]["proxies"][0])
         self.assertEqual("Asian TV", groups["Bahamut"]["proxies"][0])
-        self.assertEqual("Proxy", groups["Steam"]["proxies"][0])
+        self.assertEqual("Proxy", groups["Game"]["proxies"][0])
         self.assertEqual("Proxy", groups["Pornhub"]["proxies"][0])
 
     def test_url_test_defaults_are_written_to_proxy_group(self):

@@ -23,7 +23,6 @@ from config_defaults import (
 from config_builder import (
     DEFAULT_RULE_TYPE,
     DUSTINWIN_PROVIDERS_MAP,
-    LHIE1_PROVIDERS_MAP,
     build_config as build_subscription_config,
     build_yaml as build_subscription_yaml,
     is_no_base_rule_type,
@@ -3662,10 +3661,10 @@ with tab3:
         # ==========================
         # 1. 准备配置上下文
         # ==========================
-        rule_options = ["dustinwin规则", "lhie1规则", "自定义规则"]
+        # lhie1 已并入内置规则（DustinWin + MetaCubeX），旧值按内置规则处理。
+        rule_options = ["dustinwin规则", "自定义规则"]
         rule_labels = {
-            "dustinwin规则": "DustinWin 规则集（推荐，含 AI/Gemini 增强）",
-            "lhie1规则": "lhie1 规则集（兼容旧配置）",
+            "dustinwin规则": "内置规则（DustinWin + MetaCubeX）",
             "自定义规则": "基础自定义规则",
         }
         current_rule_type = st.session_state.get("selected_rule_type", DEFAULT_RULE_TYPE)
@@ -3705,9 +3704,7 @@ with tab3:
         # 2. 规则集选择说明
         # ==========================
         if rule_type == "dustinwin规则":
-            st.info("默认使用 DustinWin 的 mihomo-ruleset 进行基础分流，规则集由 OpenClash/mihomo 按周自动更新。")
-        elif rule_type == "lhie1规则":
-            st.info("当前使用 lhie1 规则集，适合兼容旧配置。您可以在下方添加自定义规则或规则集。")
+            st.info("默认使用 DustinWin 的 mihomo-ruleset 进行基础分流，并用 MetaCubeX meta-rules-dat 补齐专项服务，规则集由 OpenClash/mihomo 按周自动更新。")
         else:
             st.info("当前只使用基础自定义规则。您可以在下方添加单条规则或规则集。")
 
@@ -3718,27 +3715,16 @@ with tab3:
         
         all_targets = collect_rule_targets(proxy_groups, st.session_state.proxies_data)
 
-        if rule_type in {"dustinwin规则", "lhie1规则"}:
-            if rule_type == "dustinwin规则":
-                provider_targets_key = "dustinwin_provider_targets"
-                widget_prefix = "dustinwin_target_"
-                expander_title = "DustinWin 预设规则目标"
-                reset_label = "恢复 DustinWin 默认策略"
-                provider_items = [
-                    (name, str(config["target"]))
-                    for name, config in DUSTINWIN_PROVIDERS_MAP.items()
-                ]
-                caption = "这里可以修改 DustinWin 内置规则集默认走哪个策略组或节点。例如把 ai 从 AI Suite 改成某个固定节点。"
-            else:
-                provider_targets_key = "lhie1_provider_targets"
-                widget_prefix = "lhie1_target_"
-                expander_title = "lhie1 预设规则目标"
-                reset_label = "恢复 lhie1 默认策略"
-                provider_items = [
-                    (provider_name, default_target)
-                    for provider_name, (_, default_target) in LHIE1_PROVIDERS_MAP.items()
-                ]
-                caption = "这里可以修改 lhie1 内置规则集默认走哪个策略组或节点。例如把 Netflix 改成某个固定节点。"
+        if rule_type == "dustinwin规则":
+            provider_targets_key = "dustinwin_provider_targets"
+            widget_prefix = "dustinwin_target_"
+            expander_title = "内置规则集目标"
+            reset_label = "恢复内置默认策略"
+            provider_items = [
+                (name, str(config["target"]))
+                for name, config in DUSTINWIN_PROVIDERS_MAP.items()
+            ]
+            caption = "这里可以修改内置规则集默认走哪个策略组或节点。例如把 ai 从 AI Suite 改成某个固定节点。"
 
             with st.expander(expander_title, expanded=False):
                 st.caption(caption)
@@ -3776,7 +3762,6 @@ with tab3:
                     st.info(f"已覆盖 {len(next_overrides)} 条预设规则，当前为待发布草稿。")
         else:
             st.session_state.global_config["dustinwin_provider_targets"] = {}
-            st.session_state.global_config["lhie1_provider_targets"] = {}
 
         try:
             preview_config = build_subscription_config(

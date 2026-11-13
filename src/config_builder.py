@@ -38,6 +38,44 @@ GOOGLE_RULESET_URL = "https://raw.githubusercontent.com/blackmatrix7/ios_rule_sc
 DEFAULT_RULE_TYPE = "dustinwin规则"
 
 
+# 已改名的策略组：旧草稿、自定义规则和目标覆盖里的旧名在生成时自动换成新名。
+LEGACY_GROUP_RENAMES = {"Steam": "Game"}
+# mihomo 规则末尾可选的修饰参数，不是策略组目标。
+RULE_TRAILING_PARAMS = {"no-resolve", "src"}
+RULESET_PREPEND_ORDERS = {"优先 (覆盖)", "prepend"}
+
+
+def rename_legacy_target(target: Any) -> Any:
+    if isinstance(target, str):
+        return LEGACY_GROUP_RENAMES.get(target.strip(), target)
+    return target
+
+
+def rule_target_index(parts: list[str]) -> int:
+    """规则的策略组目标所在下标：跳过末尾的 no-resolve / src 修饰参数。"""
+    index = len(parts) - 1
+    while index >= 2 and parts[index].strip() in RULE_TRAILING_PARAMS:
+        index -= 1
+    return index
+
+
+def rename_legacy_rule_target(rule: Any) -> Any:
+    if not isinstance(rule, str) or "," not in rule:
+        return rule
+    parts = rule.split(",")
+    index = rule_target_index(parts)
+    renamed = LEGACY_GROUP_RENAMES.get(parts[index].strip())
+    if not renamed:
+        return rule
+    parts[index] = renamed
+    return ",".join(parts)
+
+
+def builtin_ruleset_names() -> set[str]:
+    """内置规则集占用的名称，自定义规则集不能重名，否则会顶掉内置定义。"""
+    return set(DUSTINWIN_PROVIDERS_MAP)
+
+
 def is_no_base_rule_type(value: object) -> bool:
     """Return whether the draft explicitly requests only user rules/providers.
 
@@ -98,102 +136,75 @@ SNIFFER_SKIP_DST_ADDRESS = [
     "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/4", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
 ]
 
-LHIE1_PROVIDERS_MAP = {
-    "AdBlock": ("AdBlock", "AdBlock"),
-    "HTTPDNS": ("HTTPDNS", "HTTPDNS"),
-    "Special": ("Special", "DIRECT"),
-    "PROXY": ("Proxy", "Proxy"),
-    "Domestic": ("Domestic", "Domestic"),
-    "Domestic IPs": ("Domestic%20IPs", "Domestic"),
-    "LAN": ("LAN", "DIRECT"),
-    "Netflix": ("Media/Netflix", "Netflix"),
-    "Spotify": ("Media/Spotify", "Spotify"),
-    "YouTube": ("Media/YouTube", "Youtube"),
-    "Max": ("Media/Max", "HBO Max"),
-    "Bilibili": ("Media/Bilibili", "Bilibili"),
-    "IQ": ("Media/IQ", "CN Mainland TV"),
-    "IQIYI": ("Media/IQIYI", "CN Mainland TV"),
-    "Letv": ("Media/Letv", "CN Mainland TV"),
-    "Netease Music": ("Media/Netease%20Music", "CN Mainland TV"),
-    "Tencent Video": ("Media/Tencent%20Video", "CN Mainland TV"),
-    "Youku": ("Media/Youku", "CN Mainland TV"),
-    "WeTV": ("Media/WeTV", "Global TV"),
-    "ABC": ("Media/ABC", "Global TV"),
-    "Abema TV": ("Media/Abema%20TV", "Asian TV"),
-    "Amazon": ("Media/Amazon", "Global TV"),
-    "Apple Music": ("Media/Apple%20Music", "Apple"),
-    "Apple News": ("Media/Apple%20News", "Apple"),
-    "Apple TV": ("Media/Apple%20TV", "Apple TV"),
-    "Bahamut": ("Media/Bahamut", "Bahamut"),
-    "BBC iPlayer": ("Media/BBC%20iPlayer", "Global TV"),
-    "DAZN": ("Media/DAZN", "DAZN"),
-    "Discovery Plus": ("Media/Discovery%20Plus", "Discovery Plus"),
-    "Disney Plus": ("Media/Disney%20Plus", "Disney Plus"),
-    "DMM": ("Media/DMM", "Asian TV"),
-    "encoreTVB": ("Media/encoreTVB", "Global TV"),
-    "F1 TV": ("Media/F1%20TV", "Global TV"),
-    "Fox Now": ("Media/Fox%20Now", "Global TV"),
-    "Fox+": ("Media/Fox%2B", "Asian TV"),
-    "Hulu Japan": ("Media/Hulu%20Japan", "Asian TV"),
-    "Hulu": ("Media/Hulu", "Global TV"),
-    "JOOX": ("Media/JOOX", "Asian TV"),
-    "KKBOX": ("Media/KKBOX", "Asian TV"),
-    "KKTV": ("Media/KKTV", "Asian TV"),
-    "Line TV": ("Media/Line%20TV", "Asian TV"),
-    "myTV SUPER": ("Media/myTV%20SUPER", "Asian TV"),
-    "Niconico": ("Media/Niconico", "Asian TV"),
-    "Pandora": ("Media/Pandora", "Global TV"),
-    "PBS": ("Media/PBS", "Global TV"),
-    "Pornhub": ("Media/Pornhub", "Pornhub"),
-    "Soundcloud": ("Media/Soundcloud", "Global TV"),
-    "ViuTV": ("Media/ViuTV", "Asian TV"),
-    "Telegram": ("Telegram", "Telegram"),
-    "Crypto": ("Crypto", "Crypto"),
-    "Discord": ("Discord", "Discord"),
-    "Steam": ("Steam", "Steam"),
-    "TikTok": ("TikTok", "TikTok"),
-    "Speedtest": ("Speedtest", "Speedtest"),
-    "PayPal": ("PayPal", "PayPal"),
-    "Microsoft": ("Microsoft", "Microsoft"),
-    "AI Suite": ("AI%20Suite", "AI Suite"),
-    "Apple": ("Apple", "Apple"),
-    "Google FCM": ("Google%20FCM", "Google"),
-    "Scholar": ("Scholar", "Scholar"),
-    "miHoYo": ("miHoYo", "miHoYo"),
-}
+META_RULESET_BASE_URL = "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite"
 
+
+def _meta_provider(upstream_name: str, local_name: str, target: str) -> dict[str, Any]:
+    """MetaCubeX/meta-rules-dat 的 geosite mrs：补齐 DustinWin 没有的专项服务。
+
+    本地文件名与上游分开，避免 category-scholar-!cn 这类名字里的特殊字符进入缓存路径和 URL。
+    """
+    return {
+        "file": f"{local_name}.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "target": target,
+        "url": f"{META_RULESET_BASE_URL}/{quote(upstream_name, safe='')}.mrs",
+        "source": "MetaCubeX/meta-rules-dat",
+    }
+
+
+# 唯一的内置规则源：DustinWin 为主，MetaCubeX meta-rules-dat 补齐专项服务。
+# 字典顺序就是生成顺序，要点：
+# - ai、youtube 在 ads 前，避免 AI 服务依赖的统计域名被拦；
+# - 国内可直连集合（*-cn、googlefcm）在完整 Google 列表前，完整列表会吞掉它们；
+# - 专项服务集合在 media、gfw、proxy、cn 这些大名单之前，否则永远命中不到；
+# - IP 集合放最后，cnip 兜底。
 DUSTINWIN_PROVIDERS_MAP = {
     "private": {"file": "private.mrs", "behavior": "domain", "format": "mrs", "target": "DIRECT"},
+    "ai": {"file": "ai.mrs", "behavior": "domain", "format": "mrs", "target": "AI Suite"},
+    "youtube": {"file": "youtube.mrs", "behavior": "domain", "format": "mrs", "target": "Youtube"},
     "ads": {"file": "ads.mrs", "behavior": "domain", "format": "mrs", "target": "AdBlock"},
     "applications": {"file": "applications.list", "behavior": "classical", "format": "text", "target": "DIRECT"},
     "microsoft-cn": {"file": "microsoft-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Microsoft"},
     "apple-cn": {"file": "apple-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Apple"},
-    "google": {"file": GOOGLE_RULESET_FILE, "behavior": "classical", "format": "text", "target": "Google", "url": GOOGLE_RULESET_URL},
-    # google-cn / games-cn 是国内可直连的域名：Google、Steam 组还承接境外流量，默认走代理，不能共用。
+    "googlefcm": _meta_provider("googlefcm", "googlefcm", "Google FCM"),
+    # google-cn / games-cn 是国内可直连的域名：Google、Game 组还承接境外流量，默认走代理，不能共用。
     "google-cn": {"file": "google-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Domestic"},
     "games-cn": {"file": "games-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Domestic"},
-    "games": {"file": "games.mrs", "behavior": "domain", "format": "mrs", "target": "Steam"},
+    # 学术集合包含 scholar.google.*，必须在完整 Google 列表之前，否则谷歌学术不受 Scholar 组控制。
+    "scholar": _meta_provider("category-scholar-!cn", "scholar", "Scholar"),
+    "google": {"file": GOOGLE_RULESET_FILE, "behavior": "classical", "format": "text", "target": "Google", "url": GOOGLE_RULESET_URL},
+    "telegram": _meta_provider("telegram", "telegram", "Telegram"),
+    "discord": _meta_provider("discord", "discord", "Discord"),
+    "paypal": _meta_provider("paypal", "paypal", "PayPal"),
+    "crypto": _meta_provider("category-cryptocurrency", "crypto", "Crypto"),
+    "mihoyo": _meta_provider("mihoyo", "mihoyo", "miHoYo"),
+    "games": {"file": "games.mrs", "behavior": "domain", "format": "mrs", "target": "Game"},
     "netflix": {"file": "netflix.mrs", "behavior": "domain", "format": "mrs", "target": "Netflix"},
     "disney": {"file": "disney.mrs", "behavior": "domain", "format": "mrs", "target": "Disney Plus"},
     "max": {"file": "max.mrs", "behavior": "domain", "format": "mrs", "target": "HBO Max"},
     "primevideo": {"file": "primevideo.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
     "appletv": {"file": "appletv.mrs", "behavior": "domain", "format": "mrs", "target": "Apple TV"},
-    "youtube": {"file": "youtube.mrs", "behavior": "domain", "format": "mrs", "target": "Youtube"},
+    "abema": _meta_provider("abema", "abema", "Asian TV"),
+    "bahamut": _meta_provider("bahamut", "bahamut", "Bahamut"),
+    "dazn": _meta_provider("dazn", "dazn", "DAZN"),
+    "discoveryplus": _meta_provider("discoveryplus", "discoveryplus", "Discovery Plus"),
+    "pornhub": _meta_provider("pornhub", "pornhub", "Pornhub"),
     "tiktok": {"file": "tiktok.mrs", "behavior": "domain", "format": "mrs", "target": "TikTok"},
     "bilibili": {"file": "bilibili.mrs", "behavior": "domain", "format": "mrs", "target": "Bilibili"},
     "spotify": {"file": "spotify.mrs", "behavior": "domain", "format": "mrs", "target": "Spotify"},
     "media": {"file": "media.mrs", "behavior": "domain", "format": "mrs", "target": "Global TV"},
-    "ai": {"file": "ai.mrs", "behavior": "domain", "format": "mrs", "target": "AI Suite"},
     "networktest": {"file": "networktest.mrs", "behavior": "domain", "format": "mrs", "target": "Speedtest"},
     "tld-proxy": {"file": "tld-proxy.mrs", "behavior": "domain", "format": "mrs", "target": "Proxy"},
     "gfw": {"file": "gfw.mrs", "behavior": "domain", "format": "mrs", "target": "Proxy"},
     "proxy": {"file": "proxy.mrs", "behavior": "domain", "format": "mrs", "target": "Proxy"},
     "cn": {"file": "cn.mrs", "behavior": "domain", "format": "mrs", "target": "Domestic"},
     "privateip": {"file": "privateip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "DIRECT", "no_resolve": True},
-    "cnip": {"file": "cnip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Domestic", "no_resolve": True},
     "telegramip": {"file": "telegramip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Telegram", "no_resolve": True},
     "netflixip": {"file": "netflixip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Netflix", "no_resolve": True},
     "mediaip": {"file": "mediaip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Global TV", "no_resolve": True},
+    "cnip": {"file": "cnip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Domestic", "no_resolve": True},
 }
 
 
@@ -206,35 +217,12 @@ DUSTINWIN_RULE_LABELS = {
     "media": "其他流媒体", "ai": "AI 服务", "networktest": "测速站点", "tld-proxy": "境外顶级域名",
     "gfw": "GFW 名单", "proxy": "代理域名", "cn": "国内域名", "privateip": "私有网络 IP", "cnip": "国内 IP",
     "telegramip": "Telegram IP", "netflixip": "Netflix IP", "mediaip": "流媒体 IP",
+    "googlefcm": "Google 推送", "telegram": "Telegram", "discord": "Discord", "paypal": "PayPal",
+    "crypto": "加密货币", "scholar": "学术站点", "mihoyo": "米哈游", "abema": "AbemaTV",
+    "bahamut": "巴哈姆特动画疯", "dazn": "DAZN", "discoveryplus": "Discovery+", "pornhub": "Pornhub",
 }
-LHIE1_RULE_LABELS = {
-    "AdBlock": "广告拦截", "HTTPDNS": "HTTPDNS 拦截", "Special": "特殊直连", "PROXY": "代理域名",
-    "Domestic": "国内域名", "Domestic IPs": "国内 IP", "LAN": "局域网", "AI Suite": "AI 服务",
-    "Crypto": "加密货币", "Scholar": "学术站点", "Speedtest": "测速站点", "google": "Google 服务",
-    "IQ": "爱奇艺海外", "IQIYI": "爱奇艺", "Letv": "乐视", "Netease Music": "网易云音乐",
-    "Tencent Video": "腾讯视频", "Youku": "优酷", "Bilibili": "哔哩哔哩", "Google FCM": "Google 推送",
-}
-
-
-def priority_ordered_items(
-    mapping: dict[str, Any],
-    priority_names: tuple[str, ...],
-    deferred_names: tuple[str, ...] = (),
-):
-    seen: set[str] = set()
-    deferred = set(deferred_names)
-    for name in priority_names:
-        if name in mapping:
-            seen.add(name)
-            yield name, mapping[name]
-    for name, value in mapping.items():
-        if name not in seen and name not in deferred:
-            seen.add(name)
-            yield name, value
-    for name in deferred_names:
-        if name in mapping and name not in seen:
-            seen.add(name)
-            yield name, mapping[name]
+# 已下线的 lhie1 规则源：旧草稿里的取值按内置规则源处理。
+LEGACY_RULE_TYPES = {"lhie1规则": DEFAULT_RULE_TYPE}
 
 
 def text_to_list(text: str) -> list[str]:
@@ -474,7 +462,6 @@ def build_config(
             selected_rule_type,
             custom_rules,
             custom_rule_providers,
-            global_config.get("lhie1_provider_targets", {}),
             global_config.get("dustinwin_provider_targets", {}),
         )
     else:
@@ -482,7 +469,6 @@ def build_config(
             selected_rule_type,
             custom_rules,
             custom_rule_providers,
-            global_config.get("lhie1_provider_targets", {}),
             global_config.get("dustinwin_provider_targets", {}),
         )
     if rule_providers:
@@ -634,13 +620,15 @@ def validate_config(
         errors.append("Proxies 为空")
     if not groups:
         errors.append("Proxy Groups 为空")
-    if not allow_no_match and not any(str(rule).startswith("MATCH,") for rule in rules):
+    if not allow_no_match and not any(_is_match_rule(rule) for rule in rules):
         errors.append("Rules 缺少 MATCH 兜底规则")
 
     proxy_names = [p.get("name") for p in proxies if isinstance(p, dict)]
     group_names = [g.get("name") for g in groups if isinstance(g, dict)]
     # no-resolve 是规则末尾的修饰符，不是可跳转的策略组目标。
-    valid_targets = set(proxy_names + group_names + ["DIRECT", "REJECT", "REJECT-DROP", "PASS"])
+    valid_targets = set(proxy_names + group_names + ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"])
+    provider_names = set((config.get("rule-providers") or {}).keys())
+    sub_rule_names = set((config.get("sub-rules") or {}).keys())
 
     for proxy in proxies:
         if not isinstance(proxy, dict):
@@ -657,13 +645,18 @@ def validate_config(
     for rule in rules:
         parts = str(rule).split(",")
         if len(parts) >= 2:
-            # Clash/Mihomo 规则允许在最后追加 no-resolve，例如：
-            # GEOIP,CN,Domestic,no-resolve
-            # 真正的策略组目标是倒数第二段。如果直接取最后一段，会漏掉
-            # Domestic 这类缺失策略组，坏配置就会被误判为可用。
-            target = parts[-2] if parts[-1] == "no-resolve" and len(parts) >= 3 else parts[-1]
+            # 规则末尾可以带 no-resolve / src 修饰参数，例如 GEOIP,CN,Domestic,no-resolve；
+            # 真正的目标在修饰参数之前。直接取最后一段会把缺失的策略组误判为可用。
+            rule_type = parts[0].strip().upper()
+            target = parts[rule_target_index(parts)].strip()
+            if rule_type == "SUB-RULE":
+                if target not in sub_rule_names:
+                    errors.append(f"规则 '{rule}' 引用了不存在的子规则: '{target}'")
+                continue
             if target not in valid_targets:
                 errors.append(f"规则 '{rule}' 指向了不存在的策略组: '{target}'")
+            if rule_type == "RULE-SET" and len(parts) >= 3 and parts[1].strip() not in provider_names:
+                errors.append(f"规则 '{rule}' 引用了不存在的规则集: '{parts[1].strip()}'")
 
     dns_config = config.get("dns") or {}
     if dns_config.get("respect-rules") and not dns_config.get("proxy-server-nameserver"):
@@ -685,28 +678,22 @@ def build_rules(
     selected_rule_type: str,
     custom_rules: list[str],
     custom_rule_providers: dict[str, Any],
-    lhie1_provider_targets: dict[str, str] | None = None,
     dustinwin_provider_targets: dict[str, str] | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     rule_providers: dict[str, Any] = {}
-    lhie1_provider_targets = lhie1_provider_targets or {}
-    dustinwin_provider_targets = dustinwin_provider_targets or {}
+    selected_rule_type = LEGACY_RULE_TYPES.get(selected_rule_type, selected_rule_type)
+    dustinwin_provider_targets = {
+        name: rename_legacy_target(target) for name, target in (dustinwin_provider_targets or {}).items()
+    }
+    custom_rules = [rename_legacy_rule_target(rule) for rule in custom_rules]
     if selected_rule_type == "dustinwin规则":
         rule_list = [
             "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
             "DOMAIN-SUFFIX,services.googleapis.cn,Google",
         ]
         interval = get_ruleset_update_interval()
-        # 顺序要点：ai、youtube 在 ads 前，避免 AI 服务依赖的统计域名被拦；
-        # 完整 Google 列表（google）放在 ads 和 google-cn 之后，否则会吞掉广告域名和国内可直连的 Google 域名。
-        for name, provider_config in priority_ordered_items(
-            DUSTINWIN_PROVIDERS_MAP,
-            (
-                "private", "ai", "youtube", "ads", "applications",
-                "microsoft-cn", "apple-cn", "google-cn", "games-cn", "google",
-            ),
-            ("cnip",),
-        ):
+        # 生成顺序即 DUSTINWIN_PROVIDERS_MAP 的定义顺序，排序依据见该字典上方的注释。
+        for name, provider_config in DUSTINWIN_PROVIDERS_MAP.items():
             file_name = str(provider_config["file"])
             target = dustinwin_provider_targets.get(name) or str(provider_config["target"])
             rule_providers[name] = {
@@ -720,36 +707,6 @@ def build_rules(
             suffix = ",no-resolve" if provider_config.get("no_resolve") else ""
             rule_list.append(f"RULE-SET,{name},{target}{suffix}")
         rule_list.append("MATCH,Others")
-    elif selected_rule_type == "lhie1规则":
-        base_url = "https://testingcf.jsdelivr.net/gh/dler-io/Rules@main/Clash/Provider"
-        rule_list = [
-            "DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Proxy",
-            "DOMAIN-SUFFIX,services.googleapis.cn,Google",
-        ]
-        for name, (suffix, target) in priority_ordered_items(
-            LHIE1_PROVIDERS_MAP,
-            ("AI Suite",),
-            ("Domestic", "Domestic IPs"),
-        ):
-            target = lhie1_provider_targets.get(name) or target
-            rule_providers[name] = {
-                "type": "http",
-                "behavior": "classical",
-                "url": f"{base_url}/{suffix}.yaml",
-                "path": f"./ruleset/{name.replace(' ', '_')}.yaml",
-                "interval": 86400,
-            }
-            rule_list.append(f"RULE-SET,{name},{target}")
-        rule_providers["google"] = {
-            "type": "http",
-            "behavior": "classical",
-            "format": "text",
-            "url": get_dustinwin_provider_url(GOOGLE_RULESET_FILE, GOOGLE_RULESET_URL),
-            "path": f"{DUSTINWIN_RULESET_PATH_PREFIX}/{GOOGLE_RULESET_FILE}",
-            "interval": 86400,
-        }
-        rule_list.append("RULE-SET,google,Google")
-        rule_list.extend(["GEOIP,CN,Domestic,no-resolve", "MATCH,Others"])
     elif is_no_base_rule_type(selected_rule_type):
         # Explicit "none"/custom mode deliberately has no built-in rules and
         # no implicit MATCH fallback.  The caller owns the complete rule list.
@@ -786,11 +743,13 @@ def build_rules(
             provider["format"] = config["format"]
         rule_providers[name] = provider
 
-        target = config.get("target", "Proxy")
-        if config.get("order") == "优先 (覆盖)":
-            provider_rules_prepend.append(f"RULE-SET,{name},{target}")
+        target = rename_legacy_target(config.get("target", "Proxy"))
+        # ipcidr 规则集不加 no-resolve 时，排在它后面的所有域名请求都要先做一次 DNS 解析。
+        suffix = ",no-resolve" if provider["behavior"] == "ipcidr" else ""
+        if config.get("order") in RULESET_PREPEND_ORDERS:
+            provider_rules_prepend.append(f"RULE-SET,{name},{target}{suffix}")
         else:
-            provider_rules_append.append(f"RULE-SET,{name},{target}")
+            provider_rules_append.append(f"RULE-SET,{name},{target}{suffix}")
 
     preset_normal = [rule for rule in rule_list if not _is_match_rule(rule)]
     preset_match = [rule for rule in rule_list if _is_match_rule(rule)]
@@ -800,7 +759,7 @@ def build_rules(
     custom_match = [rule for rule in custom_rules if _is_match_rule(rule)]
     final_match = custom_match[:1] or preset_match
     final_rules = custom_normal + provider_rules_prepend + preset_normal + provider_rules_append + final_match
-    if not is_no_base_rule_type(selected_rule_type) and not any(rule.startswith("MATCH,") for rule in final_rules):
+    if not is_no_base_rule_type(selected_rule_type) and not any(_is_match_rule(rule) for rule in final_rules):
         final_rules.append("MATCH,Proxy")
     return final_rules, rule_providers
 
@@ -828,8 +787,7 @@ def build_rule_catalog() -> dict[str, dict[str, Any]]:
     直接取 build_rules 的输出而不是另写一份顺序，保证界面与生成结果一致。
     """
     sources = (
-        ("dustinwin规则", "dustinwin", "DustinWin", set(DUSTINWIN_PROVIDERS_MAP), DUSTINWIN_RULE_LABELS),
-        ("lhie1规则", "lhie1", "lhie1", set(LHIE1_PROVIDERS_MAP), LHIE1_RULE_LABELS),
+        ("dustinwin规则", "dustinwin", "DustinWin + MetaCubeX", set(DUSTINWIN_PROVIDERS_MAP), DUSTINWIN_RULE_LABELS),
     )
     catalog: dict[str, dict[str, Any]] = {}
     for rule_type, key, label, overridable, labels in sources:
@@ -845,12 +803,34 @@ def build_rule_catalog() -> dict[str, dict[str, Any]]:
     return catalog
 
 
+_POLICY_KEY_PREFIXES = ("geosite", "rule-set", "geoip")
+
+
+def _split_policy_line(line: str) -> tuple[str, str] | None:
+    """拆分 “域名或分类: DNS” 一行。
+
+    键本身可能带冒号（geosite:cn、rule-set:xxx），值可能是 https://… 地址，
+    所以优先按 “冒号+空格” 拆；没有空格时跳过 geosite: 这类前缀里的冒号。
+    """
+    if ": " in line:
+        key, value = line.split(": ", 1)
+        return key, value
+    if ":" not in line:
+        return None
+    prefix, rest = line.split(":", 1)
+    if prefix.strip().lower() in _POLICY_KEY_PREFIXES and ":" in rest:
+        name, value = rest.split(":", 1)
+        return f"{prefix}:{name}", value
+    return prefix, rest
+
+
 def _parse_nameserver_policy(raw_policy: str) -> dict[str, str]:
     policy: dict[str, str] = {}
     for line in (raw_policy or "").splitlines():
-        if ":" not in line:
+        parsed = _split_policy_line(line)
+        if not parsed:
             continue
-        key, value = line.split(":", 1)
+        key, value = parsed
         key = key.strip()
         value = value.strip()
         if key and value:

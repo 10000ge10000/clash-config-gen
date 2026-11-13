@@ -12,7 +12,8 @@ import yaml
 from fastapi import HTTPException
 
 from api_errors import _safe_error_text
-from config_builder import DEFAULT_RULE_TYPE, DUSTINWIN_PROVIDERS_MAP, LHIE1_PROVIDERS_MAP, is_no_base_rule_type
+from config_builder import DEFAULT_RULE_TYPE, DUSTINWIN_PROVIDERS_MAP, LEGACY_RULE_TYPES, is_no_base_rule_type
+from config_builder import builtin_ruleset_names, rename_legacy_rule_target, rename_legacy_target
 from config_builder import build_config, build_yaml, validate_config
 from config_defaults import apply_v2_global_defaults, build_default_global_config
 from mihomo_validator import validate_with_mihomo
@@ -82,6 +83,17 @@ def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict
     if raw_global is not None and not isinstance(raw_global, dict):
         raise HTTPException(status_code=400, detail="global_config 必须是对象")
     global_config = _merged_global_config(raw_global, saved.get("global_config"))
+    # lhie1 规则源已下线，它的目标覆盖不再有意义。
+    global_config.pop("lhie1_provider_targets", None)
+    for override_key in ("dustinwin_provider_targets",):
+        overrides = global_config.get(override_key)
+        if overrides is None:
+            continue
+        if not isinstance(overrides, dict) or not all(
+            isinstance(name, str) and isinstance(target, str) for name, target in overrides.items()
+        ):
+            raise HTTPException(status_code=400, detail=f"{override_key} 必须是 规则集名 → 策略组名 的对象")
+        global_config[override_key] = {name: rename_legacy_target(target) for name, target in overrides.items()}
 
     custom_rules = source.get("custom_rules", [])
     if custom_rules is None:
@@ -95,16 +107,25 @@ def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict
             raise HTTPException(status_code=400, detail="custom_rules 的每项必须是字符串")
         if len(rule) > 512:
             raise HTTPException(status_code=400, detail=f"第 {rule_index} 条规则长度不能超过 512 字符")
-    custom_rules = copy.deepcopy(custom_rules)
+    custom_rules = [rename_legacy_rule_target(rule) for rule in custom_rules]
 
     custom_rule_providers = source.get("custom_rule_providers", {})
     if custom_rule_providers is None:
         custom_rule_providers = {}
     if not isinstance(custom_rule_providers, dict):
         raise HTTPException(status_code=400, detail="custom_rule_providers 必须是对象")
+    reserved_names = builtin_ruleset_names()
     for alias, provider in custom_rule_providers.items():
         if not isinstance(provider, dict):
             raise HTTPException(status_code=400, detail="custom_rule_providers 的每项必须是对象")
+        if alias in reserved_names:
+            raise HTTPException(status_code=400, detail=f"规则集别名 {alias} 与内置规则集重名，请换一个名字")
+        target = provider.get("target")
+        if target is not None and (not isinstance(target, str) or not target.strip() or "," in target):
+            raise HTTPException(status_code=400, detail=f"规则集 {alias} 的目标策略必须是不含逗号的策略组名")
+        behavior = provider.get("behavior")
+        if behavior is not None and behavior not in ("classical", "domain", "ipcidr"):
+            raise HTTPException(status_code=400, detail=f"规则集 {alias} 的 behavior 只能是 classical、domain 或 ipcidr")
         for url_key in ("url", "path"):
             url_value = provider.get(url_key)
             if url_value is not None and not isinstance(url_value, str):
@@ -114,6 +135,9 @@ def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict
             if isinstance(interval_value, bool) or not isinstance(interval_value, int) or not 1 <= interval_value <= 31536000:
                 raise HTTPException(status_code=400, detail=f"规则集 {alias} 的 interval 必须是 1-31536000 的整数")
     custom_rule_providers = copy.deepcopy(custom_rule_providers)
+    for provider in custom_rule_providers.values():
+        if "target" in provider:
+            provider["target"] = rename_legacy_target(provider["target"])
 
     selected_rule_type = source.get("selected_rule_type", DEFAULT_RULE_TYPE)
     if selected_rule_type is None:
@@ -121,6 +145,8 @@ def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict
     if not isinstance(selected_rule_type, str):
         raise HTTPException(status_code=400, detail="selected_rule_type 必须是字符串")
     selected_rule_type = selected_rule_type.strip() or DEFAULT_RULE_TYPE
+    # lhie1 规则源已并入内置规则，旧草稿保存时迁移过来。
+    selected_rule_type = LEGACY_RULE_TYPES.get(selected_rule_type, selected_rule_type)
 
     import_sources = source.get("import_sources", [])
     if import_sources is None:
@@ -168,14 +194,10 @@ def _draft_meta_warnings(meta: dict | None) -> list[str]:
 
 
 def _provider_defaults() -> dict:
-    # 两套规则源分别暴露，不能因为切换一套而覆盖另一套。
     return {
         "dustinwin": {
             name: str(config["target"])
             for name, config in DUSTINWIN_PROVIDERS_MAP.items()
-        },
-        "lhie1": {
-            name: target for name, (_, target) in LHIE1_PROVIDERS_MAP.items()
         },
     }
 

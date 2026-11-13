@@ -404,8 +404,8 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   }))).toEqual({ profile: 'openclash-router', desktop: false });
 
   const ruleSource = page.locator('#ruleSource');
-  await ruleSource.selectOption('lhie1规则');
-  await waitForSaved(page);
+  // lhie1 已并入内置规则，规则源只剩“内置规则”和“无基础规则”两项。
+  expect(await ruleSource.locator('option').evaluateAll((options) => options.map((option) => option.value))).toEqual(['dustinwin规则', 'none']);
   await ruleSource.selectOption('none');
   await waitForSaved(page);
   await ruleSource.selectOption('dustinwin规则');
@@ -416,11 +416,7 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   // 基础规则只读预览：不提供逐条修改，切换规则源后内容和省略条数随之变化。
   await expect(providerTargets.locator('select')).toHaveCount(0);
   await expect(providerTargets.locator('.target-row')).toHaveCount(4);
-  await expect(providerTargets.locator('.flow-omitted')).toContainText('28');
-  await ruleSource.selectOption('lhie1规则');
-  await waitForSaved(page);
-  await expect(providerTargets.locator('.target-row')).toHaveCount(4);
-  await expect(providerTargets.locator('.flow-omitted')).toContainText('61');
+  await expect(providerTargets.locator('.flow-omitted')).toContainText('40');
 
   expect(await page.locator('#ruleTarget option').evaluateAll((options) => options.map((option) => option.value))).not.toContain('no-resolve');
   expect(await page.locator('#rulesetTarget option').evaluateAll((options) => options.map((option) => option.value))).not.toContain('no-resolve');
@@ -2002,6 +1998,28 @@ test('V2 密码显示按钮与 BDP 计算器：切换明文不改值，BDP 输�
   await expect(field('initial_stream_receive_window')).toHaveValue('12500000');
   await expect(field('max_connection_receive_window')).toHaveValue('50000000');
   await page.locator('#cancelNodeBtn').click();
+});
+
+test('V2 自定义规则表单：IP 规则默认 no-resolve，规则集默认优先且不能与内置重名', async ({ page }) => {
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+  await page.locator('#step-tab-3').click();
+
+  const noResolve = page.locator('#ruleNoResolve');
+  await page.locator('#ruleType').selectOption('IP-CIDR');
+  await expect(noResolve).toBeChecked();
+  await noResolve.uncheck();
+  await page.locator('#ruleType').selectOption('IP-CIDR6');
+  await expect(noResolve).toBeChecked();
+  await page.locator('#ruleType').selectOption('DOMAIN-SUFFIX');
+  await expect(page.locator('#ruleNoResolveWrap')).toBeHidden();
+
+  await expect(page.locator('#rulesetOrder')).toHaveValue('优先 (覆盖)');
+  await page.locator('#rulesetAlias').fill('cn');
+  await page.locator('#rulesetUrl').fill('https://example.com/list.yaml');
+  await page.locator('#rulesetSaveBtn').click();
+  await expect(page.locator('#toastWrap .toast').last()).toContainText('与内置规则集重名');
+  expect(await state(page, () => Object.keys(window.v2State.config.custom_rule_providers))).not.toContain('cn');
 });
 
 test('V2 订阅二维码编码器：各容量版本输出稳定，超长内容报错', async ({ page }) => {

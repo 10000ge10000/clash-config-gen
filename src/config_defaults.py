@@ -79,7 +79,6 @@ def build_default_global_config() -> dict:
         # 规则
         "generation_profile": "openclash-router",
         "is_desktop": False,
-        "lhie1_provider_targets": {},
         "dustinwin_provider_targets": {},
     }
 
@@ -300,7 +299,6 @@ def build_global_config_schema() -> dict:
         "interface_name": _global_schema_field("interface_name", "网络接口", "text", visible=desktop),
         "geodata_mode": _global_schema_field("geodata_mode", "GeoData 模式", "checkbox", visible=core),
         "geodata_loader": _global_schema_field("geodata_loader", "GeoData 加载器", "select", options=["standard", "memconservative"], visible=core),
-        "lhie1_provider_targets": _global_schema_field("lhie1_provider_targets", "lhie1 目标覆盖", "textarea"),
         "dustinwin_provider_targets": _global_schema_field("dustinwin_provider_targets", "DustinWin 目标覆盖", "textarea"),
     }
     return schema

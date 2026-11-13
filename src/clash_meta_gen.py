@@ -165,7 +165,7 @@ def generate_proxy_groups(
         "Microsoft", "AI Suite", "Apple", "Apple TV", "Google", "Google FCM",
         "Scholar", "Bilibili", "Bahamut", "HBO Max", "Pornhub", 
         "Netflix", "Disney Plus", "Discovery Plus", 
-        "DAZN", "Spotify", "Steam", "TikTok", "miHoYo",
+        "DAZN", "Spotify", "Game", "TikTok", "miHoYo",
         "Telegram", "Crypto", "Discord", "Speedtest", "PayPal"
     ]
     global_tv_apps = {
@@ -178,8 +178,8 @@ def generate_proxy_groups(
     }
     asian_tv_apps = {"Bahamut"}
     mainland_tv_apps = {"Bilibili"}
-    # 微软、苹果组承接的主要是国内可直连的 CDN（DustinWin 的 microsoft-cn / apple-cn），默认直连。
-    direct_first_apps = {"Microsoft", "Apple"}
+    # 微软、苹果组承接的是国内可直连的 CDN（microsoft-cn / apple-cn），FCM 推送在国内也可直连，默认直连。
+    direct_first_apps = {"Microsoft", "Apple", "Google FCM"}
     for app in app_groups:
         if app in direct_first_apps:
             groups.append(create_group(app, "select", all_proxies, extra_proxies=["DIRECT", "Proxy"]))
@@ -198,7 +198,6 @@ def generate_proxy_groups(
 
     # 5. 拦截与功能
     groups.append({"name": "AdBlock", "type": "select", "proxies": ["REJECT", "DIRECT", "Proxy"]})
-    groups.append({"name": "HTTPDNS", "type": "select", "proxies": ["REJECT", "DIRECT", "Proxy"]})
     
     # 电视分组
     groups.append(create_group("Global TV", "select", all_proxies, extra_proxies=["Proxy", "DIRECT"]))

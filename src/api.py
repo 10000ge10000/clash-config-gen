@@ -35,6 +35,7 @@ from config_builder import DEFAULT_RULE_TYPE, DUSTINWIN_PROVIDERS_MAP, is_no_bas
 from config_builder import (
     build_rule_catalog,
     build_subscription_headers,
+    builtin_ruleset_names,
     build_yaml,
     validate_config,
 )
@@ -529,6 +530,13 @@ def logout(request: Request, csrf_token: str = Form(...)):
 
 
 @app.get("/ruleset/dustinwin/{name}")
+def _ruleset_source(file_name: str) -> str:
+    for config in DUSTINWIN_PROVIDERS_MAP.values():
+        if config["file"] == file_name:
+            return str(config.get("source") or "DustinWin/ruleset_geodata")
+    return "DustinWin/ruleset_geodata"
+
+
 def get_dustinwin_ruleset(name: str):
     expected_files = {str(config["file"]) for config in DUSTINWIN_PROVIDERS_MAP.values()}
     if name not in expected_files:
@@ -545,7 +553,7 @@ def get_dustinwin_ruleset(name: str):
         headers={
             "Cache-Control": "public, max-age=3600",
             "Content-Disposition": f'inline; filename="{name}"',
-            "X-Clash-Ruleset-Source": "DustinWin/ruleset_geodata",
+            "X-Clash-Ruleset-Source": _ruleset_source(name),
         },
     )
 
@@ -1027,6 +1035,7 @@ def _bootstrap(
         "subscription": subscription,
         "provider_defaults": _provider_defaults(),
         "rule_catalog": build_rule_catalog(),
+        "reserved_ruleset_names": sorted(builtin_ruleset_names()),
         "presets": {
             "full_client": FULL_CLIENT_DNS_PRESET,
             "openclash_router": OPENCLASH_ROUTER_SAFE_PRESET,
@@ -1286,6 +1295,8 @@ def api_ruleset_upload(
         safe_alias = validate_ruleset_alias(raw_alias)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=_safe_error_text(exc)) from exc
+    if safe_alias in builtin_ruleset_names():
+        raise HTTPException(status_code=400, detail=f"规则集别名 {safe_alias} 与内置规则集重名，请换一个名字")
 
     normalized_format = format.strip().lower() or _ruleset_format_from_extension(extension)
     if normalized_format not in RULESET_FORMATS:
