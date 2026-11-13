@@ -529,7 +529,6 @@ def logout(request: Request, csrf_token: str = Form(...)):
     return response
 
 
-@app.get("/ruleset/dustinwin/{name}")
 def _ruleset_source(file_name: str) -> str:
     for config in DUSTINWIN_PROVIDERS_MAP.values():
         if config["file"] == file_name:
@@ -537,6 +536,7 @@ def _ruleset_source(file_name: str) -> str:
     return "DustinWin/ruleset_geodata"
 
 
+@app.get("/ruleset/dustinwin/{name}")
 def get_dustinwin_ruleset(name: str):
     expected_files = {str(config["file"]) for config in DUSTINWIN_PROVIDERS_MAP.values()}
     if name not in expected_files:

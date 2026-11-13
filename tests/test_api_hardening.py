@@ -126,6 +126,28 @@ class HardeningTestBase(unittest.TestCase):
 class EventLoopOffloadTest(HardeningTestBase):
     """问题 1：async 路由里的阻塞工作必须在线程池执行。"""
 
+    def test_builtin_ruleset_route_serves_cached_files(self):
+        """走真实 HTTP 路由下载内置规则集：DustinWin 与 MetaCubeX 的文件都能取到，来源头正确。"""
+        import ruleset_updater
+
+        previous_cache_dir = ruleset_updater.RULESET_CACHE_DIR
+        ruleset_updater.RULESET_CACHE_DIR = Path(self.tmpdir.name)
+        try:
+            Path(self.tmpdir.name, "ai.mrs").write_bytes(b"ai-data")
+            Path(self.tmpdir.name, "scholar.mrs").write_bytes(b"scholar-data")
+            ai = self.client.get("/ruleset/dustinwin/ai.mrs")
+            scholar = self.client.get("/ruleset/dustinwin/scholar.mrs")
+            missing = self.client.get("/ruleset/dustinwin/not-a-ruleset.mrs")
+        finally:
+            ruleset_updater.RULESET_CACHE_DIR = previous_cache_dir
+
+        self.assertEqual(200, ai.status_code)
+        self.assertEqual(b"ai-data", ai.content)
+        self.assertEqual("DustinWin/ruleset_geodata", ai.headers["x-clash-ruleset-source"])
+        self.assertEqual(200, scholar.status_code)
+        self.assertEqual("MetaCubeX/meta-rules-dat", scholar.headers["x-clash-ruleset-source"])
+        self.assertEqual(404, missing.status_code)
+
     def test_api_login_runs_password_check_in_threadpool(self):
         storage.create_user("loop-user", "password123")
         original = auth_service.authenticate_user
