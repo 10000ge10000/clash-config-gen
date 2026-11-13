@@ -178,8 +178,12 @@ def generate_proxy_groups(
     }
     asian_tv_apps = {"Bahamut"}
     mainland_tv_apps = {"Bilibili"}
+    # 微软、苹果组承接的主要是国内可直连的 CDN（DustinWin 的 microsoft-cn / apple-cn），默认直连。
+    direct_first_apps = {"Microsoft", "Apple"}
     for app in app_groups:
-        if app in global_tv_apps:
+        if app in direct_first_apps:
+            groups.append(create_group(app, "select", all_proxies, extra_proxies=["DIRECT", "Proxy"]))
+        elif app in global_tv_apps:
             groups.append(create_group(app, "select", all_proxies, extra_proxies=["Global TV", "DIRECT", "Proxy"]))
         elif app in asian_tv_apps:
             groups.append(create_group(app, "select", all_proxies, extra_proxies=["Asian TV", "DIRECT", "Proxy"]))
@@ -188,8 +192,9 @@ def generate_proxy_groups(
         else:
             groups.append(create_group(app, "select", all_proxies, extra_proxies=["Proxy", "DIRECT"]))
 
-    # Youtube 特殊处理：disable-udp
-    groups.append(create_group("Youtube", "select", all_proxies, extra_proxies=["Global TV", "DIRECT", "Proxy"], disable_udp=True))
+    # 不能加 disable-udp：mihomo 遇到不支持 UDP 的组会跳过该规则继续匹配，
+    # YouTube 的 QUIC 流量就会落到后面的 media 规则，绕开用户在本组的选择。
+    groups.append(create_group("Youtube", "select", all_proxies, extra_proxies=["Global TV", "DIRECT", "Proxy"]))
 
     # 5. 拦截与功能
     groups.append({"name": "AdBlock", "type": "select", "proxies": ["REJECT", "DIRECT", "Proxy"]})

@@ -691,7 +691,7 @@ proxies:
 
         rules, providers = build_rules("dustinwin规则", [], {})
         self.assertIn("RULE-SET,google,Google", rules)
-        self.assertIn("RULE-SET,google-cn,Google", rules)
+        self.assertIn("RULE-SET,google-cn,Domestic", rules)
         self.assertIn("RULE-SET,youtube,Youtube", rules)
         self.assertLess(rules.index("RULE-SET,youtube,Youtube"), rules.index("RULE-SET,google,Google"))
         self.assertEqual("classical", providers["google"]["behavior"])
@@ -775,6 +775,42 @@ proxies:
             "RULE-SET,mediaip,Global TV,no-resolve",
         ]:
             self.assertLess(rules.index(expected_rule), cnip_index, expected_rule)
+
+    def test_youtube_group_keeps_udp(self):
+        """Youtube 组不能 disable-udp：mihomo 会让 QUIC 跳过该规则，落到 media 走 Global TV。"""
+        groups = {group["name"]: group for group in generate_proxy_groups([{"name": "node-1", "type": "ss"}])}
+
+        for group in groups.values():
+            self.assertNotIn("disable-udp", group, group["name"])
+
+    def test_domestic_reachable_rulesets_default_to_direct(self):
+        """国内可直连的规则集默认不能走代理。"""
+        groups = {group["name"]: group for group in generate_proxy_groups([{"name": "node-1", "type": "ss"}])}
+        rules, _providers = build_rules("dustinwin规则", [], {})
+
+        self.assertIn("RULE-SET,microsoft-cn,Microsoft", rules)
+        self.assertIn("RULE-SET,apple-cn,Apple", rules)
+        self.assertEqual("DIRECT", groups["Microsoft"]["proxies"][0])
+        self.assertEqual("DIRECT", groups["Apple"]["proxies"][0])
+        # Google、Steam 组还承接境外流量，保持代理；它们的国内集合改由 Domestic 承接。
+        self.assertIn("RULE-SET,google-cn,Domestic", rules)
+        self.assertIn("RULE-SET,games-cn,Domestic", rules)
+        self.assertEqual("Proxy", groups["Google"]["proxies"][0])
+        self.assertEqual("DIRECT", groups["Domestic"]["proxies"][0])
+
+    def test_dustinwin_rule_order_avoids_shadowing(self):
+        """完整 Google 列表不能抢在广告和国内集合之前；AI、YouTube 仍在广告前。"""
+        rules, _providers = build_rules("dustinwin规则", [], {})
+        index = {rule.split(",")[1]: i for i, rule in enumerate(rules) if rule.startswith("RULE-SET,")}
+
+        self.assertEqual("private", rules[2].split(",")[1])
+        self.assertLess(index["ai"], index["ads"])
+        self.assertLess(index["youtube"], index["ads"])
+        self.assertLess(index["youtube"], index["media"])
+        for earlier in ("ads", "microsoft-cn", "apple-cn", "google-cn", "games-cn"):
+            self.assertLess(index[earlier], index["google"], earlier)
+        self.assertLess(index["google"], index["games"])
+        self.assertEqual("cnip", max(index, key=index.get))
 
     def test_media_policy_groups_default_to_aggregate_selectors(self):
         """独立流媒体策略组的默认选中项要和 LHIE1 聚合规则目标一致。"""

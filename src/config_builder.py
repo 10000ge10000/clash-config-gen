@@ -169,8 +169,9 @@ DUSTINWIN_PROVIDERS_MAP = {
     "microsoft-cn": {"file": "microsoft-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Microsoft"},
     "apple-cn": {"file": "apple-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Apple"},
     "google": {"file": GOOGLE_RULESET_FILE, "behavior": "classical", "format": "text", "target": "Google", "url": GOOGLE_RULESET_URL},
-    "google-cn": {"file": "google-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Google"},
-    "games-cn": {"file": "games-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Steam"},
+    # google-cn / games-cn 是国内可直连的域名：Google、Steam 组还承接境外流量，默认走代理，不能共用。
+    "google-cn": {"file": "google-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Domestic"},
+    "games-cn": {"file": "games-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Domestic"},
     "games": {"file": "games.mrs", "behavior": "domain", "format": "mrs", "target": "Steam"},
     "netflix": {"file": "netflix.mrs", "behavior": "domain", "format": "mrs", "target": "Netflix"},
     "disney": {"file": "disney.mrs", "behavior": "domain", "format": "mrs", "target": "Disney Plus"},
@@ -696,9 +697,14 @@ def build_rules(
             "DOMAIN-SUFFIX,services.googleapis.cn,Google",
         ]
         interval = get_ruleset_update_interval()
+        # 顺序要点：ai、youtube 在 ads 前，避免 AI 服务依赖的统计域名被拦；
+        # 完整 Google 列表（google）放在 ads 和 google-cn 之后，否则会吞掉广告域名和国内可直连的 Google 域名。
         for name, provider_config in priority_ordered_items(
             DUSTINWIN_PROVIDERS_MAP,
-            ("ai", "youtube", "google"),
+            (
+                "private", "ai", "youtube", "ads", "applications",
+                "microsoft-cn", "apple-cn", "google-cn", "games-cn", "google",
+            ),
             ("cnip",),
         ):
             file_name = str(provider_config["file"])
