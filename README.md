@@ -286,9 +286,21 @@ MIHOMO_VALIDATE_ENABLED=false streamlit run src/web_app.py
 | `cn.mrs`、`cnip.mrs` | `Domestic` |
 | `telegramip.mrs` | `Telegram` |
 | `ads.mrs` | `AdBlock` |
+| `game-download.yaml`（本项目维护） | `DIRECT` |
 | `gfw.mrs`、`proxy.mrs`、`tld-proxy.mrs` | `Proxy` |
 
 Google 使用独立的 `Google` 策略组；YouTube 规则优先匹配 `Youtube` 策略组，不会被通用 Google 规则覆盖。
+
+### 游戏下载直连（内置 `game-download`）
+
+`game-download` 是本项目维护的内置规则集，覆盖 Xbox、PlayStation、Nintendo Switch、Steam、Epic、Battle.net、EA、Ubisoft 的下载 CDN，默认目标 `DIRECT`。它排在 `applications` 之后，早于 `microsoft-cn`、`games`、`media`、`gfw`、`proxy`、`cn` 等大名单，所以即使 `Game`、`Microsoft` 组选了代理，下载流量也会直连。想让某个用户的游戏下载走代理，在“内置规则集目标”里把 `game-download` 改成对应策略组即可，不需要新增策略组。
+
+名单文件是 [`src/builtin_rulesets/game-download.yaml`](src/builtin_rulesets/game-download.yaml)，随镜像发布，从 `/ruleset/dustinwin/game-download.yaml` 下载，客户端每天检查一次更新。维护时注意：
+
+- 只写厂商专用主机名或子域，例如 `+.xboxlive.com.edgesuite.net`、`fg.microsoft.map.fastly.net`。不要写 `+.gcdn.co`、`+.fastly.net`、`+.akamaihd.net`、`+.edgesuite.net` 这类公共 CDN 后缀，否则大量海外网站会被带成直连。
+- `cl-glcb907925.gcdn.co` 是 G-Core 分配给微软的编号主机名，以后可能会变。发现 Xbox 下载又走了代理时，在路由器连接列表里找实际下载主机名，按原样补进名单。
+- 只做分流，不做 DNS 映射或 Hosts 改写：Xbox 国内 CDN（`*.xboxlive.cn`）只接受 `.cn` 主机名，把 `.com` 下载域名解析到 `.cn` 的 IP 会返回 403。
+- 内置之前上传的同名私有规则集 `game-download` 由内置版本接替（仅限内置规则源；“无基础规则”模式下照常保留）：生成订阅时不再写入，旧草稿下次保存时自动移除。旧私有规则集设置的目标不会迁移，需要非 `DIRECT` 时到“内置规则集目标”里重新设置。
 
 自动更新分两层：
 

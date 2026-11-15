@@ -219,9 +219,13 @@ class RulesetUpdaterTests(unittest.TestCase):
             response = mock.Mock(content=b"payload")
             response.raise_for_status = lambda: None
             with mock.patch.object(ruleset_updater, "RULESET_CACHE_DIR", Path(tmp)), \
-                    mock.patch.object(ruleset_updater.requests, "get", return_value=response):
+                    mock.patch.object(ruleset_updater.requests, "get", return_value=response) as fake_get:
                 stats = ruleset_updater.update_dustinwin_rulesets()
             self.assertEqual(0, stats["failed"])
+            # 随代码发布的 game-download.yaml 不从网络下载，也不写进缓存目录。
+            requested = [call.args[0] for call in fake_get.call_args_list]
+            self.assertFalse(any("game-download" in url for url in requested))
+            self.assertNotIn("game-download.yaml", os.listdir(tmp))
             self.assertEqual([], [p for p in os.listdir(tmp) if p.endswith(".tmp")])
 
         calls = {"n": 0}

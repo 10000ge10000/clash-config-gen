@@ -138,6 +138,8 @@ class EventLoopOffloadTest(HardeningTestBase):
             ai = self.client.get("/ruleset/dustinwin/ai.mrs")
             scholar = self.client.get("/ruleset/dustinwin/scholar.mrs")
             missing = self.client.get("/ruleset/dustinwin/not-a-ruleset.mrs")
+            # 随代码发布的 game-download.yaml 不依赖下载缓存目录。
+            game = self.client.get("/ruleset/dustinwin/game-download.yaml")
         finally:
             ruleset_updater.RULESET_CACHE_DIR = previous_cache_dir
 
@@ -147,6 +149,9 @@ class EventLoopOffloadTest(HardeningTestBase):
         self.assertEqual(200, scholar.status_code)
         self.assertEqual("MetaCubeX/meta-rules-dat", scholar.headers["x-clash-ruleset-source"])
         self.assertEqual(404, missing.status_code)
+        self.assertEqual(200, game.status_code)
+        self.assertEqual("Clash-Config-Gen", game.headers["x-clash-ruleset-source"])
+        self.assertIn("cl-glcb907925.gcdn.co", game.text)
 
     def test_api_login_runs_password_check_in_threadpool(self):
         storage.create_user("loop-user", "password123")

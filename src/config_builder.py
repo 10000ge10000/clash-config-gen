@@ -1,6 +1,7 @@
 import base64
 import os
 import re
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -154,9 +155,34 @@ def _meta_provider(upstream_name: str, local_name: str, target: str) -> dict[str
     }
 
 
+# 随项目一起发布、由本项目维护的规则集文件目录（镜像内为 /app/builtin_rulesets）。
+BUILTIN_RULESET_DIR = Path(__file__).resolve().parent / "builtin_rulesets"
+# 没有配置 PUBLIC_BASE_URL 时的回退地址：直接取开源仓库里的同一份文件。
+BUNDLED_RULESET_BASE_URL = "https://raw.githubusercontent.com/10000ge10000/clash-config-gen/main/src/builtin_rulesets"
+# 本项目维护的名单变化比上游频繁（CDN 编号会变），客户端每天检查一次更新。
+BUNDLED_RULESET_INTERVAL = 86400
+
+
+def _bundled_provider(file_name: str, behavior: str, target: str) -> dict[str, Any]:
+    """本项目维护的规则集：文件随仓库发布，不从上游下载。"""
+    return {
+        "file": file_name,
+        "behavior": behavior,
+        "format": "yaml",
+        "target": target,
+        "url": f"{BUNDLED_RULESET_BASE_URL}/{file_name}",
+        "source": "Clash-Config-Gen",
+        "bundled": True,
+        "interval": BUNDLED_RULESET_INTERVAL,
+    }
+
+
 # 唯一的内置规则源：DustinWin 为主，MetaCubeX meta-rules-dat 补齐专项服务。
 # 字典顺序就是生成顺序，要点：
 # - ai、youtube 在 ads 前，避免 AI 服务依赖的统计域名被拦；
+# - game-download 紧跟 applications：游戏下载 CDN 一律直连，必须早于 microsoft-cn（Microsoft 组）、
+#   games（Game 组）以及 media、tld-proxy、gfw、proxy、cn 这些大名单，后者含 +.xboxlive.com、+.gcdn.co 等；
+#   名单只有厂商专用主机名，排在 private、ai、ads 之后不会抢走它们的流量；
 # - 国内可直连集合（*-cn、googlefcm）在完整 Google 列表前，完整列表会吞掉它们；
 # - 专项服务集合在 media、gfw、proxy、cn 这些大名单之前，否则永远命中不到；
 # - IP 集合放最后，cnip 兜底。
@@ -166,6 +192,7 @@ DUSTINWIN_PROVIDERS_MAP = {
     "youtube": {"file": "youtube.mrs", "behavior": "domain", "format": "mrs", "target": "Youtube"},
     "ads": {"file": "ads.mrs", "behavior": "domain", "format": "mrs", "target": "AdBlock"},
     "applications": {"file": "applications.list", "behavior": "classical", "format": "text", "target": "DIRECT"},
+    "game-download": _bundled_provider("game-download.yaml", "domain", "DIRECT"),
     "microsoft-cn": {"file": "microsoft-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Microsoft"},
     "apple-cn": {"file": "apple-cn.mrs", "behavior": "domain", "format": "mrs", "target": "Apple"},
     "googlefcm": _meta_provider("googlefcm", "googlefcm", "Google FCM"),
@@ -210,7 +237,8 @@ DUSTINWIN_PROVIDERS_MAP = {
 
 # 规则集的中文说明，只用于界面展示。
 DUSTINWIN_RULE_LABELS = {
-    "private": "私有网络域名", "ads": "广告域名", "applications": "下载类应用", "microsoft-cn": "微软国内域名",
+    "private": "私有网络域名", "ads": "广告域名", "applications": "下载类应用", "game-download": "游戏下载（直连）",
+    "microsoft-cn": "微软国内域名",
     "apple-cn": "苹果国内域名", "google": "Google 服务", "google-cn": "Google 国内域名", "games-cn": "游戏国内域名",
     "games": "游戏平台", "netflix": "Netflix", "disney": "Disney+", "max": "HBO Max", "primevideo": "Prime Video",
     "appletv": "Apple TV", "youtube": "YouTube", "tiktok": "TikTok", "bilibili": "哔哩哔哩", "spotify": "Spotify",
@@ -702,7 +730,7 @@ def build_rules(
                 "format": provider_config["format"],
                 "url": get_dustinwin_provider_url(file_name, provider_config.get("url")),
                 "path": f"{DUSTINWIN_RULESET_PATH_PREFIX}/{file_name}",
-                "interval": interval,
+                "interval": int(provider_config.get("interval") or interval),
             }
             suffix = ",no-resolve" if provider_config.get("no_resolve") else ""
             rule_list.append(f"RULE-SET,{name},{target}{suffix}")
@@ -725,7 +753,12 @@ def build_rules(
 
     provider_rules_prepend: list[str] = []
     provider_rules_append: list[str] = []
+    builtin_names = set(rule_providers)
     for name, config in custom_rule_providers.items():
+        if name in builtin_names:
+            # 与内置规则集重名的旧私有规则集（例如 game-download 内置之前上传的）不再生成：
+            # 否则同名 rule-provider 会覆盖内置文件，并多出一条重复的 RULE-SET。
+            continue
         provider = {
             "type": config.get("type", "http"),
             "behavior": config.get("behavior", "classical"),

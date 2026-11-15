@@ -416,7 +416,7 @@ test('V2 真实 FastAPI 工作台端到端流程、隔离持久化与响应式�
   // 基础规则只读预览：不提供逐条修改，切换规则源后内容和省略条数随之变化。
   await expect(providerTargets.locator('select')).toHaveCount(0);
   await expect(providerTargets.locator('.target-row')).toHaveCount(4);
-  await expect(providerTargets.locator('.flow-omitted')).toContainText('40');
+  await expect(providerTargets.locator('.flow-omitted')).toContainText('41');
 
   expect(await page.locator('#ruleTarget option').evaluateAll((options) => options.map((option) => option.value))).not.toContain('no-resolve');
   expect(await page.locator('#rulesetTarget option').evaluateAll((options) => options.map((option) => option.value))).not.toContain('no-resolve');

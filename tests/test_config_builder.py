@@ -886,6 +886,37 @@ proxies:
         self.assertEqual("Game", draft["custom_rule_providers"]["my-list"]["target"])
         self.assertEqual({"games": "Game"}, draft["global_config"]["dustinwin_provider_targets"])
 
+    def test_saved_private_ruleset_superseded_by_builtin_is_dropped(self):
+        """内置之前上传的同名私有规则集（game-download）：旧草稿保存时自动移除并提示，新上传仍拒绝。"""
+        from fastapi import HTTPException
+
+        from draft_service import _normalize_draft
+
+        legacy = {"type": "http", "behavior": "domain", "url": "https://example.com/g.yaml", "target": "DIRECT"}
+        keep = {"type": "http", "behavior": "domain", "url": "https://example.com/n.yaml", "target": "Proxy"}
+        saved = {"custom_rule_providers": {"game-download": legacy, "nbc": keep}}
+        body = {"proxies": [], "global_config": {}, "custom_rule_providers": {"game-download": legacy, "nbc": keep}}
+
+        draft, meta = _normalize_draft(body, saved)
+        self.assertEqual(["nbc"], list(draft["custom_rule_providers"]))
+        self.assertTrue(any("game-download" in warning for warning in meta["warnings"]))
+
+        with self.assertRaises(HTTPException) as context:
+            _normalize_draft(body, {"custom_rule_providers": {"nbc": keep}})
+        self.assertEqual(400, context.exception.status_code)
+
+        # “无基础规则”模式不生成内置规则集，旧的同名私有规则集必须保留，否则规则引用会断。
+        none_body = {**body, "selected_rule_type": "none", "custom_rules": ["RULE-SET,game-download,Proxy"]}
+        draft, meta = _normalize_draft(none_body, saved)
+        self.assertEqual(["game-download", "nbc"], sorted(draft["custom_rule_providers"]))
+        self.assertFalse(any("game-download" in warning for warning in meta["warnings"]))
+        rules, providers = build_rules("none", draft["custom_rules"], draft["custom_rule_providers"])
+        self.assertIn("RULE-SET,game-download,Proxy", rules)
+        self.assertEqual("https://example.com/g.yaml", providers["game-download"]["url"])
+
+        with self.assertRaises(HTTPException):
+            _normalize_draft({**body, "custom_rule_providers": {"game-download": "bad"}}, saved)
+
     def test_media_policy_groups_default_to_aggregate_selectors(self):
         """独立流媒体策略组默认回落到对应的聚合组（Global TV / Asian TV / CN Mainland TV）。"""
         proxies = [
@@ -979,6 +1010,139 @@ proxies:
         self.assertIn(f"# Project-URL: {SUBSCRIPTION_PROJECT_URL}", rendered)
         self.assertIn(f"# Usage: {SUBSCRIPTION_USAGE}", rendered)
         self.assertEqual(config, loaded)
+
+
+def _domain_payload_matches(payload: list[str], host: str) -> bool:
+    """按 mihomo domain 规则集语义匹配：+.x 匹配 x 及子域，.x 只匹配子域，*.x 匹配一级子域，其余精确匹配。"""
+    host = host.lower().rstrip(".")
+    for entry in payload:
+        entry = entry.lower()
+        if entry.startswith("+."):
+            base = entry[2:]
+            if host == base or host.endswith("." + base):
+                return True
+        elif entry.startswith("."):
+            if host.endswith(entry):
+                return True
+        elif entry.startswith("*."):
+            base = entry[2:]
+            if host.endswith("." + base) and "." not in host[: -len(base) - 1]:
+                return True
+        elif host == entry:
+            return True
+    return False
+
+
+class GameDownloadRulesetTest(unittest.TestCase):
+    """内置 game-download：游戏下载 CDN 一律直连。"""
+
+    PUBLIC_CDN_SUFFIXES = (
+        "gcdn.co", "fastly.net", "akamai.net", "akamaized.net", "akamaihd.net",
+        "cloudfront.net", "edgesuite.net", "edgekey.net", "llnwd.net", "fastly-edge.com", "akadns.net",
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        from config_builder import BUILTIN_RULESET_DIR
+
+        path = BUILTIN_RULESET_DIR / DUSTINWIN_PROVIDERS_MAP["game-download"]["file"]
+        cls.payload = yaml.safe_load(path.read_text(encoding="utf-8"))["payload"]
+
+    def test_payload_is_clean_domain_list(self):
+        self.assertEqual(len(self.payload), len(set(self.payload)), "名单有重复条目")
+        for entry in self.payload:
+            self.assertIsInstance(entry, str)
+            self.assertEqual(entry, entry.strip().lower(), entry)
+            self.assertNotIn(",", entry)
+            self.assertFalse(entry.startswith("*."), f"{entry} 应写成 +. 形式")
+
+    def test_payload_never_releases_whole_public_cdn_suffix(self):
+        for entry in self.payload:
+            if not entry.startswith("+."):
+                continue
+            base = entry[2:]
+            self.assertNotIn(base, self.PUBLIC_CDN_SUFFIXES, entry)
+            # +.x.公共CDN 后缀时，x 必须带厂商标识（至少两段），例如 xboxlive.com.edgesuite.net。
+            for suffix in self.PUBLIC_CDN_SUFFIXES:
+                if base.endswith("." + suffix):
+                    vendor_part = base[: -len(suffix) - 1]
+                    self.assertGreaterEqual(vendor_part.count("."), 1, entry)
+
+    def test_rule_is_placed_before_broad_lists_and_after_specific_ones(self):
+        rules, providers = build_rules("dustinwin规则", [], {})
+        names = [rule.split(",")[1] for rule in rules if rule.startswith("RULE-SET,")]
+        index = names.index("game-download")
+        self.assertIn("RULE-SET,game-download,DIRECT", rules)
+        for broad in ("microsoft-cn", "games-cn", "games", "media", "tld-proxy", "gfw", "proxy", "cn"):
+            self.assertLess(index, names.index(broad), broad)
+        for specific in ("private", "ai", "ads"):
+            self.assertGreater(index, names.index(specific), specific)
+        provider = providers["game-download"]
+        self.assertEqual(("domain", "yaml"), (provider["behavior"], provider["format"]))
+        self.assertEqual("./ruleset/dustinwin/game-download.yaml", provider["path"])
+        self.assertEqual(86400, provider["interval"])
+
+    def test_observed_xbox_download_hosts_match(self):
+        for host in (
+            "cl-glcb907925.gcdn.co",
+            "fg.microsoft.map.fastly.net",
+            "assets1.xboxlive.com.edgesuite.net",
+            "5.xb.delivery.microsoft.com",
+            "assets1.xboxlive.com",
+            "dlassets.xboxlive.com",
+            "assets1.xboxlive.cn",
+            "tlu.dl.delivery.mp.microsoft.com",
+            "gs2.ww.prod.dl.playstation.net",
+            "atum.hac.lp1.d4c.nintendo.net",
+            "cache1-hkg1.steamcontent.com",
+            "download.epicgames.com",
+            "level3.blizzard.com",
+            "uplaypc-s-ubisoft.cdn.ubi.com",
+        ):
+            self.assertTrue(_domain_payload_matches(self.payload, host), host)
+
+    def test_ordinary_overseas_sites_are_not_released(self):
+        for host in (
+            "www.google.com",
+            "www.youtube.com",
+            "www.reddit.com",
+            "github.githubassets.com",
+            "www.nytimes.com",
+            "nytimes.map.fastly.net",
+            "reddit.map.fastly.net",
+            "foo.global.ssl.fastly.net",
+            "a248.e.akamai.net",
+            "www.apple.com.edgekey.net",
+            "twimg.edgesuite.net",
+            "steamcommunity-a.akamaihd.net",
+            "d1234abcd.cloudfront.net",
+            "cl-glcb000000.gcdn.co",
+            "xboxlive.com",
+            "login.live.com",
+            "www.xbox.com",
+            "store.steampowered.com",
+            "www.epicgames.com",
+        ):
+            self.assertFalse(_domain_payload_matches(self.payload, host), host)
+
+    def test_legacy_private_ruleset_with_builtin_name_is_dropped(self):
+        providers = {
+            "game-download": {
+                "type": "http", "behavior": "domain", "format": "yaml", "target": "DIRECT",
+                "path": "./ruleset/users/4/game-download--old.yaml", "url": "https://example.com/x.yaml",
+                "order": "优先 (覆盖)",
+            }
+        }
+        rules, rule_providers = build_rules("dustinwin规则", [], providers)
+        self.assertEqual(1, sum(rule.startswith("RULE-SET,game-download,") for rule in rules))
+        self.assertEqual("./ruleset/dustinwin/game-download.yaml", rule_providers["game-download"]["path"])
+
+    def test_ruleset_route_serves_bundled_file(self):
+        import ruleset_updater
+
+        path = ruleset_updater.get_ruleset_cache_path("game-download.yaml")
+        self.assertTrue(path.is_file(), path)
+        self.assertNotEqual(ruleset_updater.RULESET_CACHE_DIR, path.parent)
 
 
 if __name__ == "__main__":

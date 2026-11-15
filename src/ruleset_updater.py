@@ -8,6 +8,7 @@ from pathlib import Path
 import requests
 
 from config_builder import (
+    BUILTIN_RULESET_DIR,
     DUSTINWIN_PROVIDERS_MAP,
     DUSTINWIN_RULESET_BASE_URL,
     DUSTINWIN_RULESET_INTERVAL,
@@ -25,8 +26,15 @@ def ruleset_cache_enabled() -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
+def _bundled_ruleset_files() -> set[str]:
+    return {str(config["file"]) for config in DUSTINWIN_PROVIDERS_MAP.values() if config.get("bundled")}
+
+
 def get_ruleset_cache_path(file_name: str) -> Path:
     safe_name = Path(file_name).name
+    # 本项目维护的规则集直接读随代码发布的文件，不走下载缓存。
+    if safe_name in _bundled_ruleset_files():
+        return BUILTIN_RULESET_DIR / safe_name
     return RULESET_CACHE_DIR / safe_name
 
 
@@ -37,6 +45,7 @@ def update_dustinwin_rulesets(timeout: int = 30) -> dict[str, int]:
     source_urls = {
         str(config["file"]): str(config.get("url") or f"{DUSTINWIN_RULESET_BASE_URL}/{config['file']}")
         for config in DUSTINWIN_PROVIDERS_MAP.values()
+        if not config.get("bundled")
     }
 
     for file_name, url in sorted(source_urls.items()):

@@ -115,10 +115,26 @@ def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict
     if not isinstance(custom_rule_providers, dict):
         raise HTTPException(status_code=400, detail="custom_rule_providers 必须是对象")
     reserved_names = builtin_ruleset_names()
-    for alias, provider in custom_rule_providers.items():
+    saved_providers = saved.get("custom_rule_providers")
+    saved_aliases = set(saved_providers) if isinstance(saved_providers, dict) else set()
+    # 已保存草稿里的同名私有规则集是内置之前上传的（例如 game-download），由内置版本接替：
+    # 自动移除并提示，不能让旧草稿从此无法保存。新上传的同名规则集仍然拒绝。
+    # 只有内置规则源会生成同名内置规则集；“无基础规则”模式下旧的同名私有规则集照常保留。
+    raw_rule_type = source.get("selected_rule_type") or DEFAULT_RULE_TYPE
+    uses_builtin = (
+        isinstance(raw_rule_type, str)
+        and LEGACY_RULE_TYPES.get(raw_rule_type.strip(), raw_rule_type.strip()) == DEFAULT_RULE_TYPE
+    )
+    for provider in custom_rule_providers.values():
         if not isinstance(provider, dict):
             raise HTTPException(status_code=400, detail="custom_rule_providers 的每项必须是对象")
-        if alias in reserved_names:
+    legacy_aliases = {alias for alias in custom_rule_providers if alias in reserved_names and alias in saved_aliases}
+    superseded_aliases = sorted(legacy_aliases) if uses_builtin else []
+    custom_rule_providers = {
+        alias: provider for alias, provider in custom_rule_providers.items() if alias not in superseded_aliases
+    }
+    for alias, provider in custom_rule_providers.items():
+        if alias in reserved_names and alias not in legacy_aliases:
             raise HTTPException(status_code=400, detail=f"规则集别名 {alias} 与内置规则集重名，请换一个名字")
         target = provider.get("target")
         if target is not None and (not isinstance(target, str) or not target.strip() or "," in target):
@@ -177,6 +193,9 @@ def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict
         "warnings": [
             f"节点规范化：{warning}"
             for warning in proxy_warnings
+        ] + [
+            f"私有规则集 {alias} 已由同名内置规则集接替，已从草稿移除"
+            for alias in superseded_aliases
         ],
         "errors": [
             f"节点规范化：{error}"

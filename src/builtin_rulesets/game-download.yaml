@@ -1,0 +1,80 @@
+# 游戏下载直连名单（内置规则集 game-download，behavior: domain，默认目标 DIRECT）
+#
+# 维护规则：
+# - 只写厂商专用主机名或厂商专用子域；禁止整段放行公共 CDN 后缀
+#   （+.gcdn.co、+.fastly.net、+.akamai.net、+.akamaized.net、+.akamaihd.net、
+#   +.cloudfront.net、+.edgesuite.net、+.llnwd.net 等），否则会把大量海外网站带成直连。
+# - 每条注明平台与依据；查不到公开依据、只是同类推断的条目标“待核实”。
+# - 只做分流，不做 DNS 映射或 Hosts 改写：国内 CDN（*.xboxlive.cn）只接受 .cn 主机名，
+#   把 .com 下载域名解析到 .cn 的 IP 会返回 403。
+# - 改动后文件会随镜像发布，客户端按 interval（86400 秒）拉取新版本。
+#
+# 依据缩写：
+#   [MS]     https://learn.microsoft.com/en-us/windows/deployment/do/delivery-optimization-endpoints
+#   [LC-x]   https://github.com/uklans/cache-domains 中的 x.txt（LAN cache 社区名单，非厂商官方）
+#   [DW]     DustinWin/ruleset_geodata 的 games-cn / microsoft-cn 已收录
+#   [实测]   2026-11-15 OpenWrt（OpenClash）抓到的 Xbox 实际下载连接
+payload:
+  # ---------- Xbox / Microsoft Store ----------
+  - 'assets1.xboxlive.com'              # Xbox 下载 [LC-xboxlive][实测]
+  - 'assets2.xboxlive.com'              # Xbox 下载 [LC-xboxlive]
+  - 'd1.xboxlive.com'                   # Xbox 下载 [LC-xboxlive]
+  - 'd2.xboxlive.com'                   # Xbox 下载，待核实（d1 的同类主机）
+  - 'dlassets.xboxlive.com'             # Xbox 下载，待核实
+  - 'dlassets2.xboxlive.com'            # Xbox 下载，待核实
+  - 'xbox-mbr.xboxlive.com'             # Xbox 下载 [LC-xboxlive]
+  - 'xvcf1.xboxlive.com'                # Xbox 下载 [LC-xboxlive]
+  - 'xvcf2.xboxlive.com'                # Xbox 下载 [LC-xboxlive]
+  - 'assets1.xboxlive.com.nsatc.net'    # Xbox 下载 [LC-xboxlive]
+  - '+.xboxlive.com.edgesuite.net'      # Xbox 下载（Akamai 上的厂商专用子域）[LC-xboxlive][实测]
+  - 'download.xbox.com'                 # Xbox 360 内容 [LC-xboxlive]
+  - 'download.xbox.com.edgesuite.net'   # Xbox 360 内容 [LC-xboxlive]
+  - '+.xboxlive.cn'                     # Xbox 国内 CDN [DW][实测：只接受 .cn 主机名]
+  - '+.xb.delivery.microsoft.com'       # Xbox 下载调度服务 [实测：5.xb.delivery.microsoft.com]
+  - '+.dl.delivery.mp.microsoft.com'    # 微软商店 / PC Game Pass / Windows 更新下载 [MS][DW]
+  - 'fg.microsoft.map.fastly.net'       # 微软在 Fastly 上的专用主机名 [实测]
+  # G-Core 分配给微软的客户编号主机名，编号以后可能变化。变化后按路由器上的实际下载连接补充新主机名，
+  # 不要改成 +.gcdn.co。
+  - 'cl-glcb907925.gcdn.co'             # Xbox 下载（G-Core）[实测：流量大头]
+
+  # ---------- PlayStation ----------
+  - '+.dl.playstation.net'              # PSN 下载子域（gs2.ww.prod / gst.prod / theia / vulcan 等）[LC-sony]
+  - '+.gs2.ww.prod.dl.playstation.net.edgesuite.net'  # PSN 下载（+. 同时匹配域名本身）[LC-sony]
+  - '+.gs2.sonycoment.loris-e.llnwd.net'              # PSN 下载（Limelight 上的厂商专用子域）[LC-sony]
+
+  # ---------- Nintendo ----------
+  - '+.hac.lp1.d4c.nintendo.net'        # Switch 下载 [LC-nintendo]
+  - '+.hac.lp1.eshop.nintendo.net'      # Switch 下载 [LC-nintendo]
+  - '+.hac.p01.d4c.nintendo.net'        # Switch 2 下载 [LC-nintendo]
+  - '+.hac.p01.eshop.nintendo.net'      # Switch 2 下载 [LC-nintendo]
+
+  # ---------- Steam ----------
+  - '+.steamcontent.com'                # Steam 内容服务器 [LC-steam：lancache.steamcontent.com][DW：games-cn]
+
+  # ---------- Epic Games ----------
+  - 'download.epicgames.com'            # Epic 下载 [LC-epicgames]
+  - 'download2.epicgames.com'           # Epic 下载 [LC-epicgames]
+  - 'download3.epicgames.com'           # Epic 下载 [LC-epicgames]
+  - 'download4.epicgames.com'           # Epic 下载 [LC-epicgames]
+  - 'fastly-download.epicgames.com'     # Epic 下载 [LC-epicgames]
+  - 'cloudflare.epicgamescdn.com'       # Epic 下载 [LC-epicgames]
+  - 'egs-cloudfront-chunks.epicgamescdn.com'  # Epic 下载 [LC-epicgames]
+  - 'epicgames-download1.akamaized.net' # Epic 下载（完整主机名）[LC-epicgames]
+  - 'egdownload.fastly-edge.com'        # Epic 下载（完整主机名）[LC-epicgames]
+
+  # ---------- Battle.net ----------
+  - '+.cdn.blizzard.com'                # 暴雪下载 [LC-blizzard]
+  - 'dist.blizzard.com'                 # 暴雪下载 [LC-blizzard]
+  - 'dist.blizzard.com.edgesuite.net'   # 暴雪下载 [LC-blizzard]
+  - 'level3.blizzard.com'               # 暴雪下载 [LC-blizzard]
+  - 'blzddist1-a.akamaihd.net'          # 暴雪下载（完整主机名）[LC-blizzard]
+  - 'blzddist2-a.akamaihd.net'          # 暴雪下载（完整主机名）[LC-blizzard]
+  - 'blzddist3-a.akamaihd.net'          # 暴雪下载（完整主机名）[LC-blizzard]
+  - 'blizzard.vo.llnwd.net'             # 暴雪下载（完整主机名）[LC-blizzard]
+
+  # ---------- EA ----------
+  - 'lvlt.cdn.ea.com'                   # EA 下载 [LC-origin]
+  - 'origin-a.akamaihd.net'             # EA 下载（完整主机名）[LC-origin]
+
+  # ---------- Ubisoft ----------
+  - '+.cdn.ubi.com'                     # 育碧下载 [LC-uplay]
