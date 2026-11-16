@@ -59,7 +59,7 @@ jobs:
         env:
           PYTHONPATH: src
           MIHOMO_VALIDATE_ENABLED: "false"
-          RULESET_CACHE_ENABLED: "false"
+          # 与 docker-publish.yml 保持一致：部分测试依赖默认开启的服务端规则集缓存。
           RULESET_DIR: ${{ runner.temp }}/ruleset-unit
         run: |
           pip install -r src/requirements.txt
