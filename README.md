@@ -254,7 +254,7 @@ Streamlit 回滚后端不需要额外的公网 location。确认它只绑定本�
 
 ## mihomo 内核校验
 
-Docker 镜像内置 `mihomo v1.19.33`。点击“生成并检查配置文件”时，系统会先生成 YAML，再执行真实 mihomo 配置测试；只有测试通过才会写入数据库并对外发布订阅。Dockerfile 对 AMD64 和 ARM64 官方发布包分别执行固定 SHA256 校验。
+Docker 镜像内置 mihomo，版本以 `Dockerfile` 中的 `ARG MIHOMO_VERSION` 为准（会自动更新，见下文）。点击“生成并检查配置文件”时，系统会先生成 YAML，再执行真实 mihomo 配置测试；只有测试通过才会写入数据库并对外发布订阅。Dockerfile 对 AMD64 和 ARM64 官方发布包分别执行固定 SHA256 校验。
 
 本地开发如果暂时没有安装 mihomo，可以显式关闭内核校验：
 
@@ -263,6 +263,20 @@ MIHOMO_VALIDATE_ENABLED=false streamlit run src/web_app.py
 ```
 
 生产环境不建议关闭该选项，否则 OpenClash 只能在导入后才暴露配置错误。
+
+### 内核自动更新
+
+分两层，第二层只在服务器上配置了 cron 时生效：
+
+1. GitHub Actions 的 [`mihomo-update.yml`](.github/workflows/mihomo-update.yml) 每天北京时间 02:17 检查 MetaCubeX/mihomo 正式版。只升级同一主版本、发布已满 24 小时的版本；自行下载 amd64 与 arm64 资产计算 sha256，并与 GitHub 公布的 digest 核对。随后构建镜像、用新内核校验样例订阅、跑单元测试，全部通过才把 `Dockerfile` 的改动提交到 `main`，并触发镜像发布。主版本号变化（例如 v2）不会自动升级。
+2. 服务器每天运行 [`deploy/oracle-1/auto-update-mihomo.sh`](deploy/oracle-1/auto-update-mihomo.sh)。只有 `origin/main` 新增的提交仅改了 `Dockerfile` 里的 `MIHOMO_*` 参数时才自动部署；`main` 上有其他未部署的代码，或服务器源码有本地改动时，一律跳过并写日志，需要人工部署。部署顺序：打回滚镜像（保留最近 5 份）→ 构建 → 用新内核只读校验全部已发布订阅 → 切换容器 → 等待健康检查。任一步失败都会恢复旧镜像和旧源码。
+
+```bash
+# 服务器 crontab（北京时间每天 04:30）
+30 4 * * * /opt/clash-config-gen/deploy/oracle-1/auto-update-mihomo.sh >> /var/log/clash-config-gen-mihomo-update.log 2>&1
+# 只检查不部署
+DRY_RUN=1 /opt/clash-config-gen/deploy/oracle-1/auto-update-mihomo.sh
+```
 
 新账号在首次发布有效节点前，订阅接口返回 HTTP 409。导入、手动保存和发布配置都会拒绝大小写不敏感的 `type: masque` 节点。
 

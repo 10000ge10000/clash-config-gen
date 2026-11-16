@@ -1,0 +1,81 @@
+name: mihomo 内核自动更新
+
+# 每天检查 MetaCubeX/mihomo 正式版。有新版本时：核对 sha256 → 改 Dockerfile → 构建镜像并用新内核
+# 校验样例订阅 → 跑单元测试 → 提交到 main → 触发镜像发布。
+# 服务器上的 deploy/oracle-1/auto-update-mihomo.sh 只会自动部署这类“只改 Dockerfile 中 mihomo 参数”的提交。
+on:
+  schedule:
+    - cron: "17 18 * * *" # UTC 18:17，即北京时间 02:17
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: mihomo-update
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: src/requirements.txt
+
+      - name: 检查新版本并更新 Dockerfile
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/update_mihomo.py --write --min-age-hours 24
+
+      - name: 构建镜像（Dockerfile 内会校验 sha256 并执行 mihomo -v）
+        if: steps.bump.outputs.changed == 'true'
+        run: docker build -t clash-config-gen-mihomo-check .
+
+      - name: 用新内核校验样例订阅
+        if: steps.bump.outputs.changed == 'true'
+        run: |
+          docker run --rm -i --entrypoint python -e MIHOMO_HOME=/tmp/mihomo-home clash-config-gen-mihomo-check - <<'PY'
+          import sys
+          from config_builder import build_config, build_yaml
+          from mihomo_validator import validate_with_mihomo
+
+          proxy = {"name": "sample", "type": "ss", "server": "127.0.0.1", "port": 8388,
+                   "cipher": "aes-128-gcm", "password": "password"}
+          result = validate_with_mihomo(build_yaml(build_config([proxy], {})), timeout=120)
+          print("mihomo 校验:", result.status, str(result.message)[-500:])
+          sys.exit(0 if result.status == "passed" else 1)
+          PY
+
+      - name: 单元测试
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          PYTHONPATH: src
+          MIHOMO_VALIDATE_ENABLED: "false"
+          RULESET_CACHE_ENABLED: "false"
+          RULESET_DIR: ${{ runner.temp }}/ruleset-unit
+        run: |
+          pip install -r src/requirements.txt
+          python -m unittest discover -s tests
+
+      - name: 提交并触发镜像发布
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          PREVIOUS: ${{ steps.bump.outputs.previous }}
+        run: |
+          git config user.name "10000ge10000"
+          git config user.email "huipengbotr@gmail.com"
+          git add Dockerfile
+          git commit -m "chore: 升级 mihomo 内核 ${PREVIOUS} -> ${VERSION}"
+          git push origin HEAD:main
+          # GITHUB_TOKEN 推送不会触发其他工作流，这里显式触发镜像发布。
+          gh workflow run docker-publish.yml --ref main
