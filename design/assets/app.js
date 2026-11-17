@@ -2494,8 +2494,12 @@
       node_name: value.name || "",
       node_server: value.server || "",
       node_port: value.port || 443,
-      node_udp: value.udp !== false,
-      node_password: value.password || ""
+      // mihomo 中 udp 缺失即关闭；按实际值回显，避免打开再保存就悄悄开启 UDP。
+      node_udp: value.udp === true,
+      node_password: value.password || "",
+      // 所有协议共用的链式代理字段：节点已有 dialer-proxy 时必须回显为开启，否则编辑时看不到。
+      use_dialer_proxy: Boolean(String(value["dialer-proxy"] || "").trim()),
+      dialer_proxy_name: String(value["dialer-proxy"] || "")
     };
     var type = String(value.type || "").toLowerCase();
     if (type === "ss" || type === "vless" || type === "vmess") {
@@ -2503,7 +2507,8 @@
       var brutal = isObject(smux["brutal-opts"]) ? smux["brutal-opts"] : {};
       Object.assign(fields, {
         enable_smux: isObject(value.smux),
-        smux_enabled: smux.enabled !== false,
+        // 已有 smux 但没写 enabled 时 mihomo 视为关闭；没有 smux 时保持开启默认，方便勾选启用。
+        smux_enabled: isObject(value.smux) ? smux.enabled === true : true,
         smux_protocol: smux.protocol || "h2mux",
         smux_max_connections: smux["max-connections"] || 4,
         smux_brutal_enabled: Boolean(brutal.enabled),
@@ -2535,7 +2540,8 @@
       vless_tfo: Boolean(value.tfo),
       vless_fp: value["client-fingerprint"] || "chrome",
       vless_ip_version: value["ip-version"] || "默认",
-      vless_ws_path: ws.path || "/vless",
+      // 已有 ws-opts 但没写 path 时实际是 "/"，不能回显成新建默认的 "/vless"。
+      vless_ws_path: ws.path || (isObject(value["ws-opts"]) ? "/" : "/vless"),
       vless_ws_host: ws.headers && ws.headers.Host || "",
       vless_h2_path: h2.path || "/",
       vless_h2_host: Array.isArray(h2.host) ? h2.host[0] : (h2.host || ""),
@@ -2583,7 +2589,8 @@
       anytls_ip_version: value["ip-version"] || "默认",
       anytls_idle_session_check_interval: value["idle-session-check-interval"] || 30,
       anytls_idle_session_timeout: value["idle-session-timeout"] || 180,
-      anytls_min_idle_session: value["min-idle-session"] || 2,
+      // 0 是合法值，不能用 || 兜底。
+      anytls_min_idle_session: value["min-idle-session"] === undefined || value["min-idle-session"] === null ? 2 : value["min-idle-session"],
       anytls_ech_enabled: Boolean(value["ech-opts"] && value["ech-opts"].enable),
       anytls_ech_config: value["ech-opts"] && value["ech-opts"].config || "",
       anytls_ech_query_server_name: value["ech-opts"] && value["ech-opts"]["query-server-name"] || ""
@@ -2598,9 +2605,11 @@
       tuic_udp_relay_mode: value["udp-relay-mode"] || "native",
       tuic_heartbeat_interval: value["heartbeat-interval"] || 10000,
       tuic_close_sni: Boolean(value["disable-sni"]),
-      tuic_reduce_rtt: value["reduce-rtt"] !== false,
-      tuic_skip_cert_verify: value["skip-cert-verify"] !== false,
-      tuic_fast_open: value["fast-open"] !== false,
+      // 已有节点按实际值回显：键缺失在 mihomo 中即为关闭，不能套用新建节点的默认开启，
+      // 否则只是打开再保存就会悄悄写入 skip-cert-verify: true 等。
+      tuic_reduce_rtt: Boolean(value["reduce-rtt"]),
+      tuic_skip_cert_verify: Boolean(value["skip-cert-verify"]),
+      tuic_fast_open: Boolean(value["fast-open"]),
       tuic_ip_version: value["ip-version"] || "默认"
     });
     if (type === "hysteria2") Object.assign(fields, {
@@ -2611,7 +2620,7 @@
       // 节点没写带宽时留空，保存时不能凭空写入默认值，否则客户端会被限速
       hy2_up_mbps: Number(String(value.up || "").split(" ")[0]) || "",
       hy2_down_mbps: Number(String(value.down || "").split(" ")[0]) || "",
-      hy2_skip_cert: value["skip-cert-verify"] !== false,
+      hy2_skip_cert: Boolean(value["skip-cert-verify"]),
       hy2_alpn: Array.isArray(value.alpn) ? value.alpn.join(",") : (value.alpn || "h3"),
       enable_port_hopping: Boolean(value.ports),
       port_hopping_range: value.ports || "",
@@ -2927,10 +2936,69 @@
     return result;
   }
 
+  // 表单负责、但只在开启/非空时才由 /api/node/build 写出的可选键：
+  // 表单提交了对应控件而构建结果里没有该键，表示用户清空或关闭了它，合并时必须删除原值。
+  var FORM_OPTIONAL_KEYS = {
+    "dialer-proxy": ["use_dialer_proxy"],
+    "ip-version": ["ss_ip_version", "vless_ip_version", "ip_version", "trojan_ip_version", "anytls_ip_version", "tuic_ip_version", "hy2_ip_version"],
+    "sni": ["hy2_sni", "anytls_sni", "tuic_sni"],
+    "obfs": ["hy2_obfs_type"],
+    "obfs-password": ["hy2_obfs_type"],
+    "ports": ["enable_port_hopping"],
+    "client-fingerprint": ["hy2_fingerprint"],
+    "ip": ["tuic_server_ip"],
+    "servername": ["vless_servername"],
+    "flow": ["vless_flow"],
+    "packet-encoding": ["vless_packet_encoding"],
+    "protocol-param": ["ssr_protocol_param"],
+    "obfs-param": ["ssr_obfs_param"],
+    "alpn": ["anytls_alpn", "vless_alpn"]
+  };
+  // 传输容器内的可选子键（路径）：容器仍在但子键缺失，表示用户清空了对应输入框。
+  // ws 只删 headers.Host，保留订阅里可能带的其他请求头。
+  var FORM_OPTIONAL_NESTED = [
+    [["ws-opts", "headers", "Host"], ["ws_host", "vless_ws_host"]],
+    [["h2-opts", "host"], ["h2_host", "vless_h2_host"]],
+    [["xhttp-opts", "host"], ["vless_xhttp_host"]]
+  ];
+  var IMPORT_METADATA_KEYS = ["_source_id", "_source_name", "_origin_name"];
+
+  function formHasAny(formFields, keys) {
+    return keys.some(function (key) { return Object.prototype.hasOwnProperty.call(formFields, key); });
+  }
+
   function mergeEditedNode(original, parsed, formFields) {
     var source = original || {};
     var next = parsed || {};
+    if (!formFields) {
+      // 原始 YAML 展示的是完整节点（仅去掉导入来源元数据），保存时以 YAML 内容为准，
+      // 用户删掉的行才能真正删除；导入来源元数据从原节点保留。
+      var replaced = clone(next) || {};
+      IMPORT_METADATA_KEYS.forEach(function (key) {
+        if (Object.prototype.hasOwnProperty.call(source, key) && !Object.prototype.hasOwnProperty.call(replaced, key)) {
+          replaced[key] = clone(source[key]);
+        }
+      });
+      return replaced;
+    }
     var merged = deepMergeNodeFields(source, next);
+    Object.keys(FORM_OPTIONAL_KEYS).forEach(function (key) {
+      if (formHasAny(formFields, FORM_OPTIONAL_KEYS[key]) && !Object.prototype.hasOwnProperty.call(next, key)) delete merged[key];
+    });
+    FORM_OPTIONAL_NESTED.forEach(function (item) {
+      var path = item[0];
+      if (!formHasAny(formFields, item[1]) || !isObject(next[path[0]])) return;
+      var built = next, target = merged;
+      for (var depth = 0; depth < path.length - 1; depth += 1) {
+        built = isObject(built) ? built[path[depth]] : undefined;
+        target = isObject(target) ? target[path[depth]] : undefined;
+      }
+      var leaf = path[path.length - 1];
+      if (!isObject(target) || (isObject(built) && Object.prototype.hasOwnProperty.call(built, leaf))) return;
+      delete target[leaf];
+      // headers 只剩空对象时一并去掉。
+      if (path.length > 2 && !Object.keys(target).length) delete merged[path[0]][path[1]];
+    });
     var changedType = String(source.type || "") !== String(next.type || "");
     var changedNetwork = String(source.network || "") !== String(next.network || "");
     if (changedType || changedNetwork) {

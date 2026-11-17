@@ -2083,6 +2083,16 @@ test('V2 节点改名同步链式代理：上游改名后下游 dialer-proxy 跟
   await waitForSaved(page);
   expect(await state(page, () => window.v2State.config.proxies.find((node) => node.name === 'Relink-Down')['dialer-proxy'])).toBe('Relink-Up-New');
 
+  // 编辑已有链式代理节点：开关与上游必须回显；取消勾选后保存应删除 dialer-proxy。
+  await card('Relink-Down').getByRole('button', { name: '编辑' }).click();
+  await expect(field('use_dialer_proxy')).toBeChecked();
+  await expect(field('dialer_proxy_name')).toHaveValue('Relink-Up-New');
+  await field('use_dialer_proxy').uncheck();
+  await page.locator('#saveNodeBtn').click();
+  await expect(page.locator('#nodeFormPanel')).toBeHidden({ timeout: 15_000 });
+  await waitForSaved(page);
+  expect(await state(page, () => 'dialer-proxy' in window.v2State.config.proxies.find((node) => node.name === 'Relink-Down'))).toBe(false);
+
   // 清理，避免影响共用管理员账号的其他用例。
   for (const name of ['Relink-Down', 'Relink-Up-New']) {
     page.once('dialog', (dialog) => dialog.accept());

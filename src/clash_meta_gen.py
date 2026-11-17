@@ -204,7 +204,8 @@ def plan_dual_protocol_groups(all_proxies, priority="udp"):
     返回 (vps_groups, auto_members, choice_members)：
     - vps_groups：[(组名, 按优先协议排好序的节点名)]；
     - auto_members：Auto - UrlTest 的成员，即各 VPS 组加上未配对的节点；
-    - choice_members：手动选择组的成员，在 auto_members 后追加已配对的原始节点，便于强制指定协议。
+    - choice_members：Proxy 组的成员，在 auto_members 后追加已配对的原始节点，便于强制指定协议；
+      其余应用分组只用 auto_members。
     """
     priority = priority if priority in DUAL_PROTOCOL_PRIORITIES else "udp"
     by_server = {}
@@ -284,17 +285,21 @@ def generate_proxy_groups(
     groups = []
     vps_groups = []
     auto_proxies = all_proxies
+    proxy_choices = all_proxies
     if dual_protocol_priority:
         vps_groups, auto_members, choice_members = plan_dual_protocol_groups(all_proxies, dual_protocol_priority)
         auto_proxies = [{"name": name} for name in auto_members]
-        all_proxies = [{"name": name} for name in choice_members]
+        # 只有 Proxy 保留已配对的原始节点，便于强制指定协议；
+        # 其余应用/流媒体分组只列合并后的成员（VPS 回落组 + 未配对节点），与 Auto 一致。
+        proxy_choices = [{"name": name} for name in choice_members]
+        all_proxies = auto_proxies
 
     # 1. 自动测速
     groups.append(create_group("Auto - UrlTest", "url-test", auto_proxies,
                                url=url_test_url, interval=url_test_interval, tolerance=url_test_tolerance))
     
     # 2. 手动选择
-    groups.append(create_group("Proxy", "select", all_proxies, 
+    groups.append(create_group("Proxy", "select", proxy_choices,
                                extra_proxies=["Auto - UrlTest", "DIRECT"]))
     
     # 3. 基础流量规则

@@ -1193,9 +1193,18 @@ class DualProtocolFallbackTest(unittest.TestCase):
              "Ali-1/HK-HY2", "Ali-1/HK-AnyTLS", "Dedi-TUIC", "Dedi-VLESS"],
             groups["Proxy"]["proxies"],
         )
-        # 应用分组同样能选 VPS 组和单个节点。
-        self.assertIn("Ali-1/HK", groups["Netflix"]["proxies"])
-        self.assertIn("Ali-1/HK-AnyTLS", groups["Netflix"]["proxies"])
+        # 除 Proxy 外，所有列出节点的分组只列合并后的成员（与 Auto 一致），不出现已配对的原始节点。
+        auto_members = groups["Auto - UrlTest"]["proxies"]
+        paired = {"Ali-1/HK-HY2", "Ali-1/HK-AnyTLS", "Dedi-TUIC", "Dedi-VLESS"}
+        checked = []
+        for name, group in groups.items():
+            if name == "Proxy" or group["type"] != "select" or "Ali-1/HK" not in group["proxies"]:
+                continue
+            checked.append(name)
+            members = [item for item in group["proxies"] if item in set(auto_members) | paired]
+            self.assertEqual(auto_members, members, name)
+        for name in ["Netflix", "AI Suite", "Microsoft", "Youtube", "Global TV", "Asian TV", "Game"]:
+            self.assertIn(name, checked)
         # 既有策略组顺序不变，回落组追加在最后。
         flat_names = [group["name"] for group in self.build()["proxy-groups"]]
         self.assertEqual(flat_names, [group["name"] for group in config["proxy-groups"]][: len(flat_names)])
