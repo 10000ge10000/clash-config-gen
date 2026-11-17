@@ -1168,6 +1168,8 @@ class DualProtocolFallbackTest(unittest.TestCase):
     def test_disabled_keeps_flat_groups(self):
         config = self.build()
         groups = self.groups(config)
+        # 普通模式下常用分组紧跟 Proxy。
+        self.assertEqual(["Auto - UrlTest", "Proxy", "AI Suite", "Global TV", "Domestic"], list(groups)[:5])
         self.assertEqual([p["name"] for p in self.PROXIES], groups["Auto - UrlTest"]["proxies"])
         self.assertFalse(any(group["type"] == "fallback" for group in config["proxy-groups"]))
 
@@ -1200,7 +1202,8 @@ class DualProtocolFallbackTest(unittest.TestCase):
         self.assertNotIn("hidden", single)
         self.assertEqual(["Ali-1/HK-HY2", "Ali-1/HK-AnyTLS", "Dedi-TUIC", "Dedi-VLESS"], single["proxies"])
         names = [group["name"] for group in config["proxy-groups"]]
-        self.assertEqual(names.index("Proxy") + 1, names.index("单协议节点"))
+        # 常用分组紧跟在「单协议节点」之后。
+        self.assertEqual(["Auto - UrlTest", "Proxy", "单协议节点", "AI Suite", "Global TV", "Domestic"], names[:6])
         # 所有列出节点的分组都只列合并后的成员，外加「单协议节点」入口，不平铺已配对的原始节点。
         auto_members = groups["Auto - UrlTest"]["proxies"]
         self.assertNotIn("单协议节点", auto_members)

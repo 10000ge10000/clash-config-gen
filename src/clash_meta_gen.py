@@ -145,6 +145,8 @@ UDP_PROXY_TYPES = {"hysteria2", "hysteria", "tuic", "wireguard"}
 DUAL_PROTOCOL_PRIORITIES = ("udp", "tcp")
 # 双协议回落组的健康检查超时（毫秒）：UDP 被阻断时尽快判定失败。
 DUAL_PROTOCOL_TIMEOUT_MS = 2000
+# 常用分组，在策略组列表中紧跟 Proxy（及「单协议节点」）之后。
+FRONT_GROUP_NAMES = ("AI Suite", "Global TV")
 # 双协议模式下收纳已配对原始节点的子分组，Proxy 里只放这一个入口。
 SINGLE_PROTOCOL_GROUP_NAME = "单协议节点"
 # 生成器自带的策略组名，VPS 回落组不能与之重名。
@@ -375,6 +377,12 @@ def generate_proxy_groups(
     groups.append({"name": "CN Mainland TV", "type": "select", "proxies": ["DIRECT", "Proxy"]})
 
     # 6. 双协议回落：每台 VPS 一个 fallback 组，放在最后，不改变既有策略组的顺序。
+    # 常用分组前置：紧跟在 Proxy（双协议模式下是「单协议节点」）之后，面板里不用往下翻。
+    pinned = [group for name in FRONT_GROUP_NAMES for group in groups if group["name"] == name]
+    groups = [group for group in groups if group not in pinned]
+    anchor = next(i for i, group in enumerate(groups) if group["name"] == "Proxy") + (2 if single_group else 1)
+    groups[anchor:anchor] = pinned
+
     groups.extend(build_dual_protocol_fallback_groups(vps_groups, url_test_url, url_test_interval))
     return groups
 
