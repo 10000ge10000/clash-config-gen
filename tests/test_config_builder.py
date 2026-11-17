@@ -1182,32 +1182,41 @@ class DualProtocolFallbackTest(unittest.TestCase):
         self.assertFalse(fallback["lazy"])
         self.assertEqual(2000, fallback["timeout"])
         self.assertEqual(groups["Auto - UrlTest"]["url"], fallback["url"])
+        # 回落组在面板分组列表中隐藏，但仍是 Proxy 等分组的成员。
+        self.assertIs(True, fallback["hidden"])
         # 同一 server 只有 UDP 节点时不配对。
         self.assertNotIn("3.3.3.3", groups)
         self.assertEqual(
             ["Ali-1/HK", "Hw/SG", "Dedi", "Solo-HY2-a", "Solo-HY2-b"],
             groups["Auto - UrlTest"]["proxies"],
         )
+        # Proxy 每台 VPS 只出现一次，已配对的原始节点收进「单协议节点」子分组。
         self.assertEqual(
-            ["Auto - UrlTest", "DIRECT", "Ali-1/HK", "Hw/SG", "Dedi", "Solo-HY2-a", "Solo-HY2-b",
-             "Ali-1/HK-HY2", "Ali-1/HK-AnyTLS", "Dedi-TUIC", "Dedi-VLESS"],
+            ["Auto - UrlTest", "DIRECT", "Ali-1/HK", "Hw/SG", "Dedi", "Solo-HY2-a", "Solo-HY2-b", "单协议节点"],
             groups["Proxy"]["proxies"],
         )
-        # 除 Proxy 外，所有列出节点的分组只列合并后的成员（与 Auto 一致），不出现已配对的原始节点。
+        single = groups["单协议节点"]
+        self.assertEqual("select", single["type"])
+        self.assertNotIn("hidden", single)
+        self.assertEqual(["Ali-1/HK-HY2", "Ali-1/HK-AnyTLS", "Dedi-TUIC", "Dedi-VLESS"], single["proxies"])
+        names = [group["name"] for group in config["proxy-groups"]]
+        self.assertEqual(names.index("Proxy") + 1, names.index("单协议节点"))
+        # 所有列出节点的分组都只列合并后的成员，外加「单协议节点」入口，不平铺已配对的原始节点。
         auto_members = groups["Auto - UrlTest"]["proxies"]
-        paired = {"Ali-1/HK-HY2", "Ali-1/HK-AnyTLS", "Dedi-TUIC", "Dedi-VLESS"}
+        self.assertNotIn("单协议节点", auto_members)
+        paired = {"Ali-1/HK-HY2", "Ali-1/HK-AnyTLS", "Dedi-TUIC", "Dedi-VLESS", "单协议节点"}
         checked = []
         for name, group in groups.items():
             if name == "Proxy" or group["type"] != "select" or "Ali-1/HK" not in group["proxies"]:
                 continue
             checked.append(name)
             members = [item for item in group["proxies"] if item in set(auto_members) | paired]
-            self.assertEqual(auto_members, members, name)
+            self.assertEqual(auto_members + ["单协议节点"], members, name)
         for name in ["Netflix", "AI Suite", "Microsoft", "Youtube", "Global TV", "Asian TV", "Game"]:
             self.assertIn(name, checked)
-        # 既有策略组顺序不变，回落组追加在最后。
+        # 既有策略组顺序不变：只在 Proxy 后插入子分组，回落组追加在最后。
         flat_names = [group["name"] for group in self.build()["proxy-groups"]]
-        self.assertEqual(flat_names, [group["name"] for group in config["proxy-groups"]][: len(flat_names)])
+        self.assertEqual(flat_names, [name for name in names if name != "单协议节点"][: len(flat_names)])
         errors, _warnings = validate_config(config)
         self.assertEqual([], errors)
 
@@ -1265,6 +1274,23 @@ class DualProtocolFallbackTest(unittest.TestCase):
         self.assertIn("HK 双协议 2", names)
         self.assertEqual([], validate_config(config)[0])
 
+    def test_single_protocol_group_name_avoids_node_names_and_is_skipped_without_pairs(self):
+        proxies = [
+            {"name": "单协议节点", "type": "anytls", "server": "9.9.9.9", "port": 443, "password": "p"},
+            {"name": "A-HY2", "type": "hysteria2", "server": "1.1.1.1", "port": 443, "password": "p"},
+            {"name": "A-AnyTLS", "type": "anytls", "server": "1.1.1.1", "port": 443, "password": "p"},
+        ]
+        groups = self.groups(build_config(proxies, {"dual_protocol_fallback": True}))
+        self.assertEqual(["A-HY2", "A-AnyTLS"], groups["单协议节点 2"]["proxies"])
+        self.assertEqual("单协议节点 2", groups["Proxy"]["proxies"][-1])
+        # 没有任何配对时不生成子分组，Proxy 与普通模式一致。
+        solo = [proxies[0], {"name": "B", "type": "hysteria2", "server": "2.2.2.2", "port": 443, "password": "p"}]
+        config = build_config(solo, {"dual_protocol_fallback": True})
+        self.assertEqual(
+            [group["name"] for group in build_config(solo, {})["proxy-groups"]],
+            [group["name"] for group in config["proxy-groups"]],
+        )
+
     def test_draft_normalizes_priority_case(self):
         from draft_service import _normalize_draft
 
@@ -1276,7 +1302,8 @@ class DualProtocolFallbackTest(unittest.TestCase):
     def test_minimal_profile_supports_dual_protocol(self):
         config = self.build(generation_profile="minimal", dual_protocol_fallback=True, dual_protocol_priority="tcp")
         groups = self.groups(config)
-        self.assertEqual(["Auto - UrlTest", "Proxy", "Ali-1/HK", "Dedi"], list(groups))
+        self.assertEqual(["Auto - UrlTest", "Proxy", "单协议节点", "Ali-1/HK", "Dedi"], list(groups))
+        self.assertEqual("单协议节点", groups["Proxy"]["proxies"][-1])
         self.assertEqual(["Ali-1/HK-AnyTLS", "Ali-1/HK-HY2"], groups["Ali-1/HK"]["proxies"])
 
     def test_draft_validates_dual_protocol_settings(self):

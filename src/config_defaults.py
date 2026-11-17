@@ -263,7 +263,7 @@ def build_global_config_schema() -> dict:
             help_=(
                 "同一 VPS（server 地址相同）上同时有 UDP 类（HY2、TUIC 等）和 TCP 类（AnyTLS、VLESS 等）节点时，"
                 "合成一个按 VPS 命名的 fallback 组：优先协议不可用时自动改用另一个，恢复后自动切回。"
-                "Auto - UrlTest 在这些 VPS 组之间测速；只有 Proxy 还能直接选单个节点（强制某个协议），其余应用分组只列合并后的 VPS 组和未配对节点。"
+                "Auto - UrlTest 在这些 VPS 组之间测速；Proxy 和应用分组只列合并后的 VPS 组和未配对节点；需要强制某个协议时，在分组里选「单协议节点」子分组再挑具体节点。"
                 "server 地址不同（例如一个写域名、一个写 IP）的节点不会配对。"
                 "回落组的名字会随节点名变化，关闭本模式后也会消失，自定义规则请指向 Proxy 等固定组，不要直接指向回落组。"
             ),

@@ -13,6 +13,7 @@ from clash_meta_gen import (
     DEFAULT_URL_TEST_URL,
     DUAL_PROTOCOL_PRIORITIES,
     build_dual_protocol_fallback_groups,
+    build_single_protocol_group,
     generate_proxy_groups,
     plan_dual_protocol_groups,
 )
@@ -568,8 +569,11 @@ def generate_minimal_proxy_groups(
     proxies = [proxy for proxy in proxies if isinstance(proxy, dict) and proxy.get("name")]
     auto_members = choice_members = [proxy["name"] for proxy in proxies]
     vps_groups: list = []
+    single_group = None
     if dual_protocol_priority:
-        vps_groups, auto_members, choice_members = plan_dual_protocol_groups(proxies, dual_protocol_priority)
+        vps_groups, auto_members, choice_members, single_group = plan_dual_protocol_groups(
+            proxies, dual_protocol_priority
+        )
     return [
         {
             "name": "Auto - UrlTest",
@@ -580,7 +584,7 @@ def generate_minimal_proxy_groups(
             "tolerance": url_test_tolerance,
         },
         {"name": "Proxy", "type": "select", "proxies": ["Auto - UrlTest", "DIRECT"] + choice_members},
-    ] + build_dual_protocol_fallback_groups(vps_groups, url_test_url, url_test_interval)
+    ] + build_single_protocol_group(single_group) + build_dual_protocol_fallback_groups(vps_groups, url_test_url, url_test_interval)
 
 
 def build_yaml(config: dict[str, Any]) -> str:

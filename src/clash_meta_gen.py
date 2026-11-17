@@ -145,6 +145,8 @@ UDP_PROXY_TYPES = {"hysteria2", "hysteria", "tuic", "wireguard"}
 DUAL_PROTOCOL_PRIORITIES = ("udp", "tcp")
 # 双协议回落组的健康检查超时（毫秒）：UDP 被阻断时尽快判定失败。
 DUAL_PROTOCOL_TIMEOUT_MS = 2000
+# 双协议模式下收纳已配对原始节点的子分组，Proxy 里只放这一个入口。
+SINGLE_PROTOCOL_GROUP_NAME = "单协议节点"
 # 生成器自带的策略组名，VPS 回落组不能与之重名。
 RESERVED_GROUP_NAMES = {
     "Auto - UrlTest", "Proxy", "Domestic", "Others", "Microsoft", "AI Suite", "Apple", "Apple TV", "Google",
@@ -201,11 +203,12 @@ def _server_key(proxy):
 def plan_dual_protocol_groups(all_proxies, priority="udp"):
     """双协议回落：同一 server 地址上同时有 UDP 类与 TCP 类节点时，合成一个 fallback 组。
 
-    返回 (vps_groups, auto_members, choice_members)：
+    返回 (vps_groups, auto_members, choice_members, single_group)：
     - vps_groups：[(组名, 按优先协议排好序的节点名)]；
     - auto_members：Auto - UrlTest 的成员，即各 VPS 组加上未配对的节点；
-    - choice_members：Proxy 组的成员，在 auto_members 后追加已配对的原始节点，便于强制指定协议；
-      其余应用分组只用 auto_members。
+    - choice_members：Proxy 与各应用分组的成员，在 auto_members 后追加一个「单协议节点」子分组入口；
+    - single_group：(子分组名, 已配对的原始节点名)，没有配对时为 None。
+      需要强制某个协议时，先在分组里选子分组，再在子分组里选具体节点，分组本身不再平铺重复节点。
     """
     priority = priority if priority in DUAL_PROTOCOL_PRIORITIES else "udp"
     by_server = {}
@@ -223,6 +226,12 @@ def plan_dual_protocol_groups(all_proxies, priority="udp"):
         if {_proxy_transport(proxy) for proxy in members} == {"udp", "tcp"}
     }
     taken = {str(proxy.get("name")) for proxy in all_proxies} | RESERVED_GROUP_NAMES
+    single_name = SINGLE_PROTOCOL_GROUP_NAME
+    index = 2
+    while single_name in taken:
+        single_name = f"{SINGLE_PROTOCOL_GROUP_NAME} {index}"
+        index += 1
+    taken.add(single_name)
     group_name_of = {}
     vps_groups = []
     for server in order:
@@ -255,7 +264,16 @@ def plan_dual_protocol_groups(all_proxies, priority="udp"):
             paired_nodes.append(str(proxy["name"]))
         else:
             auto_members.append(str(proxy["name"]))
-    return vps_groups, auto_members, auto_members + paired_nodes
+    if not paired_nodes:
+        return vps_groups, auto_members, list(auto_members), None
+    return vps_groups, auto_members, auto_members + [single_name], (single_name, paired_nodes)
+
+
+def build_single_protocol_group(single_group):
+    if not single_group:
+        return []
+    name, members = single_group
+    return [{"name": name, "type": "select", "proxies": list(members)}]
 
 
 def build_dual_protocol_fallback_groups(vps_groups, url_test_url, url_test_interval):
@@ -269,6 +287,8 @@ def build_dual_protocol_fallback_groups(vps_groups, url_test_url, url_test_inter
             "timeout": DUAL_PROTOCOL_TIMEOUT_MS,
             # 空闲时也要定时检查，UDP 被阻断时才能提前切到备用协议。
             "lazy": False,
+            # 回落组是自动切换的，面板分组列表里不必单独占一块；仍可在 Proxy 等分组中选中。
+            "hidden": True,
         }
         for name, members in vps_groups
     ]
@@ -286,13 +306,16 @@ def generate_proxy_groups(
     vps_groups = []
     auto_proxies = all_proxies
     proxy_choices = all_proxies
+    single_group = None
     if dual_protocol_priority:
-        vps_groups, auto_members, choice_members = plan_dual_protocol_groups(all_proxies, dual_protocol_priority)
+        vps_groups, auto_members, choice_members, single_group = plan_dual_protocol_groups(
+            all_proxies, dual_protocol_priority
+        )
         auto_proxies = [{"name": name} for name in auto_members]
-        # 只有 Proxy 保留已配对的原始节点，便于强制指定协议；
-        # 其余应用/流媒体分组只列合并后的成员（VPS 回落组 + 未配对节点），与 Auto 一致。
+        # Proxy 与各应用/流媒体分组都列合并后的成员（VPS 回落组 + 未配对节点），
+        # 再加一个「单协议节点」子分组入口，用于强制指定协议；Auto 只测速合并后的成员。
         proxy_choices = [{"name": name} for name in choice_members]
-        all_proxies = auto_proxies
+        all_proxies = proxy_choices
 
     # 1. 自动测速
     groups.append(create_group("Auto - UrlTest", "url-test", auto_proxies,
@@ -301,6 +324,7 @@ def generate_proxy_groups(
     # 2. 手动选择
     groups.append(create_group("Proxy", "select", proxy_choices,
                                extra_proxies=["Auto - UrlTest", "DIRECT"]))
+    groups.extend(build_single_protocol_group(single_group))
     
     # 3. 基础流量规则
     groups.append({"name": "Domestic", "type": "select", "proxies": ["DIRECT", "Proxy"]})
