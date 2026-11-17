@@ -140,16 +140,157 @@ def create_group(name, type_name, proxies_list, extra_proxies=None, url=None, in
     if tolerance and type_name == "url-test": group["tolerance"] = tolerance
     return group
 
+# 基于 QUIC/UDP 传输的协议；其余协议（AnyTLS、VLESS、Trojan、SS 等）按 TCP 处理。
+UDP_PROXY_TYPES = {"hysteria2", "hysteria", "tuic", "wireguard"}
+DUAL_PROTOCOL_PRIORITIES = ("udp", "tcp")
+# 双协议回落组的健康检查超时（毫秒）：UDP 被阻断时尽快判定失败。
+DUAL_PROTOCOL_TIMEOUT_MS = 2000
+# 生成器自带的策略组名，VPS 回落组不能与之重名。
+RESERVED_GROUP_NAMES = {
+    "Auto - UrlTest", "Proxy", "Domestic", "Others", "Microsoft", "AI Suite", "Apple", "Apple TV", "Google",
+    "Google FCM", "Scholar", "Bilibili", "Bahamut", "HBO Max", "Pornhub", "Netflix", "Disney Plus",
+    "Discovery Plus", "DAZN", "Spotify", "Game", "TikTok", "miHoYo", "Telegram", "Crypto", "Discord",
+    "Speedtest", "PayPal", "Youtube", "AdBlock", "Global TV", "Asian TV", "CN Mainland TV",
+    "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL",
+}
+
+
+def _proxy_transport(proxy):
+    return "udp" if str(proxy.get("type") or "").lower() in UDP_PROXY_TYPES else "tcp"
+
+
+# 节点名里的分隔符；右括号类只算断点、保留在组名里（【HK】HY2 → 【HK】）。
+_NAME_SEPARATORS = " -_|/·:：（(【[｜丨－—"
+_NAME_CLOSERS = "）)】]"
+
+
+def _is_cjk(char):
+    return "\u4e00" <= char <= "\u9fff" or "\u3040" <= char <= "\u30ff" or "\uac00" <= char <= "\ud7af"
+
+
+def _is_name_boundary(prev_char, next_char):
+    """prev_char 与 next_char 之间能否截断：遇到分隔符、右括号或中日韩文字与其他字符的交界。"""
+    if next_char is None or next_char in _NAME_SEPARATORS:
+        return True
+    return prev_char in _NAME_SEPARATORS or prev_char in _NAME_CLOSERS or _is_cjk(prev_char) != _is_cjk(next_char)
+
+
+def _vps_group_base_name(names, server):
+    """取同一 VPS 各节点名的公共前缀作为组名，例如 Ali-1/HK-HY2 与 Ali-1/HK-AnyTLS 得到 Ali-1/HK。
+
+    前缀只在断点处截断：Test-HY2 与 Test-HTTP 得到 Test 而不是 Test-H，香港HY2 与 香港AnyTLS 得到 香港。
+    """
+    prefix = os.path.commonprefix(names)
+    while prefix:
+        if len(prefix) == len(os.path.commonprefix(names)):
+            next_chars = [name[len(prefix)] if len(name) > len(prefix) else None for name in names]
+        else:
+            next_chars = [names[0][len(prefix)]]
+        if all(_is_name_boundary(prefix[-1], char) for char in next_chars):
+            break
+        prefix = prefix[:-1]
+    prefix = prefix.rstrip(_NAME_SEPARATORS)
+    return prefix if len(prefix) >= 2 else server
+
+
+def _server_key(proxy):
+    """配对用的 server：忽略大小写和 IPv6 方括号。"""
+    return str(proxy.get("server") or "").strip().strip("[]").lower()
+
+
+def plan_dual_protocol_groups(all_proxies, priority="udp"):
+    """双协议回落：同一 server 地址上同时有 UDP 类与 TCP 类节点时，合成一个 fallback 组。
+
+    返回 (vps_groups, auto_members, choice_members)：
+    - vps_groups：[(组名, 按优先协议排好序的节点名)]；
+    - auto_members：Auto - UrlTest 的成员，即各 VPS 组加上未配对的节点；
+    - choice_members：手动选择组的成员，在 auto_members 后追加已配对的原始节点，便于强制指定协议。
+    """
+    priority = priority if priority in DUAL_PROTOCOL_PRIORITIES else "udp"
+    by_server = {}
+    order = []
+    for proxy in all_proxies:
+        server = _server_key(proxy)
+        if not server:
+            continue
+        if server not in by_server:
+            by_server[server] = []
+            order.append(server)
+        by_server[server].append(proxy)
+    paired = {
+        server: members for server, members in by_server.items()
+        if {_proxy_transport(proxy) for proxy in members} == {"udp", "tcp"}
+    }
+    taken = {str(proxy.get("name")) for proxy in all_proxies} | RESERVED_GROUP_NAMES
+    group_name_of = {}
+    vps_groups = []
+    for server in order:
+        if server not in paired:
+            continue
+        members = paired[server]
+        names = [str(proxy["name"]) for proxy in members]
+        base = _vps_group_base_name(names, server)
+        name = base
+        if name in taken:
+            name = f"{base} 双协议"
+        index = 2
+        while name in taken:
+            name = f"{base} 双协议 {index}"
+            index += 1
+        taken.add(name)
+        group_name_of[server] = name
+        ordered = [p for p in members if _proxy_transport(p) == priority] + [
+            p for p in members if _proxy_transport(p) != priority
+        ]
+        vps_groups.append((name, [str(p["name"]) for p in ordered]))
+
+    auto_members = []
+    paired_nodes = []
+    for proxy in all_proxies:
+        server = _server_key(proxy)
+        if server in group_name_of:
+            if group_name_of[server] not in auto_members:
+                auto_members.append(group_name_of[server])
+            paired_nodes.append(str(proxy["name"]))
+        else:
+            auto_members.append(str(proxy["name"]))
+    return vps_groups, auto_members, auto_members + paired_nodes
+
+
+def build_dual_protocol_fallback_groups(vps_groups, url_test_url, url_test_interval):
+    return [
+        {
+            "name": name,
+            "type": "fallback",
+            "proxies": members,
+            "url": url_test_url,
+            "interval": url_test_interval,
+            "timeout": DUAL_PROTOCOL_TIMEOUT_MS,
+            # 空闲时也要定时检查，UDP 被阻断时才能提前切到备用协议。
+            "lazy": False,
+        }
+        for name, members in vps_groups
+    ]
+
+
 def generate_proxy_groups(
     all_proxies,
     url_test_url=DEFAULT_URL_TEST_URL,
     url_test_interval=DEFAULT_URL_TEST_INTERVAL,
     url_test_tolerance=DEFAULT_URL_TEST_TOLERANCE,
+    dual_protocol_priority=None,
 ):
+    """dual_protocol_priority 为 "udp"/"tcp" 时启用双协议回落模式，None 时保持原有平铺结构。"""
     groups = []
-    
+    vps_groups = []
+    auto_proxies = all_proxies
+    if dual_protocol_priority:
+        vps_groups, auto_members, choice_members = plan_dual_protocol_groups(all_proxies, dual_protocol_priority)
+        auto_proxies = [{"name": name} for name in auto_members]
+        all_proxies = [{"name": name} for name in choice_members]
+
     # 1. 自动测速
-    groups.append(create_group("Auto - UrlTest", "url-test", all_proxies, 
+    groups.append(create_group("Auto - UrlTest", "url-test", auto_proxies,
                                url=url_test_url, interval=url_test_interval, tolerance=url_test_tolerance))
     
     # 2. 手动选择
@@ -203,7 +344,9 @@ def generate_proxy_groups(
     groups.append(create_group("Global TV", "select", all_proxies, extra_proxies=["Proxy", "DIRECT"]))
     groups.append(create_group("Asian TV", "select", all_proxies, extra_proxies=["Proxy", "DIRECT"]))
     groups.append({"name": "CN Mainland TV", "type": "select", "proxies": ["DIRECT", "Proxy"]})
-    
+
+    # 6. 双协议回落：每台 VPS 一个 fallback 组，放在最后，不改变既有策略组的顺序。
+    groups.extend(build_dual_protocol_fallback_groups(vps_groups, url_test_url, url_test_interval))
     return groups
 
 # ==========================================

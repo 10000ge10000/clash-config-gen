@@ -85,6 +85,12 @@ def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict
     global_config = _merged_global_config(raw_global, saved.get("global_config"))
     # lhie1 规则源已下线，它的目标覆盖不再有意义。
     global_config.pop("lhie1_provider_targets", None)
+    if not isinstance(global_config.get("dual_protocol_fallback", False), bool):
+        raise HTTPException(status_code=400, detail="dual_protocol_fallback 必须是布尔值")
+    priority = global_config.get("dual_protocol_priority")
+    global_config["dual_protocol_priority"] = priority.strip().lower() if isinstance(priority, str) else "udp"
+    if global_config["dual_protocol_priority"] not in ("udp", "tcp"):
+        raise HTTPException(status_code=400, detail="dual_protocol_priority 只能是 udp 或 tcp")
     for override_key in ("dustinwin_provider_targets",):
         overrides = global_config.get(override_key)
         if overrides is None:

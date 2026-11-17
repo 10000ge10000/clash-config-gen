@@ -2228,16 +2228,18 @@
       var selectValue = value === undefined || value === null ? "" : String(value);
       // 编辑既有节点时，字段值可能不在后端枚举里（如订阅带来的旧 flow 值）。
       // 保留原值为首个选项，避免 select 回填为空导致保存时被误判缺字段。
-      if (selectValue !== "" && !optionValues.some(function (optionValue) { return String(optionValue) === selectValue; })) {
+      if (selectValue !== "" && !optionValues.some(function (optionValue) { return String(Array.isArray(optionValue) ? optionValue[0] : optionValue) === selectValue; })) {
         var currentOption = document.createElement("option");
         currentOption.value = selectValue;
         currentOption.textContent = selectValue + "（当前值）";
         control.appendChild(currentOption);
       }
+      // 选项可以是纯值，也可以是 [值, 显示文字]。
       optionValues.forEach(function (optionValue) {
         var option = document.createElement("option");
-        option.value = String(optionValue);
-        option.textContent = String(optionValue);
+        var pair = Array.isArray(optionValue);
+        option.value = String(pair ? optionValue[0] : optionValue);
+        option.textContent = String(pair ? optionValue[1] : optionValue);
         control.appendChild(option);
       });
       control.value = selectValue;
@@ -2299,6 +2301,7 @@
     { id: "basic", label: "基础与端口", keys: ["include_inbound_ports", "include_global_compat", "include_router_options", "enable_core_options", "port", "socks_port", "mixed_port", "allow_lan", "bind_address", "mode", "log_level", "ipv6_support"] },
     { id: "controller", label: "控制器", keys: ["include_controller", "external_controller", "secret", "external_ui", "external_ui_name", "external_ui_url"] },
     { id: "speed", label: "测速与性能", keys: ["find_process_mode", "url_test_url", "url_test_interval", "url_test_tolerance", "tcp_concurrent", "unified_delay", "geodata_mode", "geodata_loader", "keep_alive_interval", "keep_alive_idle"] },
+    { id: "fallback", label: "双协议回落", keys: ["dual_protocol_fallback", "dual_protocol_priority"] },
     { id: "tun", label: "TUN 与路由", keys: ["enable_tun", "tun_stack", "tun_device", "tun_auto_route", "tun_auto_detect_interface", "tun_dns_hijack", "tun_dns_hijack_value", "tun_endpoint_independent_nat", "tun_auto_redirect", "tun_strict_route", "redir_port", "tproxy_port", "interface_name"] },
     { id: "dns", label: "DNS", keys: ["enable_dns", "dns_listen", "dns_ipv6", "enhanced_mode", "fake_ip_range", "fake_ip_range6", "fake_ip_filter_mode", "dns_respect_rules", "direct_nameserver", "proxy_server_nameserver", "default_nameserver", "nameserver", "fallback", "nameserver_policy"] },
     { id: "sniffer", label: "嗅探", keys: ["enable_sniffer", "sniff_override_dest", "sniffer_parse_pure_ip", "sniffer_force_dns_mapping"] },

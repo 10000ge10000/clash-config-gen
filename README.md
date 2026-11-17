@@ -282,6 +282,17 @@ DRY_RUN=1 /opt/clash-config-gen/deploy/oracle-1/auto-update-mihomo.sh
 
 如果修改了 docker-compose.yml 中的端口映射（例如将 8000 映射到 8502），需要同步修改 Nginx 配置中的 `proxy_pass` 地址，并继续保持 `127.0.0.1` 绑定。
 
+## 双协议回落模式
+
+同一台 VPS 同时部署 UDP 类协议（Hysteria2、TUIC 等）和 TCP 类协议（AnyTLS、VLESS、Trojan 等）时，可以在“全局设置 → 双协议回落”中开启。开启后：
+
+- **配对规则**：`server` 地址相同、并且同时有 UDP 类和 TCP 类节点的，合成一个 `fallback` 组。组名取节点名的公共前缀，例如 `Ali-1/HK-HY2` 和 `Ali-1/HK-AnyTLS` 合成 `Ali-1/HK`；没有公共前缀时用 server 地址，和已有节点或策略组重名时加“双协议”后缀。server 比较时忽略大小写和 IPv6 方括号，但一个写域名、一个写 IP 的不会配对。
+- **优先协议**：可选“UDP 优先”或“TCP 优先”。两种都可用时用优先协议；它的健康检查失败（例如 UDP 被阻断）后，新连接改走另一种协议，恢复后自动切回。
+- **策略组结构**：`Auto - UrlTest` 在各 VPS 组和未配对节点之间测速；`Proxy` 和各应用分组既能选 VPS 组，也能直接选单个节点，强制使用某个协议。回落组追加在策略组列表最后，原有策略组的名字和顺序不变。
+- **切换时间**：回落组按“测速间隔”检查（默认 60 秒，超时 2 秒，空闲时也检查）。真实连接连续失败时 mihomo 也会提前触发检查。用真实 mihomo 实测，间隔设为 10 秒时，停掉 HY2 服务端约 10 秒后切到 TCP，恢复后约 26 秒切回。
+- **组名会变**：回落组的名字跟着节点名走，关闭本模式后也会消失。自定义规则请指向 `Proxy` 等固定组，不要直接指向回落组。
+- **限制**：已建立的连接不会迁移，会断开一次再走新协议。UDP 只是被限速、没有完全断开时，健康检查可能仍然通过，这时请在 `Proxy` 里手动选 TCP 节点。
+
 ## 分流规则与自动更新
 
 项目默认使用 [DustinWin/ruleset_geodata](https://github.com/DustinWin/ruleset_geodata) 的 `mihomo-ruleset` 规则集增强分流，并为 Google 保留独立策略组。例如：

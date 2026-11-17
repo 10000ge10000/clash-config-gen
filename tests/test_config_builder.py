@@ -1145,5 +1145,150 @@ class GameDownloadRulesetTest(unittest.TestCase):
         self.assertNotEqual(ruleset_updater.RULESET_CACHE_DIR, path.parent)
 
 
+class DualProtocolFallbackTest(unittest.TestCase):
+    """双协议回落：同一 VPS 的 UDP 与 TCP 节点合成 fallback 组，可选优先协议。"""
+
+    PROXIES = [
+        {"name": "Ali-1/HK-HY2", "type": "hysteria2", "server": "1.1.1.1", "port": 443, "password": "p"},
+        {"name": "Hw/SG", "type": "anytls", "server": "2.2.2.2", "port": 443, "password": "p"},
+        {"name": "Ali-1/HK-AnyTLS", "type": "anytls", "server": "1.1.1.1", "port": 8443, "password": "p"},
+        {"name": "Dedi-TUIC", "type": "tuic", "server": "Dedi.example.com", "port": 443, "uuid": "u", "password": "p"},
+        {"name": "Dedi-VLESS", "type": "vless", "server": "dedi.example.com", "port": 443, "uuid": "u"},
+        {"name": "Solo-HY2-a", "type": "hysteria2", "server": "3.3.3.3", "port": 443, "password": "p"},
+        {"name": "Solo-HY2-b", "type": "hysteria2", "server": "3.3.3.3", "port": 444, "password": "p"},
+    ]
+
+    def build(self, **global_config):
+        return build_config(self.PROXIES, global_config)
+
+    @staticmethod
+    def groups(config):
+        return {group["name"]: group for group in config["proxy-groups"]}
+
+    def test_disabled_keeps_flat_groups(self):
+        config = self.build()
+        groups = self.groups(config)
+        self.assertEqual([p["name"] for p in self.PROXIES], groups["Auto - UrlTest"]["proxies"])
+        self.assertFalse(any(group["type"] == "fallback" for group in config["proxy-groups"]))
+
+    def test_udp_first_pairs_by_server_and_orders_members(self):
+        config = self.build(dual_protocol_fallback=True, dual_protocol_priority="udp")
+        groups = self.groups(config)
+        self.assertEqual(["Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"], groups["Ali-1/HK"]["proxies"])
+        # server 比较不区分大小写；组名取节点名的公共前缀。
+        self.assertEqual(["Dedi-TUIC", "Dedi-VLESS"], groups["Dedi"]["proxies"])
+        fallback = groups["Ali-1/HK"]
+        self.assertEqual("fallback", fallback["type"])
+        self.assertFalse(fallback["lazy"])
+        self.assertEqual(2000, fallback["timeout"])
+        self.assertEqual(groups["Auto - UrlTest"]["url"], fallback["url"])
+        # 同一 server 只有 UDP 节点时不配对。
+        self.assertNotIn("3.3.3.3", groups)
+        self.assertEqual(
+            ["Ali-1/HK", "Hw/SG", "Dedi", "Solo-HY2-a", "Solo-HY2-b"],
+            groups["Auto - UrlTest"]["proxies"],
+        )
+        self.assertEqual(
+            ["Auto - UrlTest", "DIRECT", "Ali-1/HK", "Hw/SG", "Dedi", "Solo-HY2-a", "Solo-HY2-b",
+             "Ali-1/HK-HY2", "Ali-1/HK-AnyTLS", "Dedi-TUIC", "Dedi-VLESS"],
+            groups["Proxy"]["proxies"],
+        )
+        # 应用分组同样能选 VPS 组和单个节点。
+        self.assertIn("Ali-1/HK", groups["Netflix"]["proxies"])
+        self.assertIn("Ali-1/HK-AnyTLS", groups["Netflix"]["proxies"])
+        # 既有策略组顺序不变，回落组追加在最后。
+        flat_names = [group["name"] for group in self.build()["proxy-groups"]]
+        self.assertEqual(flat_names, [group["name"] for group in config["proxy-groups"]][: len(flat_names)])
+        errors, _warnings = validate_config(config)
+        self.assertEqual([], errors)
+
+    def test_tcp_first_reverses_member_order(self):
+        groups = self.groups(self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp"))
+        self.assertEqual(["Ali-1/HK-AnyTLS", "Ali-1/HK-HY2"], groups["Ali-1/HK"]["proxies"])
+        self.assertEqual(["Dedi-VLESS", "Dedi-TUIC"], groups["Dedi"]["proxies"])
+
+    def test_invalid_priority_falls_back_to_udp(self):
+        groups = self.groups(self.build(dual_protocol_fallback=True, dual_protocol_priority="weird"))
+        self.assertEqual(["Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"], groups["Ali-1/HK"]["proxies"])
+
+    def test_group_name_never_collides_with_nodes_or_builtin_groups(self):
+        proxies = [
+            {"name": "Netflix", "type": "hysteria2", "server": "9.9.9.9", "port": 443, "password": "p"},
+            {"name": "Netflix-AnyTLS", "type": "anytls", "server": "9.9.9.9", "port": 443, "password": "p"},
+            {"name": "Edge", "type": "hysteria2", "server": "8.8.8.8", "port": 443, "password": "p"},
+            {"name": "Edge AnyTLS", "type": "anytls", "server": "8.8.8.8", "port": 443, "password": "p"},
+            {"name": "Tokyo", "type": "hysteria2", "server": "7.7.7.7", "port": 443, "password": "p"},
+            {"name": "JP backup", "type": "anytls", "server": "7.7.7.7", "port": 443, "password": "p"},
+        ]
+        config = build_config(proxies, {"dual_protocol_fallback": True})
+        names = [group["name"] for group in config["proxy-groups"]]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn("Netflix 双协议", names)
+        self.assertIn("Edge 双协议", names)
+        # 节点名没有公共前缀时用 server 地址命名。
+        self.assertIn("7.7.7.7", names)
+        self.assertEqual([], validate_config(config)[0])
+
+    def test_group_name_cuts_shared_prefix_only_at_separators(self):
+        from clash_meta_gen import _vps_group_base_name
+
+        self.assertEqual("Test", _vps_group_base_name(["Test-HY2", "Test-HTTP"], "1.1.1.1"))
+        self.assertEqual("Ali-1/HK", _vps_group_base_name(["Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"], "1.1.1.1"))
+        self.assertEqual("Edge", _vps_group_base_name(["Edge", "Edge AnyTLS"], "1.1.1.1"))
+        self.assertEqual("1.1.1.1", _vps_group_base_name(["HY2", "HTTP"], "1.1.1.1"))
+        self.assertEqual("1.1.1.1", _vps_group_base_name(["Tokyo", "JP backup"], "1.1.1.1"))
+        self.assertEqual("香港", _vps_group_base_name(["香港HY2", "香港AnyTLS"], "1.1.1.1"))
+        self.assertEqual("【HK】", _vps_group_base_name(["【HK】HY2", "【HK】AnyTLS"], "1.1.1.1"))
+        self.assertEqual("日本", _vps_group_base_name(["日本｜HY2", "日本｜AnyTLS"], "1.1.1.1"))
+
+    def test_repeated_name_collisions_and_ipv6_brackets(self):
+        proxies = [
+            {"name": "HK 双协议", "type": "anytls", "server": "9.9.9.9", "port": 443, "password": "p"},
+            {"name": "HK", "type": "anytls", "server": "8.8.8.8", "port": 443, "password": "p"},
+            {"name": "HK-HY2", "type": "hysteria2", "server": "[2001:db8::1]", "port": 443, "password": "p"},
+            {"name": "HK-AnyTLS", "type": "anytls", "server": "2001:DB8::1", "port": 443, "password": "p"},
+            {"name": "HK-B-HY2", "type": "hysteria2", "server": "1.1.1.1", "port": 443, "password": "p"},
+            {"name": "HK-B-AnyTLS", "type": "anytls", "server": "1.1.1.1", "port": 443, "password": "p"},
+        ]
+        config = build_config(proxies, {"dual_protocol_fallback": True})
+        names = [group["name"] for group in config["proxy-groups"]]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn("HK 双协议 2", names)
+        self.assertEqual([], validate_config(config)[0])
+
+    def test_draft_normalizes_priority_case(self):
+        from draft_service import _normalize_draft
+
+        draft, _meta = _normalize_draft({"proxies": [], "global_config": {"dual_protocol_priority": " TCP "}})
+        self.assertEqual("tcp", draft["global_config"]["dual_protocol_priority"])
+        draft, _meta = _normalize_draft({"proxies": [], "global_config": {"dual_protocol_priority": None}})
+        self.assertEqual("udp", draft["global_config"]["dual_protocol_priority"])
+
+    def test_minimal_profile_supports_dual_protocol(self):
+        config = self.build(generation_profile="minimal", dual_protocol_fallback=True, dual_protocol_priority="tcp")
+        groups = self.groups(config)
+        self.assertEqual(["Auto - UrlTest", "Proxy", "Ali-1/HK", "Dedi"], list(groups))
+        self.assertEqual(["Ali-1/HK-AnyTLS", "Ali-1/HK-HY2"], groups["Ali-1/HK"]["proxies"])
+
+    def test_draft_validates_dual_protocol_settings(self):
+        from fastapi import HTTPException
+
+        from config_defaults import build_global_config_schema
+        from draft_service import _normalize_draft
+
+        draft, _meta = _normalize_draft({"proxies": [], "global_config": {}})
+        self.assertIs(False, draft["global_config"]["dual_protocol_fallback"])
+        self.assertEqual("udp", draft["global_config"]["dual_protocol_priority"])
+        for bad in ({"dual_protocol_priority": "quic"}, {"dual_protocol_fallback": "yes"}):
+            with self.assertRaises(HTTPException) as context:
+                _normalize_draft({"proxies": [], "global_config": bad})
+            self.assertEqual(400, context.exception.status_code)
+
+        schema = build_global_config_schema()
+        self.assertEqual("checkbox", schema["dual_protocol_fallback"]["type"])
+        self.assertEqual({"key": "dual_protocol_fallback", "equals": True}, schema["dual_protocol_priority"]["visible"])
+        self.assertEqual(["udp", "tcp"], [option[0] for option in schema["dual_protocol_priority"]["options"]])
+
+
 if __name__ == "__main__":
     unittest.main()

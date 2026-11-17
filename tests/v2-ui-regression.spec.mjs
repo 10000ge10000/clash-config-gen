@@ -2022,6 +2022,36 @@ test('V2 自定义规则表单：IP 规则默认 no-resolve，规则集默认优
   expect(await state(page, () => Object.keys(window.v2State.config.custom_rule_providers))).not.toContain('cn');
 });
 
+test('V2 双协议回落设置：开关显示优先协议，选项带说明并写入草稿', async ({ page }) => {
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+  await page.locator('#step-tab-3').click();
+  const group = page.locator('#globalSchemaPanel details[data-group="fallback"]');
+  await expect(group.locator('summary')).toHaveText('双协议回落');
+  await group.locator('summary').click();
+  const toggle = page.locator('#globalSchemaPanel [data-field-key="dual_protocol_fallback"]');
+  const priority = page.locator('#globalSchemaPanel [data-field-key="dual_protocol_priority"]');
+  await expect(toggle).not.toBeChecked();
+  await expect(priority).toBeHidden();
+
+  await toggle.check();
+  await expect(priority).toBeVisible();
+  await expect(priority.locator('option')).toHaveText(['UDP 优先（HY2 等）', 'TCP 优先（AnyTLS 等）']);
+  await expect(priority).toHaveValue('udp');
+  await priority.selectOption('tcp');
+  await waitForSaved(page);
+  expect(await state(page, () => {
+    const config = window.v2State.config.global_config;
+    return [config.dual_protocol_fallback, config.dual_protocol_priority];
+  })).toEqual([true, 'tcp']);
+
+  // 还原，避免影响共用管理员账号的其他用例。
+  await priority.selectOption('udp');
+  await toggle.uncheck();
+  await waitForSaved(page);
+  await expect(priority).toBeHidden();
+});
+
 test('V2 订阅二维码编码器：各容量版本输出稳定，超长内容报错', async ({ page }) => {
   await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
   const result = await page.evaluate(async () => {

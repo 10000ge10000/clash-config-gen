@@ -11,7 +11,10 @@ from clash_meta_gen import (
     DEFAULT_URL_TEST_INTERVAL,
     DEFAULT_URL_TEST_TOLERANCE,
     DEFAULT_URL_TEST_URL,
+    DUAL_PROTOCOL_PRIORITIES,
+    build_dual_protocol_fallback_groups,
     generate_proxy_groups,
+    plan_dual_protocol_groups,
 )
 from normalizer import (
     normalize_proxies_for_mihomo,
@@ -316,12 +319,14 @@ def build_config(
     url_test_url = str(global_config.get("url_test_url") or DEFAULT_URL_TEST_URL).strip() or DEFAULT_URL_TEST_URL
     url_test_interval = int_config(global_config.get("url_test_interval"), DEFAULT_URL_TEST_INTERVAL)
     url_test_tolerance = int_config(global_config.get("url_test_tolerance"), DEFAULT_URL_TEST_TOLERANCE, minimum=0)
+    dual_protocol_priority = dual_protocol_priority_of(global_config)
     if generation_profile == "minimal":
         final_proxy_groups = generate_minimal_proxy_groups(
             proxies,
             url_test_url=url_test_url,
             url_test_interval=url_test_interval,
             url_test_tolerance=url_test_tolerance,
+            dual_protocol_priority=dual_protocol_priority,
         )
     else:
         final_proxy_groups = generate_proxy_groups(
@@ -329,6 +334,7 @@ def build_config(
             url_test_url=url_test_url,
             url_test_interval=url_test_interval,
             url_test_tolerance=url_test_tolerance,
+            dual_protocol_priority=dual_protocol_priority,
         )
 
     final_config: dict[str, Any] = {
@@ -544,24 +550,37 @@ def apply_generation_profile(global_config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def dual_protocol_priority_of(global_config: dict[str, Any]) -> str | None:
+    """开启双协议回落时返回 "udp"/"tcp"（优先协议），未开启返回 None。"""
+    if not global_config.get("dual_protocol_fallback"):
+        return None
+    priority = str(global_config.get("dual_protocol_priority") or "udp").strip().lower()
+    return priority if priority in DUAL_PROTOCOL_PRIORITIES else "udp"
+
+
 def generate_minimal_proxy_groups(
     proxies: list[dict[str, Any]],
     url_test_url: str = DEFAULT_URL_TEST_URL,
     url_test_interval: int = DEFAULT_URL_TEST_INTERVAL,
     url_test_tolerance: int = DEFAULT_URL_TEST_TOLERANCE,
+    dual_protocol_priority: str | None = None,
 ) -> list[dict[str, Any]]:
-    node_names = [proxy["name"] for proxy in proxies if isinstance(proxy, dict) and proxy.get("name")]
+    proxies = [proxy for proxy in proxies if isinstance(proxy, dict) and proxy.get("name")]
+    auto_members = choice_members = [proxy["name"] for proxy in proxies]
+    vps_groups: list = []
+    if dual_protocol_priority:
+        vps_groups, auto_members, choice_members = plan_dual_protocol_groups(proxies, dual_protocol_priority)
     return [
         {
             "name": "Auto - UrlTest",
             "type": "url-test",
-            "proxies": node_names,
+            "proxies": auto_members,
             "url": url_test_url,
             "interval": url_test_interval,
             "tolerance": url_test_tolerance,
         },
-        {"name": "Proxy", "type": "select", "proxies": ["Auto - UrlTest", "DIRECT"] + node_names},
-    ]
+        {"name": "Proxy", "type": "select", "proxies": ["Auto - UrlTest", "DIRECT"] + choice_members},
+    ] + build_dual_protocol_fallback_groups(vps_groups, url_test_url, url_test_interval)
 
 
 def build_yaml(config: dict[str, Any]) -> str:

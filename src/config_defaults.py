@@ -30,6 +30,9 @@ def build_default_global_config() -> dict:
         "url_test_url": "http://cp.cloudflare.com/generate_204",
         "url_test_interval": 60,
         "url_test_tolerance": 30,
+        # 双协议回落：同一 VPS 的 UDP（HY2 等）与 TCP（AnyTLS 等）节点合成 fallback 组。
+        "dual_protocol_fallback": False,
+        "dual_protocol_priority": "udp",
         "tcp_concurrent": False,
         "unified_delay": False,
         "find_process_mode": "strict",
@@ -253,6 +256,26 @@ def build_global_config_schema() -> dict:
         "url_test_url": _global_schema_field("url_test_url", "测速 URL", "text"),
         "url_test_interval": _global_schema_field("url_test_interval", "测速间隔", "number"),
         "url_test_tolerance": _global_schema_field("url_test_tolerance", "测速容差", "number"),
+        "dual_protocol_fallback": _global_schema_field(
+            "dual_protocol_fallback",
+            "双协议回落模式",
+            "checkbox",
+            help_=(
+                "同一 VPS（server 地址相同）上同时有 UDP 类（HY2、TUIC 等）和 TCP 类（AnyTLS、VLESS 等）节点时，"
+                "合成一个按 VPS 命名的 fallback 组：优先协议不可用时自动改用另一个，恢复后自动切回。"
+                "Auto - UrlTest 在这些 VPS 组之间测速；Proxy 等手动组既能选 VPS 组，也能直接选单个节点。"
+                "server 地址不同（例如一个写域名、一个写 IP）的节点不会配对。"
+                "回落组的名字会随节点名变化，关闭本模式后也会消失，自定义规则请指向 Proxy 等固定组，不要直接指向回落组。"
+            ),
+        ),
+        "dual_protocol_priority": _global_schema_field(
+            "dual_protocol_priority",
+            "优先协议",
+            "select",
+            options=[["udp", "UDP 优先（HY2 等）"], ["tcp", "TCP 优先（AnyTLS 等）"]],
+            visible={"key": "dual_protocol_fallback", "equals": True},
+            help_="两种协议都可用时使用优先协议；它的健康检查失败时，同组改用另一种协议。",
+        ),
         "tcp_concurrent": _global_schema_field("tcp_concurrent", "TCP 并发", "checkbox", visible=core),
         "unified_delay": _global_schema_field("unified_delay", "统一延迟", "checkbox", visible=core),
         "enable_tun": _global_schema_field("enable_tun", "启用 TUN", "checkbox", visible=desktop),
