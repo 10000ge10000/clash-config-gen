@@ -1290,5 +1290,30 @@ class DualProtocolFallbackTest(unittest.TestCase):
         self.assertEqual(["udp", "tcp"], [option[0] for option in schema["dual_protocol_priority"]["options"]])
 
 
+class DialerProxyValidationTest(unittest.TestCase):
+    """链式代理上游改名或删除后，结构校验要给出明确提示，而不是只有 mihomo 的 not found。"""
+
+    def config(self, dialer, **global_config):
+        proxies = [
+            {"name": "Ali3-HY2", "type": "hysteria2", "server": "3.3.3.3", "port": 443, "password": "p"},
+            {"name": "Ali3-AnyTLS", "type": "anytls", "server": "3.3.3.3", "port": 443, "password": "p"},
+            {"name": "Yuusei", "type": "ss", "server": "4.4.4.4", "port": 8388, "cipher": "aes-128-gcm",
+             "password": "p", "dialer-proxy": dialer},
+        ]
+        return build_config(proxies, global_config)
+
+    def test_missing_upstream_is_reported_clearly(self):
+        errors, _warnings = validate_config(self.config("Ali-3/HK"))
+        self.assertTrue(any("Yuusei" in error and "Ali-3/HK" in error and "dialer-proxy" in error for error in errors), errors)
+
+    def test_self_reference_is_rejected(self):
+        errors, _warnings = validate_config(self.config("Yuusei"))
+        self.assertTrue(any("不能指向自己" in error for error in errors), errors)
+
+    def test_existing_node_or_fallback_group_is_valid_upstream(self):
+        self.assertEqual([], validate_config(self.config("Ali3-HY2"))[0])
+        self.assertEqual([], validate_config(self.config("Ali3", dual_protocol_fallback=True))[0])
+
+
 if __name__ == "__main__":
     unittest.main()

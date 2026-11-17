@@ -3060,10 +3060,21 @@
       } else {
         state.config.proxies[currentIndex] = merged;
       }
+      // 改名时同步其它节点的链式代理上游，否则 mihomo 会因找不到上游而拒绝整份配置。
+      var oldName = adding ? "" : String(base.name || "").trim();
+      var relinked = 0;
+      if (oldName && oldName !== name) {
+        state.config.proxies.forEach(function (node) {
+          if (node && node !== merged && String(node["dialer-proxy"] || "").trim() === oldName) {
+            node["dialer-proxy"] = name;
+            relinked += 1;
+          }
+        });
+      }
       if (!markDirty()) return;
       closeNodeForm();
       renderStats();
-      showToast(adding ? "节点已加入草稿" : "节点草稿已更新", "info");
+      showToast(adding ? "节点已加入草稿" : (relinked ? "节点草稿已更新，" + relinked + " 个节点的链式代理已同步改为新名称" : "节点草稿已更新"), "info");
     } catch (error) {
       if (isStale(epoch)) return;
       displayApiError(error, "节点保存失败");

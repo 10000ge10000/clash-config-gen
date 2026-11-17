@@ -683,6 +683,17 @@ def validate_config(
             continue
         for proxy_error in validate_proxy_fields(proxy):
             errors.append(f"节点 '{proxy.get('name', '未命名节点')}' {proxy_error}")
+        # 链式代理的上游只能是现有节点或策略组；上游改名或删除后 mihomo 只会报 not found。
+        dialer = proxy.get("dialer-proxy")
+        if dialer not in (None, ""):
+            name = proxy.get("name", "未命名节点")
+            if dialer == name:
+                errors.append(f"节点 '{name}' 的链式代理（dialer-proxy）不能指向自己")
+            elif dialer not in valid_targets:
+                errors.append(
+                    f"节点 '{name}' 的链式代理（dialer-proxy）指向不存在的节点/组 '{dialer}'，"
+                    "可能是上游节点改名或删除了，请编辑该节点重新选择上游"
+                )
 
     for group in groups:
         for target in group.get("proxies", []):

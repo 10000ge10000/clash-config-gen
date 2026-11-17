@@ -2052,6 +2052,46 @@ test('V2 双协议回落设置：开关显示优先协议，选项带说明并�
   await expect(priority).toBeHidden();
 });
 
+test('V2 节点改名同步链式代理：上游改名后下游 dialer-proxy 跟着改', async ({ page }) => {
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+  await page.locator('#step-tab-2').click();
+  const field = (key) => page.locator(`#nodeSchemaFields [data-field-key="${key}"]`);
+  const card = (name) => page.locator('#nodeGrid .node-card').filter({ has: page.getByText(name, { exact: true }) });
+  async function addTrojan(name, dialer) {
+    await page.locator('#protocolPills [data-protocol="trojan"]').click();
+    await page.locator('#addNodeBtn').click();
+    await expect(page.locator('#nodeFormPanel')).toBeVisible();
+    await field('node_name').fill(name);
+    await field('node_server').fill(`${name.toLowerCase()}.example.com`);
+    await field('node_password').fill('chain-password');
+    if (dialer) {
+      await field('use_dialer_proxy').check();
+      await field('dialer_proxy_name').fill(dialer);
+    }
+    await page.locator('#saveNodeBtn').click();
+    await expect(card(name)).toHaveCount(1, { timeout: 15_000 });
+  }
+  await addTrojan('Relink-Up');
+  await addTrojan('Relink-Down', 'Relink-Up');
+  await waitForSaved(page);
+
+  await card('Relink-Up').getByRole('button', { name: '编辑' }).click();
+  await field('node_name').fill('Relink-Up-New');
+  await page.locator('#saveNodeBtn').click();
+  await expect(page.locator('.toast').last()).toContainText('1 个节点的链式代理已同步');
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.proxies.find((node) => node.name === 'Relink-Down')['dialer-proxy'])).toBe('Relink-Up-New');
+
+  // 清理，避免影响共用管理员账号的其他用例。
+  for (const name of ['Relink-Down', 'Relink-Up-New']) {
+    page.once('dialog', (dialog) => dialog.accept());
+    await card(name).getByRole('button', { name: '删除' }).click();
+    await expect(card(name)).toHaveCount(0);
+  }
+  await waitForSaved(page);
+});
+
 test('V2 订阅二维码编码器：各容量版本输出稳定，超长内容报错', async ({ page }) => {
   await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
   const result = await page.evaluate(async () => {
