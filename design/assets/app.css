@@ -492,7 +492,7 @@ html.dark #themeToggle .ico-moon { display: block; }
 .node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 14px; }
 .node-card {
   /* 屏幕外卡片跳过布局与绘制；auto 会记住已渲染高度 */
-  content-visibility: auto; contain-intrinsic-size: auto 150px;
+  content-visibility: auto; contain-intrinsic-size: auto 100px;
   padding: 16px; border-radius: 14px;
   background: var(--card); border: 1px solid var(--border);
   transition: transform .35s var(--ease-out), border-color .35s, box-shadow .35s;
@@ -510,8 +510,13 @@ html.dark #themeToggle .ico-moon { display: block; }
 .node-form-conflict { color: var(--danger); margin: 0 0 12px; }
 .node-card:hover::before { opacity: 1; }
 
-.node-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
-.node-name { font-size: 13.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-top { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; }
+.node-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-top .vps-status.single { margin: 0; }
+.node-transport { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text-dim); flex-shrink: 0; }
+/* 卡片窄时（单节点标记 + 协议名会把名称挤没）只留 UDP / TCP */
+.node-card { container-type: inline-size; }
+@container (max-width: 300px) { .node-top:has(.vps-status.single) .badge { display: none; } }
 .badge {
   font-size: 10px; font-weight: 800; letter-spacing: 1px;
   padding: 4px 9px; border-radius: 6px; text-transform: uppercase;
@@ -572,6 +577,25 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 .node-divider-line { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(79,70,229,.35), rgba(148,163,184,.12)); }
 .node-divider-hint { font-size: 12px; color: var(--text-faint); }
 .vps-member.drop-target { border-color: rgba(34,211,238,.75); box-shadow: 0 0 0 2px rgba(34,211,238,.2); }
+/* 节点健康：绿点可用，红点闪烁不可用，黄点已回落备用，灰点检测中 */
+.health-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; background: rgba(148,163,184,.55); }
+.health-dot[hidden] { display: none; }
+.health-dot.is-ok { background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,.16); }
+.health-dot.is-warn { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,.18); }
+.health-dot.is-down { background: #ef4444; animation: health-blink 1.1s ease-in-out infinite; }
+.health-dot.is-idle { animation: health-wait 1.6s ease-in-out infinite; }
+.health-dot.is-skipped { background: transparent; border: 1.5px solid rgba(148,163,184,.7); }
+@keyframes health-blink {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239,68,68,.55); }
+  50% { opacity: .35; box-shadow: 0 0 0 5px rgba(239,68,68,0); }
+}
+@keyframes health-wait { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.panel-head:has(#healthBar) { gap: 10px; flex-wrap: wrap; }
+.health-bar { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-faint); }
+.health-bar[hidden] { display: none; }
+.health-legend { display: inline-flex; align-items: center; gap: 5px; }
+.health-legend .health-dot:last-of-type { margin-left: 6px; }
+.health-bar:not([hidden]) ~ .sort-toggle { margin-left: 0; }
 /* 客户端顺序：排序小窗口 */
 .node-layout { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 16px; align-items: start; }
 .node-layout:has(> .sort-panel[hidden]) { grid-template-columns: minmax(0, 1fr); }
@@ -631,28 +655,29 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
   background: rgba(8,145,178,.08); border: 1px solid rgba(8,145,178,.28); color: var(--accent-text);
 }
 .vps-banner-text { flex: 1; min-width: 220px; font-size: 13px; }
-.vps-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+/* 与单节点卡片同宽 */
+.vps-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 14px; align-items: start; }
 .vps-card { padding: 12px 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--border); }
-.vps-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.vps-card-head { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
 .vps-name-input {
-  flex: 0 1 160px; min-width: 90px; font: inherit; font-size: 14px; font-weight: 700; color: var(--text);
+  flex: 1 1 auto; width: 0; min-width: 60px; font: inherit; font-size: 14px; font-weight: 700; color: var(--text);
   background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px;
 }
 .vps-name-input:hover, .vps-name-input:focus { border-color: var(--border); background: var(--input-bg); outline: none; }
 .vps-card-name { font-size: 14px; font-weight: 700; }
-.vps-status { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+.vps-status { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; flex-shrink: 0; white-space: nowrap; }
 .vps-status.ok { color: var(--success); background: rgba(5,150,105,.1); }
 .vps-status.warn { color: var(--warn); background: rgba(217,119,6,.1); }
 .vps-card-head .chip-btn.danger { margin-left: auto; }
-.vps-member { display: flex; align-items: center; gap: 8px; padding: 7px 2px; border-top: 1px solid var(--border); font-size: 13px; cursor: grab; }
+.vps-member { display: flex; flex-direction: column; gap: 6px; padding: 8px 2px 7px; border-top: 1px solid var(--border); font-size: 13px; cursor: grab; }
+.vps-member-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .vps-member.dragging { opacity: .45; }
 .vps-grip { color: var(--text-faint); letter-spacing: -2px; }
 .vps-tag { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; color: var(--text-dim); background: rgba(148,163,184,.12); }
 .vps-tag-primary { color: var(--accent-text); background: rgba(8,145,178,.12); }
-.vps-member-label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.vps-member-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.vps-member-meta { font-family: var(--mono); font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vps-member-actions { display: flex; gap: 6px; }
+.vps-member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.vps-member-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.vps-tag { flex-shrink: 0; }
 .vps-add-select { margin-top: 8px; width: 100%; font: inherit; font-size: 12.5px; padding: 6px 8px; border-radius: 8px; border: 1px dashed var(--border); background: transparent; color: var(--text-dim); }
 .vps-empty { font-size: 13px; color: var(--text-faint); }
 

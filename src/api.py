@@ -66,6 +66,7 @@ from importers import (
     validate_ruleset_alias,
 )
 from node_builder import NODE_FORM_SCHEMA, build_manual_node
+from node_health import check_user_nodes
 from normalizer import normalize_proxies_for_mihomo
 from ruleset_store import (
     MAX_RULESET_UPLOAD_BYTES,
@@ -1438,6 +1439,28 @@ def _api_ruleset_delete_sync(user: dict, body: dict) -> dict:
         "deleted": bool(existed),
         "path": _user_ruleset_provider_path(user_id, versioned_filename),
     }
+
+
+@app.post("/api/nodes/health")
+async def api_nodes_health(request: Request):
+    """节点健康检测：按已保存的草稿在服务器上真连测试，只返回每个节点 ok / down / skipped。"""
+    user = await run_in_threadpool(_require_api_user_and_csrf, request)
+    body = await _read_json_body(request)
+    force = bool(body.get("force")) if isinstance(body, dict) else False
+    return await run_in_threadpool(_api_nodes_health_sync, user, force)
+
+
+def _api_nodes_health_sync(user: dict, force: bool) -> dict:
+    saved = _load_saved_config(user)
+    # 优先用构建后的节点（已按 mihomo 规范化、去掉内部字段），与订阅里的节点一致。
+    try:
+        built = _build_draft_config(saved)
+        proxies = built.get("proxies") or []
+        groups = built.get("proxy-groups") or []
+    except Exception:  # 草稿暂时不能生成时，只测不带链式代理的节点
+        proxies = saved.get("proxies") or []
+        groups = []
+    return check_user_nodes(int(user["id"]), proxies, groups, force=force)
 
 
 @app.post("/api/validate")

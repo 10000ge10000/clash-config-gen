@@ -64,7 +64,9 @@
     // 会话中途过期时记录过期前的用户名，重新登录后据此判断是否保留本地未保存修改。
     sessionExpiredUser: "",
     // 登录主体代数：退出、换号、重新登录时递增；进行中请求的迟到回包据此识别并丢弃，避免写回上一用户数据。
-    authEpoch: 0
+    authEpoch: 0,
+    // 节点健康检测（服务器上真连测试）：results 为 {节点名: "ok" | "down" | "skipped"}。
+    health: { enabled: null, results: {}, checkedAt: 0, loading: false, error: "" }
   };
 
   function isStale(epoch) {
@@ -80,6 +82,7 @@
     state.validateInFlight = false;
     state.publishInFlight = false;
     state.globalSaving = false;
+    state.health = { enabled: null, results: {}, checkedAt: 0, loading: false, error: "" };
   }
 
   // 内部状态默认不挂到全局；仅在测试/调试开关打开时暴露：
@@ -1198,6 +1201,7 @@
     state.activeStep = value;
     // 切换到某步骤时补渲染该步骤下被延后的区块。
     flushDirtyBlocks(value);
+    if (value === 2) window.setTimeout(healthTick, 0);
   }
 
   function initNavigation() {
@@ -3203,18 +3207,13 @@
     var fragment = document.createDocumentFragment();
     var top = document.createElement("div");
     top.className = "node-top";
-    appendText(top, info.name, "node-name");
+    top.appendChild(healthDot(info.name));
+    // 卡片不再显示地址和来源，悬停名称时可以看到地址。
+    appendText(top, info.name, "node-name").title = info.name + (info.server ? "\n" + info.server + (info.port ? ":" + info.port : "") : "");
     if (info.single) appendText(top, "单节点", "vps-status single");
     appendText(top, info.type || "未指定协议", "badge b-" + info.type.replace(/[^a-z0-9_-]/gi, ""));
+    appendText(top, transportOf(info.type), "node-transport");
     fragment.appendChild(top);
-    var serverLine = document.createElement("div");
-    serverLine.className = "node-server";
-    serverLine.textContent = info.server + (info.port ? ":" + info.port : "");
-    fragment.appendChild(serverLine);
-    var meta = document.createElement("div");
-    meta.className = "node-meta";
-    meta.textContent = info.source ? "来源：" + info.source : "运行时延迟：后端未提供";
-    fragment.appendChild(meta);
     var actions = document.createElement("div");
     actions.className = "node-actions";
     var buttons = [
@@ -3458,17 +3457,18 @@
     row.dataset.group = groupName;
     row.dataset.member = member;
     row.title = "拖动调整主备顺序";
-    appendText(row, "⋮⋮", "vps-grip").setAttribute("aria-hidden", "true");
-    appendText(row, memberIndex === 0 ? "主用" : "备用", memberIndex === 0 ? "vps-tag vps-tag-primary" : "vps-tag");
-    var label = document.createElement("span");
-    label.className = "vps-member-label";
-    appendText(label, member, "vps-member-name").title = member;
+    var line = document.createElement("div");
+    line.className = "vps-member-line";
+    appendText(line, "⋮⋮", "vps-grip").setAttribute("aria-hidden", "true");
+    line.appendChild(healthDot(member));
+    appendText(line, memberIndex === 0 ? "主用" : "备用", memberIndex === 0 ? "vps-tag vps-tag-primary" : "vps-tag");
     var type = String(node && node.type || "").toLowerCase();
     var server = String(node && (node.server || node.ip) || "");
     var port = node && node.port !== undefined && node.port !== null ? ":" + node.port : "";
-    appendText(label, (type || "未知协议") + " · " + (UDP_NODE_TYPES[type] ? "UDP" : "TCP") + (server ? " · " + server + port : ""), "vps-member-meta");
-    row.appendChild(label);
-    var actions = document.createElement("span");
+    appendText(line, member, "vps-member-name").title = member + "\n" + (type || "未知协议") + (server ? " · " + server + port : "");
+    appendText(line, transportOf(type), "node-transport");
+    row.appendChild(line);
+    var actions = document.createElement("div");
     actions.className = "vps-member-actions";
     if (memberIndex > 0) actions.appendChild(vpsButton("设主用", "primary", groupName, member));
     actions.appendChild(vpsButton("编辑", "edit", groupName, member));
@@ -3487,6 +3487,7 @@
     var members = (group.members || []).filter(function (member) { return nodes[member]; });
     var head = document.createElement("div");
     head.className = "vps-card-head";
+    head.appendChild(healthGroupDot(groupName, members));
     var nameInput = document.createElement("input");
     nameInput.className = "vps-name-input";
     nameInput.value = groupName;
@@ -3494,8 +3495,9 @@
     nameInput.setAttribute("aria-label", "VPS 组名");
     nameInput.maxLength = 128;
     head.appendChild(nameInput);
-    appendText(head, members.length >= 2 ? "VPS 回落组" : "成员不足，不会生成",
+    var status = appendText(head, members.length >= 2 ? "VPS" : "成员不足",
       members.length >= 2 ? "vps-status ok" : "vps-status warn");
+    status.title = members.length >= 2 ? "VPS 回落组：主用不可用时自动切到备用" : "成员不足 2 个，不会生成";
     var split = vpsButton("拆分", "split", groupName, undefined, "chip-btn danger");
     split.title = "解散该 VPS 组，成员恢复为单节点";
     head.appendChild(split);
@@ -3823,6 +3825,149 @@
       });
     });
     panel.addEventListener("dragend", function () { clearVpsDrag(panel); });
+  }
+
+  // ============ 节点健康检测 ============
+  // 服务器上临时启动 mihomo 真连测试地址：绿点可用，红点闪烁不可用。只代表节点服务本身在运行，
+  // 不代表用户本地网络一定能连上。节点页可见时每 60 秒检测一次，节点有变化时尽快补测。
+  var HEALTH_INTERVAL = 60000;
+  var HEALTH_LABELS = { ok: "可用", down: "不可用", warn: "主用不可用，已回落到备用", idle: "检测中", skipped: "未检测（内网地址或不支持的类型）" };
+
+  function transportOf(type) {
+    return UDP_NODE_TYPES[String(type || "").toLowerCase()] ? "UDP" : "TCP";
+  }
+
+  function nodeHealth(name) {
+    var result = state.health.results[name];
+    if (result === "ok" || result === "down" || result === "skipped") return result;
+    return "idle";
+  }
+
+  // 组：主用可用 → 绿；主用不可用但有备用可用 → 黄；全部不可用 → 红；其余（检测中、未检测）→ 灰。
+  function groupHealth(members) {
+    var statuses = members.map(nodeHealth);
+    if (!statuses.length) return "idle";
+    if (statuses[0] === "ok") return "ok";
+    if (statuses[0] === "down" && statuses.indexOf("ok") > 0) return "warn";
+    if (statuses.every(function (status) { return status === "down"; })) return "down";
+    return "idle";
+  }
+
+  function setHealthClass(dot, status) {
+    var className = "health-dot is-" + status;
+    if (dot.className !== className) dot.className = className;
+    var label = HEALTH_LABELS[status] || "";
+    if (dot.title !== label) {
+      dot.title = label;
+      dot.setAttribute("aria-label", "健康状态：" + label);
+    }
+  }
+
+  function healthDot(name) {
+    var dot = document.createElement("span");
+    dot.setAttribute("role", "img");
+    dot.dataset.healthNode = name;
+    dot.hidden = state.health.enabled === false;
+    setHealthClass(dot, nodeHealth(name));
+    return dot;
+  }
+
+  function healthGroupDot(groupName, members) {
+    var dot = document.createElement("span");
+    dot.setAttribute("role", "img");
+    dot.dataset.healthGroup = groupName;
+    dot.dataset.healthMembers = members.join("\u0001");
+    dot.hidden = state.health.enabled === false;
+    setHealthClass(dot, groupHealth(members));
+    return dot;
+  }
+
+  function applyHealthDots() {
+    var off = state.health.enabled === false;
+    document.querySelectorAll("[data-health-node]").forEach(function (dot) {
+      dot.hidden = off;
+      setHealthClass(dot, nodeHealth(dot.dataset.healthNode));
+    });
+    document.querySelectorAll("[data-health-group]").forEach(function (dot) {
+      dot.hidden = off;
+      var members = dot.dataset.healthMembers ? dot.dataset.healthMembers.split("\u0001") : [];
+      setHealthClass(dot, groupHealth(members));
+    });
+    renderHealthBar();
+  }
+
+  function renderHealthBar() {
+    var bar = $("healthBar");
+    if (!bar) return;
+    var health = state.health;
+    bar.hidden = health.enabled === false || !state.authenticated;
+    if (bar.hidden) return;
+    var text = $("healthText");
+    var button = $("healthCheckBtn");
+    var message;
+    if (health.loading) message = "正在检测节点…";
+    else if (health.error) message = health.error;
+    else if (health.checkedAt) {
+      var seconds = Math.max(0, Math.round((Date.now() - health.checkedAt) / 1000));
+      message = "健康检测 · " + (seconds < 60 ? seconds + " 秒前" : Math.round(seconds / 60) + " 分钟前");
+    } else message = "健康检测 · 等待检测";
+    if (text && text.textContent !== message) text.textContent = message;
+    if (button) button.disabled = health.loading;
+  }
+
+  function healthMissing() {
+    var proxies = Array.isArray(state.config.proxies) ? state.config.proxies : [];
+    return proxies.some(function (node) { return node && !state.health.results[String(node.name)]; });
+  }
+
+  async function runHealthCheck(force) {
+    var health = state.health;
+    if (!state.authenticated || health.loading || health.enabled === false) return;
+    var epoch = state.authEpoch;
+    health.loading = true;
+    applyHealthDots();
+    try {
+      // 检测按服务器上已保存的草稿进行，先把未保存的修改落盘。
+      try { await flushDraftSave(); } catch (_) { /* 保存失败另有提示，这里照常检测已保存的版本 */ }
+      if (isStale(epoch)) return;
+      var data = await apiRequest("/api/nodes/health", { method: "POST", body: { force: Boolean(force) } });
+      if (isStale(epoch)) return;
+      health.enabled = data.enabled !== false;
+      if (data.busy) {
+        // 另一个页面正在检测：保留已有结果，10 秒后再来取。
+        if (isObject(data.results) && Object.keys(data.results).length) health.results = data.results;
+        health.checkedAt = Date.now() - HEALTH_INTERVAL + 10000;
+        return;
+      }
+      health.results = isObject(data.results) ? data.results : {};
+      health.error = data.error ? String(data.error) : "";
+      health.checkedAt = Date.now();
+    } catch (error) {
+      if (isStale(epoch)) return;
+      health.error = "健康检测失败";
+      health.checkedAt = Date.now();
+    } finally {
+      if (!isStale(epoch)) {
+        health.loading = false;
+        applyHealthDots();
+      }
+    }
+  }
+
+  function healthTick() {
+    renderHealthBar();
+    if (!state.authenticated || state.loading || state.activeStep !== 2) return;
+    if (document.visibilityState && document.visibilityState !== "visible") return;
+    var age = Date.now() - state.health.checkedAt;
+    // 有新节点还没结果时 8 秒后补测；上次检测出错就只按 60 秒间隔重试，避免反复让服务器启动 mihomo。
+    if (age >= HEALTH_INTERVAL || (age >= 8000 && !state.health.error && healthMissing())) runHealthCheck(false);
+  }
+
+  function initHealthCheck() {
+    var button = $("healthCheckBtn");
+    if (button) button.addEventListener("click", function () { runHealthCheck(true); });
+    window.setInterval(healthTick, 5000);
+    document.addEventListener("visibilitychange", healthTick);
   }
 
   // ============ 客户端顺序：排序小窗口 ============
@@ -5288,6 +5433,7 @@
     });
     bindVpsPanel();
     bindSortPanel();
+    initHealthCheck();
     $("nodeGrid") && $("nodeGrid").addEventListener("click", function (event) {
       var button = event.target.closest("[data-node-action]");
       if (!button) return;

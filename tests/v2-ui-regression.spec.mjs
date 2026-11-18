@@ -2273,6 +2273,14 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
 test('V2 VPS 回落组卡片：开关、合并建议、改名、主备、排序窗口、单节点分区', async ({ page }) => {
   test.setTimeout(120_000);
   const tracker = trackPageFailures(page);
+  // 健康检测在服务器上真连节点，测试里用固定结果代替。
+  let healthCalls = 0;
+  await page.route('**/api/nodes/health', async (route) => {
+    healthCalls += 1;
+    await route.fulfill({ json: { enabled: true, checked_at: 1, results: {
+      'VpsA-HY2': 'down', 'VpsA-AnyTLS': 'ok', 'VpsB-TUIC': 'down', 'VpsB-VLESS': 'ok', Solo: 'down',
+    } } });
+  });
   await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
   await signInViaForm(page, adminUsername, adminPassword);
   const username = `vps-${Date.now()}`;
@@ -2337,6 +2345,30 @@ test('V2 VPS 回落组卡片：开关、合并建议、改名、主备、排序�
   await nameInput.press('Enter');
   await waitForSaved(page);
   expect((await gc()).dual_protocol_groups[0].name).toBe('香港');
+
+  // 健康圆点：绿点可用、红点闪烁不可用；组：主用可用为绿，主用不可用但备用可用为黄。
+  await page.locator('#healthCheckBtn').click();
+  await expect(page.locator('#healthText')).toContainText('秒前');
+  expect(healthCalls).toBeGreaterThan(0);
+  const dot = (selector) => page.locator(`${selector} .health-dot`).first();
+  await expect(dot('.vps-card[data-card="香港"] .vps-card-head')).toHaveClass(/is-ok/);
+  await expect(dot('.vps-card[data-card="VpsB"] .vps-card-head')).toHaveClass(/is-warn/);
+  await expect(dot('.vps-member[data-member="VpsB-TUIC"]')).toHaveClass(/is-down/);
+  await expect(dot('.vps-member[data-member="VpsB-VLESS"]')).toHaveClass(/is-ok/);
+  await expect(dot('#nodeGrid .node-card[data-node-name="Solo"]')).toHaveClass(/is-down/);
+  // 只显示 UDP / TCP，不显示地址、延迟和来源；成员按钮都保留。
+  await expect(panel.locator('.vps-member[data-member="VpsB-TUIC"] .node-transport')).toHaveText('UDP');
+  await expect(panel.locator('.vps-member[data-member="VpsB-VLESS"] .node-transport')).toHaveText('TCP');
+  await expect(page.locator('#nodeGrid .node-card[data-node-name="Solo"] .node-transport')).toHaveText('TCP');
+  await expect(panel).not.toContainText('3.3.3.3');
+  await expect(page.locator('#nodeGrid')).not.toContainText('2.2.2.2');
+  await expect(page.locator('#nodeGrid')).not.toContainText('来源');
+  await expect(panel).not.toContainText('ms');
+  const backup = panel.locator('.vps-member[data-member="VpsB-VLESS"]');
+  for (const name of ['设主用', '编辑', '移出']) await expect(backup.getByRole('button', { name })).toBeVisible();
+  await expect(panel.locator('.vps-card[data-card="VpsB"]').getByRole('button', { name: '拆分' })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('health-cards.png'), clip: await page.locator('#step2 .panel').first().boundingBox() });
+  await page.locator('#nodeGrid').screenshot({ path: test.info().outputPath('health-single.png') });
 
   // 排序窗口：VPS 组与单节点混排，顺序 = 客户端顺序；排序只改节点列表，不改分组定义。
   const sortPanel = page.locator('#sortPanel');
