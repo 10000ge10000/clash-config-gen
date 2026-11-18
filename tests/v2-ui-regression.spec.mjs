@@ -2270,7 +2270,7 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
   tracker.assertClean();
 });
 
-test('V2 VPS 回落组卡片：开关、合并建议、改名、主备与卡片排序、单节点分区', async ({ page }) => {
+test('V2 VPS 回落组卡片：开关、合并建议、改名、主备、排序窗口、单节点分区', async ({ page }) => {
   test.setTimeout(120_000);
   const tracker = trackPageFailures(page);
   await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
@@ -2338,14 +2338,44 @@ test('V2 VPS 回落组卡片：开关、合并建议、改名、主备与卡片�
   await waitForSaved(page);
   expect((await gc()).dual_protocol_groups[0].name).toBe('香港');
 
-  // 拖动卡片：把 VpsB 拖到 香港 前面。
-  await cards.nth(1).locator('.vps-card-grip').hover();
-  await page.mouse.down();
-  await cardA.locator('.vps-card-head').hover({ position: { x: 20, y: 10 } });
-  await cardA.locator('.vps-card-head').hover({ position: { x: 30, y: 12 } });
-  await page.mouse.up();
+  // 排序窗口：VPS 组与单节点混排，顺序 = 客户端顺序；排序只改节点列表，不改分组定义。
+  const sortPanel = page.locator('#sortPanel');
+  const sortNames = () => sortPanel.locator('.sort-name').allTextContents();
+  const proxyNames = () => state(page, () => window.v2State.config.proxies.map((node) => node.name));
+  await expect(sortPanel).toBeVisible();
+  expect(await sortNames()).toEqual(['香港', 'Solo', 'VpsB']);
+  await expect(sortPanel.locator('.sort-tag')).toHaveText(['VPS', '单', 'VPS']);
+  // 拖动：把 VpsB 拖到最前面，组内成员一起挪动且保持主备顺序。
+  await sortPanel.locator('.sort-item', { hasText: 'VpsB' }).dragTo(sortPanel.locator('.sort-item', { hasText: '香港' }), { targetPosition: { x: 40, y: 4 } });
   await waitForSaved(page);
-  expect((await gc()).dual_protocol_groups.map((group) => group.name)).toEqual(['VpsB', '香港']);
+  expect(await sortNames()).toEqual(['VpsB', '香港', 'Solo']);
+  expect(await proxyNames()).toEqual(['VpsB-TUIC', 'VpsB-VLESS', 'VpsA-HY2', 'VpsA-AnyTLS', 'Solo']);
+  expect((await gc()).dual_protocol_groups.map((group) => group.name)).toEqual(['香港', 'VpsB']);
+  await expect(cards.first()).toHaveAttribute('data-card', 'VpsB');
+  // ↑ 按钮：单节点 Solo 上移到 香港 前面。
+  await sortPanel.locator('.sort-item', { hasText: 'Solo' }).getByRole('button', { name: /上移一位/ }).click();
+  await waitForSaved(page);
+  expect(await sortNames()).toEqual(['VpsB', 'Solo', '香港']);
+  expect(await proxyNames()).toEqual(['VpsB-TUIC', 'VpsB-VLESS', 'Solo', 'VpsA-HY2', 'VpsA-AnyTLS']);
+  // 键盘连续操作：↑ 后焦点仍在同一条目的按钮上。
+  await expect(sortPanel.locator('.sort-item', { hasText: 'Solo' }).getByRole('button', { name: /上移一位/ })).toBeFocused();
+  // 滚动页面时排序窗口固定在视口内（sticky）。
+  // 模拟节点很多：把网格撑高，再滚到布局中段。
+  await page.evaluate(() => {
+    document.getElementById('nodeGrid').style.minHeight = '3000px';
+    const top = document.querySelector('.node-layout').getBoundingClientRect().top + window.scrollY;
+    window.scrollTo(0, top + 1200);
+  });
+  await expect(async () => {
+    const box = await sortPanel.boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(60);
+    expect(box.y).toBeLessThan(120);
+  }).toPass();
+  await page.evaluate(() => { document.getElementById('nodeGrid').style.minHeight = ''; window.scrollTo(0, 0); });
+  // 悬停排序行会高亮对应卡片。
+  await sortPanel.locator('.sort-item', { hasText: 'Solo' }).hover();
+  await expect(page.locator('#nodeGrid .node-card.sort-hl')).toContainText('Solo');
+  await page.mouse.move(5, 300);
 
   // 成员行“编辑”打开对应节点的表单。
   await panel.locator('.vps-member', { hasText: 'VpsB-TUIC' }).getByRole('button', { name: '编辑' }).click();
@@ -2363,9 +2393,11 @@ test('V2 VPS 回落组卡片：开关、合并建议、改名、主备与卡片�
   await expect(page.locator('#singleNodeDivider')).toBeHidden();
   expect((await gridNames()).length).toBe(5);
   await expect(page.locator('#nodeGrid .vps-status.single')).toHaveCount(0);
+  // 关闭时排序窗口仍可用，全部按单节点列出。
+  expect(await sortNames()).toEqual(['VpsB-TUIC', 'VpsB-VLESS', 'Solo', 'VpsA-HY2', 'VpsA-AnyTLS']);
   await panel.getByRole('button', { name: '开启双协议回落' }).click();
   await waitForSaved(page);
-  expect((await gc()).dual_protocol_groups.map((group) => group.name)).toEqual(['VpsB', '香港']);
+  expect(await sortNames()).toEqual(['VpsB', 'Solo', '香港']);
 
   // 单节点的上移/下移跳过隐藏的已入组节点。再加一个单节点，让 Solo2 与 Solo 之间隔着入组节点。
   await page.locator('#step-tab-1').click();
@@ -2377,9 +2409,31 @@ test('V2 VPS 回落组卡片：开关、合并建议、改名、主备与卡片�
   await page.locator('#nodeGrid .node-card', { hasText: 'Solo2' }).getByRole('button', { name: '上移' }).click();
   await waitForSaved(page);
   expect(await gridNames()).toEqual(['Solo2', 'Solo']);
+  expect(await sortNames()).toEqual(['VpsB', 'Solo2', '香港', 'Solo']);
+
+  // 窄屏：排序窗口收成「排序」按钮，点开是抽屉。
+  await page.setViewportSize({ width: 820, height: 900 });
+  await expect(page.locator('#sortToggleBtn')).toBeVisible();
+  await expect(sortPanel).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator('#sortToggleBtn').click();
+  await expect(sortPanel).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath('sort-drawer.png') });
+  // 抽屉里点 ↓ 后抽屉保持打开；Esc 收起。
+  await sortPanel.locator('.sort-item', { hasText: 'VpsB' }).getByRole('button', { name: /下移一位/ }).click();
+  await waitForSaved(page);
+  expect(await sortNames()).toEqual(['Solo2', 'VpsB', '香港', 'Solo']);
+  await expect(sortPanel).toBeInViewport({ ratio: 1 });
+  await page.keyboard.press('Escape');
+  await expect(sortPanel).toBeHidden();
+  await page.locator('#sortToggleBtn').click();
+  await sortPanel.getByRole('button', { name: '收起排序窗口' }).click();
+  await expect(sortPanel).toBeHidden();
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   // 拆分：分组移除，服务端重新给出合并建议。
-  await panel.locator('.vps-card').first().getByRole('button', { name: '拆分' }).click();
+  await panel.locator('.vps-card[data-card="VpsB"]').getByRole('button', { name: '拆分' }).click();
   await waitForSaved(page);
   expect((await gc()).dual_protocol_groups.map((group) => group.name)).toEqual(['香港']);
   await expect(panel.locator('.vps-banner')).toContainText('VpsB');

@@ -571,9 +571,60 @@ html.dark .b-trojan { background: rgba(244,114,182,.12); color: #f472b6; border-
 }
 .node-divider-line { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(79,70,229,.35), rgba(148,163,184,.12)); }
 .node-divider-hint { font-size: 12px; color: var(--text-faint); }
-.vps-card.dragging { opacity: .45; border-style: dashed; }
-.vps-card.drop-target, .vps-member.drop-target { border-color: rgba(34,211,238,.75); box-shadow: 0 0 0 2px rgba(34,211,238,.2); }
-.vps-card-grip { cursor: grab; padding: 2px 2px 2px 0; }
+.vps-member.drop-target { border-color: rgba(34,211,238,.75); box-shadow: 0 0 0 2px rgba(34,211,238,.2); }
+/* 客户端顺序：排序小窗口 */
+.node-layout { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 16px; align-items: start; }
+.node-layout:has(> .sort-panel[hidden]) { grid-template-columns: minmax(0, 1fr); }
+/* .panel 的 overflow: hidden 会让 sticky 只在面板内部生效；clip 同样裁剪圆角但不生成滚动容器。 */
+.panel:has(.node-layout) { overflow: clip; }
+.node-main { min-width: 0; }
+.sort-panel {
+  position: sticky; top: 78px; max-height: calc(100vh - 132px); overflow-y: auto;
+  padding: 12px; border-radius: 14px; background: var(--panel-bg); border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+}
+.sort-panel[hidden] { display: none; }
+.sort-head { display: flex; align-items: center; justify-content: space-between; }
+.sort-title { font-size: 14px; font-weight: 700; }
+.sort-close { display: none; padding: 2px 9px; }
+.sort-desc { display: block; font-size: 11.5px; color: var(--text-faint); margin: 2px 0 10px; }
+.sort-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.sort-item {
+  display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 8px; border-radius: 9px; font-size: 12.5px;
+  background: rgba(148,163,184,.08); border: 1px solid var(--border); cursor: grab; user-select: none;
+  transition: border-color .2s, background-color .2s;
+}
+.sort-item:hover { border-color: rgba(34,211,238,.45); }
+.sort-item.is-vps { background: rgba(8,145,178,.07); border-color: rgba(8,145,178,.25); }
+.sort-item.dragging { opacity: .4; }
+.sort-item.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+.sort-item.drop-after { box-shadow: 0 2px 0 var(--accent); }
+.sort-no { width: 16px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--text-faint); flex-shrink: 0; }
+.sort-grip { color: var(--text-faint); letter-spacing: -2px; flex-shrink: 0; }
+.sort-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sort-tag { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 5px; flex-shrink: 0; }
+.sort-tag.vps { color: var(--success); background: rgba(5,150,105,.1); }
+.sort-tag.single { color: var(--accent-2); background: rgba(79,70,229,.1); }
+.sort-step {
+  width: 22px; height: 22px; padding: 0; border-radius: 6px; font-size: 12px; line-height: 1; flex-shrink: 0;
+  background: transparent; border: 1px solid transparent; color: var(--text-faint); cursor: pointer;
+}
+.sort-step:hover:not(:disabled) { border-color: var(--border); color: var(--text); background: var(--input-bg); }
+.sort-step:disabled { opacity: .3; cursor: default; }
+.sort-hl { border-color: rgba(34,211,238,.85) !important; box-shadow: 0 0 0 3px rgba(34,211,238,.22) !important; }
+.sort-toggle { display: none; margin-left: auto; }
+@media (max-width: 1100px) {
+  .node-layout { grid-template-columns: minmax(0, 1fr); }
+  .sort-panel {
+    position: fixed; top: 62px; right: 0; bottom: 38px; width: min(280px, 86vw); max-height: none; z-index: 95;
+    border-radius: 14px 0 0 14px; transform: translateX(105%); transition: transform .25s var(--ease-out), visibility .25s;
+    background: var(--bg); visibility: hidden;
+  }
+  .sort-panel.open { visibility: visible; box-shadow: -12px 0 32px rgba(15,23,42,.18); }
+  .sort-panel.open { transform: translateX(0); }
+  .sort-close { display: inline-flex; }
+  .sort-toggle:not([hidden]) { display: inline-flex; }
+}
 .vps-banner {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 14px; margin-bottom: 12px; border-radius: 10px;

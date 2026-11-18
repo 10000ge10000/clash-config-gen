@@ -3231,6 +3231,7 @@
     fragment.appendChild(actions);
     clearElement(card);
     card.appendChild(fragment);
+    card.dataset.nodeName = info.name;
     nodeCardParts.set(card, { key: info.key, buttons: buttons, index: null, editing: null });
   }
 
@@ -3350,6 +3351,7 @@
       (dualView.enabled ? " · " + dualView.groups.length + " 个 VPS 组" : "") +
       (query || state.nodeProtocol ? " · 当前显示 " + visible : ""));
     renderSingleNodeDivider(singles);
+    renderSortPanel();
     blockRendered("nodes");
   }
 
@@ -3485,9 +3487,6 @@
     var members = (group.members || []).filter(function (member) { return nodes[member]; });
     var head = document.createElement("div");
     head.className = "vps-card-head";
-    var grip = appendText(head, "⋮⋮", "vps-grip vps-card-grip");
-    grip.title = "拖动调整 VPS 顺序";
-    grip.setAttribute("aria-hidden", "true");
     var nameInput = document.createElement("input");
     nameInput.className = "vps-name-input";
     nameInput.value = groupName;
@@ -3543,7 +3542,7 @@
     appendText(head, "VPS 回落组", "vps-title");
     appendText(head, view.enabled ? "已开启" : "未开启", view.enabled ? "vps-status ok" : "vps-status off");
     appendText(head, view.enabled
-      ? "同一台 VPS 的多个协议合成一组，主用不可用时自动切到备用；拖动卡片调整顺序"
+      ? "同一台 VPS 的多个协议合成一组，主用不可用时自动切到备用；顺序在右侧“客户端顺序”窗口调整"
       : "开启后可把同一台 VPS 的 UDP / TCP 节点合成自动回落组", "panel-hint");
     var tools = document.createElement("span");
     tools.className = "vps-tools";
@@ -3591,7 +3590,16 @@
       var freeNodes = nodeNames.filter(function (name) { return !view.assigned[name]; });
       var list = document.createElement("div");
       list.className = "vps-list";
-      view.groups.forEach(function (group) {
+      // 卡片按客户端顺序展示（组的位置 = 第一个成员在节点列表里的位置），与右侧排序窗口一致。
+      var firstIndex = function (group) {
+        var best = Infinity;
+        (group.members || []).forEach(function (member) {
+          var index = nodeNames.indexOf(member);
+          if (index >= 0 && index < best) best = index;
+        });
+        return best;
+      };
+      view.groups.slice().sort(function (left, right) { return firstIndex(left) - firstIndex(right); }).forEach(function (group) {
         list.appendChild(vpsGroupCard(group, nodes, freeNodes));
       });
       if (!view.groups.length) appendText(list, "还没有 VPS 组。点“新建 VPS 组”把同一台 VPS 的节点放在一起。", "vps-empty");
@@ -3610,7 +3618,7 @@
     clearElement(divider);
     appendText(divider, "单节点", "node-divider-label");
     appendText(divider, "", "node-divider-line").setAttribute("aria-hidden", "true");
-    appendText(divider, singleCount + " 个 · 未加入 VPS 回落组，可用上移 / 下移或拖动排序", "node-divider-hint");
+    appendText(divider, singleCount + " 个 · 未加入 VPS 回落组；与 VPS 组的先后顺序在右侧“客户端顺序”窗口调整", "node-divider-hint");
   }
 
   // 按组名定位：界面过期（例如回包前节点被删、建议列表变化）时找不到就放弃并重绘，绝不改错组。
@@ -3744,12 +3752,8 @@
 
   function vpsDropTarget(event) {
     if (!vpsDrag || !event.target.closest) return null;
-    if (vpsDrag.kind === "member") {
-      var row = event.target.closest(".vps-member");
-      return row && row.dataset.group === vpsDrag.group ? row : null;
-    }
-    var card = event.target.closest(".vps-card");
-    return card && card.dataset.card !== vpsDrag.group ? card : null;
+    var row = event.target.closest(".vps-member");
+    return row && row.dataset.group === vpsDrag.group ? row : null;
   }
 
   function clearVpsDrag(panel) {
@@ -3758,7 +3762,6 @@
       item.classList.remove("dragging");
       item.classList.remove("drop-target");
     });
-    panel.querySelectorAll(".vps-card[draggable]").forEach(function (card) { card.removeAttribute("draggable"); });
   }
 
   function bindVpsPanel() {
@@ -3790,26 +3793,12 @@
     panel.addEventListener("keydown", function (event) {
       if (event.key === "Enter" && event.target.dataset.vpsName !== undefined) event.target.blur();
     });
-    // 卡片只在按住拖动手柄时可拖，避免影响组名输入框里的文字选择。
-    panel.addEventListener("mousedown", function (event) {
-      var grip = event.target.closest && event.target.closest(".vps-card-grip");
-      if (grip) grip.closest(".vps-card").setAttribute("draggable", "true");
-    });
-    panel.addEventListener("mouseup", function () {
-      if (!vpsDrag) panel.querySelectorAll(".vps-card[draggable]").forEach(function (card) { card.removeAttribute("draggable"); });
-    });
+    // 成员行拖动只调整同组内的主备顺序；VPS 组与单节点之间的先后在“客户端顺序”窗口调整。
     panel.addEventListener("dragstart", function (event) {
       var row = event.target.closest && event.target.closest(".vps-member");
-      var card = event.target.closest && event.target.closest(".vps-card");
-      if (row) {
-        vpsDrag = { kind: "member", group: row.dataset.group, member: row.dataset.member };
-        row.classList.add("dragging");
-      } else if (card && card.getAttribute("draggable") === "true") {
-        vpsDrag = { kind: "card", group: card.dataset.card };
-        card.classList.add("dragging");
-      } else {
-        return;
-      }
+      if (!row) return;
+      vpsDrag = { kind: "member", group: row.dataset.group, member: row.dataset.member };
+      row.classList.add("dragging");
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", vpsDrag.member || vpsDrag.group);
@@ -3828,22 +3817,284 @@
       clearVpsDrag(panel);
       if (!target || !drag) return;
       event.preventDefault();
-      if (drag.kind === "member") {
-        var to = target.dataset.member;
-        editVpsGroup(drag.group, function (group) {
-          return moveInList(group.members, drag.member, to);
-        });
-        return;
-      }
-      var toGroup = target.dataset.card;
-      editVpsGroups(function (groups) {
-        var item = findVpsGroup(groups, drag.group);
-        var goal = findVpsGroup(groups, toGroup);
-        if (!item || !goal) return false;
-        return moveInList(groups, item, goal);
+      var to = target.dataset.member;
+      editVpsGroup(drag.group, function (group) {
+        return moveInList(group.members, drag.member, to);
       });
     });
     panel.addEventListener("dragend", function () { clearVpsDrag(panel); });
+  }
+
+  // ============ 客户端顺序：排序小窗口 ============
+  // 只负责顺序：VPS 组与单节点混排，从上到下就是 Proxy 等分组里的顺序（「单协议节点」固定在最后）。
+  // 排序结果直接写进节点列表：VPS 组出现在它第一个成员的位置，拖动 VPS 组时组内成员一起挪动并保持相邻。
+  var sortDrag = null;
+
+  function sortItems() {
+    var view = dualProtocolView();
+    var proxies = Array.isArray(state.config.proxies) ? state.config.proxies : [];
+    var present = {};
+    proxies.forEach(function (node) { if (node) present[String(node.name)] = true; });
+    var groupOf = {};
+    if (view.enabled) {
+      // 与后端 sanitize_dual_protocol_groups 一致：成员须是现有节点、先到先得，组名非空且有效成员 ≥ 2 才生成 VPS 组。
+      view.groups.forEach(function (group) {
+        var name = String(group.name || "").trim();
+        var members = [];
+        (group.members || []).forEach(function (member) {
+          member = String(member);
+          if (present[member] && !groupOf[member] && members.indexOf(member) < 0) members.push(member);
+        });
+        if (!name || members.length < 2) return;
+        members.forEach(function (member) { groupOf[member] = name; });
+      });
+    }
+    var items = [];
+    var seen = {};
+    proxies.forEach(function (node) {
+      if (!node) return;
+      var name = String(node.name);
+      var group = groupOf[name];
+      if (group) {
+        if (seen[group]) return;
+        seen[group] = true;
+        items.push({ kind: "vps", name: group, key: "vps:" + group, groupOf: groupOf });
+      } else {
+        items.push({ kind: "node", name: name, key: "node:" + name, node: node, groupOf: groupOf });
+      }
+    });
+    return items;
+  }
+
+  // 按新的条目顺序重排节点列表；返回是否发生变化。
+  function applySortOrder(items) {
+    var list = state.config.proxies;
+    if (!Array.isArray(list) || !items.length) return false;
+    var groupOf = items[0].groupOf || {};
+    var next = [];
+    items.forEach(function (item) {
+      if (item.kind === "node") {
+        if (item.node && list.indexOf(item.node) >= 0) next.push(item.node);
+        return;
+      }
+      list.forEach(function (node) {
+        if (node && groupOf[String(node.name)] === item.name) next.push(node);
+      });
+    });
+    // 兜底：任何没被条目覆盖的节点保持原相对顺序追加在后面，绝不丢节点。
+    list.forEach(function (node) { if (next.indexOf(node) < 0) next.push(node); });
+    var changed = next.some(function (node, index) { return node !== list[index]; });
+    if (!changed) return false;
+    list.length = 0;
+    Array.prototype.push.apply(list, next);
+    if (!markDirty()) return false;
+    renderNodes();
+    return true;
+  }
+
+  // 与网格的编辑锁一致：正在表单里编辑的节点（或包含它的 VPS 组）不能挪动。
+  function sortItemLocked(item) {
+    var index = editingNodeIndex();
+    var node = index >= 0 ? state.config.proxies[index] : null;
+    if (!node) return false;
+    var name = String(node.name);
+    var locked = item.kind === "node" ? item.node === node : item.groupOf[name] === item.name;
+    if (locked) showToast("该节点正在编辑，请先保存或取消表单", "error");
+    return locked;
+  }
+
+  function moveSortItem(key, targetKey, after) {
+    var items = sortItems();
+    var from = items.findIndex(function (item) { return item.key === key; });
+    if (from < 0 || sortItemLocked(items[from])) return;
+    var moved = items.splice(from, 1)[0];
+    var to = targetKey === null ? items.length : items.findIndex(function (item) { return item.key === targetKey; });
+    if (to < 0) return;
+    items.splice(after ? to + 1 : to, 0, moved);
+    applySortOrder(items);
+  }
+
+  function stepSortItem(key, direction) {
+    var items = sortItems();
+    var index = items.findIndex(function (item) { return item.key === key; });
+    var target = index + direction;
+    if (index < 0 || target < 0 || target >= items.length || sortItemLocked(items[index])) return;
+    var moved = items.splice(index, 1)[0];
+    items.splice(target, 0, moved);
+    if (!applySortOrder(items)) return;
+    // 面板已重建：把焦点还给同一条目的按钮，键盘可以连续移动；到头时换成另一个方向。
+    var row = $("sortPanel").querySelector('.sort-item[data-sort-key="' + cssEscape(key) + '"]');
+    if (!row) return;
+    var button = row.querySelector('[data-sort-step="' + direction + '"]');
+    if (!button || button.disabled) button = row.querySelector('[data-sort-step="' + (-direction) + '"]');
+    if (button && !button.disabled) button.focus();
+  }
+
+  function highlightSortTarget(item, on) {
+    var selector = item.kind === "vps"
+      ? '#vpsPanel .vps-card[data-card="' + cssEscape(item.name) + '"]'
+      : '#nodeGrid .node-card[data-node-name="' + cssEscape(item.name) + '"]';
+    var target = document.querySelector(selector);
+    if (target) target.classList.toggle("sort-hl", on);
+    return target;
+  }
+
+  function cssEscape(value) {
+    return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  function renderSortPanel() {
+    var panel = $("sortPanel");
+    if (!panel) return;
+    var items = sortItems();
+    sortDrag = null;
+    panel.hidden = state.loading || items.length < 2;
+    var toggle = $("sortToggleBtn");
+    if (toggle) toggle.hidden = panel.hidden;
+    clearElement(panel);
+    if (panel.hidden) {
+      setSortDrawer(false);
+      return;
+    }
+    var head = document.createElement("div");
+    head.className = "sort-head";
+    appendText(head, "客户端顺序", "sort-title");
+    var close = makeButton("×", "chip-btn sort-close", function () { setSortDrawer(false); });
+    close.setAttribute("aria-label", "收起排序窗口");
+    head.appendChild(close);
+    panel.appendChild(head);
+    appendText(panel, "拖动排序，即 Proxy 等分组里的顺序", "sort-desc");
+    var list = document.createElement("ol");
+    list.className = "sort-list";
+    items.forEach(function (item, index) {
+      var row = document.createElement("li");
+      row.className = "sort-item" + (item.kind === "vps" ? " is-vps" : "");
+      row.draggable = true;
+      row.tabIndex = 0;
+      row.title = "点击定位到卡片，拖动调整顺序";
+      row.dataset.sortKey = item.key;
+      appendText(row, String(index + 1), "sort-no");
+      appendText(row, "⋮⋮", "sort-grip").setAttribute("aria-hidden", "true");
+      appendText(row, item.name, "sort-name").title = item.name;
+      appendText(row, item.kind === "vps" ? "VPS" : "单", item.kind === "vps" ? "sort-tag vps" : "sort-tag single");
+      var up = makeButton("↑", "sort-step", null);
+      up.dataset.sortStep = "-1";
+      up.disabled = index === 0;
+      up.setAttribute("aria-label", "把 " + item.name + " 上移一位");
+      var down = makeButton("↓", "sort-step", null);
+      down.dataset.sortStep = "1";
+      down.disabled = index === items.length - 1;
+      down.setAttribute("aria-label", "把 " + item.name + " 下移一位");
+      row.appendChild(up);
+      row.appendChild(down);
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+  }
+
+  function setSortDrawer(open) {
+    var panel = $("sortPanel");
+    var toggle = $("sortToggleBtn");
+    var wasOpen = !!(panel && panel.classList.contains("open"));
+    if (panel) panel.classList.toggle("open", open);
+    if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open && !wasOpen && panel) {
+      var first = panel.querySelector(".sort-item");
+      if (first) first.focus();
+    } else if (!open && wasOpen && toggle && panel.contains(document.activeElement)) {
+      toggle.focus();
+    }
+  }
+
+  function sortItemByKey(key) {
+    return sortItems().find(function (item) { return item.key === key; }) || null;
+  }
+
+  function bindSortPanel() {
+    var panel = $("sortPanel");
+    if (!panel) return;
+    var toggle = $("sortToggleBtn");
+    if (toggle) toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      setSortDrawer(!panel.classList.contains("open"));
+    });
+    // 抽屉：Esc 或点外部收起。
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && panel.classList.contains("open")) setSortDrawer(false);
+    });
+    document.addEventListener("click", function (event) {
+      // 用派发时的路径判断：点 ↑↓ 会重建面板，事件冒泡到这里时按钮已脱离文档。
+      var path = event.composedPath ? event.composedPath() : [event.target];
+      if (panel.classList.contains("open") && path.indexOf(panel) < 0) setSortDrawer(false);
+    });
+    panel.addEventListener("keydown", function (event) {
+      if (event.key !== "Enter" || !event.target.classList || !event.target.classList.contains("sort-item")) return;
+      event.preventDefault();
+      event.target.click();
+    });
+    panel.addEventListener("click", function (event) {
+      var step = event.target.closest("[data-sort-step]");
+      var row = event.target.closest(".sort-item");
+      if (!row) return;
+      if (step) {
+        stepSortItem(row.dataset.sortKey, Number(step.dataset.sortStep));
+        return;
+      }
+      var item = sortItemByKey(row.dataset.sortKey);
+      var target = item && highlightSortTarget(item, true);
+      if (target && target.scrollIntoView) target.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (target) window.setTimeout(function () { target.classList.remove("sort-hl"); }, 1200);
+    });
+    panel.addEventListener("mouseover", function (event) {
+      var row = event.target.closest(".sort-item");
+      if (!row || row.contains(event.relatedTarget)) return;
+      var item = sortItemByKey(row.dataset.sortKey);
+      if (item) highlightSortTarget(item, true);
+    });
+    panel.addEventListener("mouseout", function (event) {
+      var row = event.target.closest(".sort-item");
+      if (!row || row.contains(event.relatedTarget)) return;
+      document.querySelectorAll(".sort-hl").forEach(function (item) { item.classList.remove("sort-hl"); });
+    });
+    panel.addEventListener("dragstart", function (event) {
+      var row = event.target.closest && event.target.closest(".sort-item");
+      if (!row) return;
+      sortDrag = row.dataset.sortKey;
+      row.classList.add("dragging");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", sortDrag);
+      }
+    });
+    panel.addEventListener("dragover", function (event) {
+      var row = event.target.closest && event.target.closest(".sort-item");
+      if (!row || !sortDrag) return;
+      event.preventDefault();
+      var after = event.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+      panel.querySelectorAll(".drop-before, .drop-after").forEach(function (item) {
+        item.classList.remove("drop-before");
+        item.classList.remove("drop-after");
+      });
+      row.classList.add(after ? "drop-after" : "drop-before");
+    });
+    panel.addEventListener("drop", function (event) {
+      var row = event.target.closest && event.target.closest(".sort-item");
+      var key = sortDrag;
+      sortDrag = null;
+      if (!row || !key) return;
+      event.preventDefault();
+      var after = event.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+      if (row.dataset.sortKey !== key) moveSortItem(key, row.dataset.sortKey, after);
+      else renderSortPanel();
+    });
+    panel.addEventListener("dragend", function () {
+      sortDrag = null;
+      panel.querySelectorAll(".dragging, .drop-before, .drop-after").forEach(function (item) {
+        item.classList.remove("dragging");
+        item.classList.remove("drop-before");
+        item.classList.remove("drop-after");
+      });
+    });
   }
 
   // 拖拽排序（对齐 V1）：事件委托在 #nodeGrid 上，基于卡片 data-index 的真实索引交换，
@@ -5036,6 +5287,7 @@
       renderNodes();
     });
     bindVpsPanel();
+    bindSortPanel();
     $("nodeGrid") && $("nodeGrid").addEventListener("click", function (event) {
       var button = event.target.closest("[data-node-action]");
       if (!button) return;

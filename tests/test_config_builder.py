@@ -1327,36 +1327,37 @@ class DualProtocolFallbackTest(unittest.TestCase):
             ["香港", "Dedi-TUIC", "Dedi-VLESS", "Solo-HY2-a", "Solo-HY2-b"],
             groups["Auto - UrlTest"]["proxies"],
         )
-        self.assertEqual(["Ali-1/HK-AnyTLS", "Ali-1/HK-HY2", "Hw/SG"], groups["单协议节点"]["proxies"])
+        self.assertEqual(["Ali-1/HK-HY2", "Hw/SG", "Ali-1/HK-AnyTLS"], groups["单协议节点"]["proxies"])
         self.assertEqual([], validate_config(config)[0])
 
-    def test_explicit_group_card_order_drives_choice_order(self):
+    def test_node_list_order_drives_choice_order(self):
         groups_cfg = [
             {"name": "Dedi", "members": ["Dedi-VLESS", "Dedi-TUIC"]},
             {"name": "Ali-1/HK", "members": ["Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"]},
         ]
-        groups = self.groups(self.build(dual_protocol_fallback=True, dual_protocol_groups=groups_cfg))
-        # VPS 组按卡片顺序排在前面，单节点按节点列表顺序排在后面。
-        self.assertEqual(["Dedi", "Ali-1/HK", "Hw/SG", "Solo-HY2-a", "Solo-HY2-b"], groups["Auto - UrlTest"]["proxies"])
+        # 排序窗口把 Dedi 拖到最前、Hw/SG 放在两个 VPS 之间：成员挪在一起写进节点列表。
+        order = ["Dedi-TUIC", "Dedi-VLESS", "Hw/SG", "Ali-1/HK-HY2", "Ali-1/HK-AnyTLS", "Solo-HY2-a", "Solo-HY2-b"]
+        by_name = {proxy["name"]: proxy for proxy in self.PROXIES}
+        config = build_config(
+            [by_name[name] for name in order], {"dual_protocol_fallback": True, "dual_protocol_groups": groups_cfg}
+        )
+        groups = self.groups(config)
+        self.assertEqual(["Dedi", "Hw/SG", "Ali-1/HK", "Solo-HY2-a", "Solo-HY2-b"], groups["Auto - UrlTest"]["proxies"])
         self.assertEqual(
-            ["Auto - UrlTest", "DIRECT", "Dedi", "Ali-1/HK", "Hw/SG", "Solo-HY2-a", "Solo-HY2-b", "单协议节点"],
+            ["Auto - UrlTest", "DIRECT", "Dedi", "Hw/SG", "Ali-1/HK", "Solo-HY2-a", "Solo-HY2-b", "单协议节点"],
             groups["Proxy"]["proxies"],
         )
-        self.assertEqual(["Dedi-VLESS", "Dedi-TUIC", "Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"], groups["单协议节点"]["proxies"])
+        # 回落组内的主备顺序仍以卡片为准，与节点列表顺序无关。
+        self.assertEqual(["Dedi-VLESS", "Dedi-TUIC"], groups["Dedi"]["proxies"])
 
-    def test_confirming_suggestions_keeps_groups_and_moves_vps_first(self):
-        legacy = self.groups(self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp"))
+    def test_confirming_suggestions_keeps_output_identical(self):
+        legacy = self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp")
         from config_builder import dual_protocol_suggestions
 
         suggestions = dual_protocol_suggestions(self.PROXIES, {"dual_protocol_priority": "tcp"})
-        confirmed = self.groups(
-            self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp", dual_protocol_groups=suggestions)
-        )
-        # 回落组本身完全一致；确认后 VPS 组统一排在单节点前面。
-        for name in ("Ali-1/HK", "Dedi"):
-            self.assertEqual(legacy[name], confirmed[name])
-        self.assertEqual(sorted(legacy["Auto - UrlTest"]["proxies"]), sorted(confirmed["Auto - UrlTest"]["proxies"]))
-        self.assertEqual(["Ali-1/HK", "Dedi", "Hw/SG"], confirmed["Auto - UrlTest"]["proxies"][:3])
+        confirmed = self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp", dual_protocol_groups=suggestions)
+        # 确认建议只是把分组写进草稿，生成结果与未确认时逐字一致。
+        self.assertEqual(legacy["proxy-groups"], confirmed["proxy-groups"])
 
     def test_suggestions_skip_nodes_already_grouped_and_taken_names(self):
         from config_builder import dual_protocol_suggestions

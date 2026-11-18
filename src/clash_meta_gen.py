@@ -299,7 +299,7 @@ def plan_dual_protocol_groups(all_proxies, priority="udp", explicit_groups=None)
 
     返回 (vps_groups, auto_members, choice_members, single_group)：
     - vps_groups：[(组名, 成员，第一个为主用)]；
-    - auto_members：Auto - UrlTest 的成员，即各 VPS 组加上未合并的节点（确认过的分组按卡片顺序在前）；
+    - auto_members：Auto - UrlTest 的成员，即各 VPS 组加上未合并的节点，按节点列表顺序排列；
     - choice_members：Proxy 与各应用分组的成员，在 auto_members 后追加一个「单协议节点」子分组入口；
     - single_group：(子分组名, 已合并的原始节点名)，没有合并时为 None。
       需要强制某个协议时，先在分组里选子分组，再在子分组里选具体节点，分组本身不再平铺重复节点。
@@ -310,22 +310,17 @@ def plan_dual_protocol_groups(all_proxies, priority="udp", explicit_groups=None)
         vps_groups = sanitize_dual_protocol_groups(all_proxies, explicit_groups)
     group_of = {member: name for name, members in vps_groups for member in members}
 
+    # 顺序统一由节点列表决定：VPS 组出现在它第一个成员的位置（节点页“排序”窗口按这个规则写入节点顺序）。
     auto_members = []
     paired_nodes = []
-    if explicit_groups is not None:
-        # 用户确认过的分组：VPS 组按卡片顺序排在前面，单节点按节点列表顺序排在后面，与节点页一致。
-        auto_members = [name for name, _members in vps_groups]
-        paired_nodes = [member for _name, members in vps_groups for member in members]
-        auto_members += [str(proxy["name"]) for proxy in all_proxies if str(proxy["name"]) not in group_of]
-    else:
-        for proxy in all_proxies:
-            proxy_name = str(proxy["name"])
-            if proxy_name in group_of:
-                if group_of[proxy_name] not in auto_members:
-                    auto_members.append(group_of[proxy_name])
-                paired_nodes.append(proxy_name)
-            else:
-                auto_members.append(proxy_name)
+    for proxy in all_proxies:
+        proxy_name = str(proxy["name"])
+        if proxy_name in group_of:
+            if group_of[proxy_name] not in auto_members:
+                auto_members.append(group_of[proxy_name])
+            paired_nodes.append(proxy_name)
+        else:
+            auto_members.append(proxy_name)
     if not paired_nodes:
         return vps_groups, auto_members, list(auto_members), None
     taken = {str(proxy.get("name")) for proxy in all_proxies} | RESERVED_GROUP_NAMES

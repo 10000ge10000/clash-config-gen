@@ -99,7 +99,7 @@
       <section class="step-section" id="step2" role="tabpanel" aria-labelledby="step-tab-2" tabindex="0">
         <div class="step-banner" style="--bc:99,102,241"><div class="sb-ico">⌘</div><div class="sb-body"><div class="sb-eyebrow">Step 02 · Nodes</div><h2 class="sb-title">节点管理</h2><p class="sb-desc">列表、筛选、排序、字段表单和原始 YAML 编辑都直接作用于当前草稿。</p></div><div class="sb-num">02</div></div>
         <div class="panel">
-          <div class="panel-head"><div class="panel-title">节点管理</div><span class="panel-hint" id="nodeSummary">正在加载</span></div>
+          <div class="panel-head"><div class="panel-title">节点管理</div><span class="panel-hint" id="nodeSummary">正在加载</span><button class="btn btn-ghost sort-toggle" id="sortToggleBtn" type="button" aria-controls="sortPanel" aria-expanded="false">排序</button></div>
           <div class="add-node-bar"><div class="protocol-pills" id="protocolPills"></div><div class="node-toolbar"><input id="nodeSearch" class="node-search" type="search" placeholder="筛选节点 / 协议 / 服务器" aria-label="筛选节点"><button class="btn btn-primary" id="addNodeBtn" type="button">+ 手动添加节点</button></div></div>
           <div class="panel node-form-panel" id="nodeFormPanel" hidden>
             <div class="node-form-head"><h3 id="nodeFormTitle">节点编辑</h3><button class="btn btn-ghost" id="toggleRawNodeBtn" type="button">编辑原始 YAML</button></div>
@@ -108,9 +108,14 @@
             <div id="nodeRawMode" hidden><textarea id="nodeRawEditor" class="raw-editor" spellcheck="false" aria-label="节点原始 YAML"></textarea><div class="raw-help">服务端负责 YAML 解析；保存时会把解析映射合并到原节点，保留原节点中未触碰的未知字段。</div></div>
             <div class="node-form-actions"><button class="btn btn-primary" id="saveNodeBtn" type="button">保存节点草稿</button><button class="btn btn-ghost" id="cancelNodeBtn" type="button">取消</button></div>
           </div>
-          <div class="vps-panel" id="vpsPanel" hidden></div>
-          <div class="node-divider" id="singleNodeDivider" hidden></div>
-          <div class="node-grid" id="nodeGrid"><div class="loading-state">正在加载节点…</div></div>
+          <div class="node-layout">
+            <div class="node-main">
+              <div class="vps-panel" id="vpsPanel" hidden></div>
+              <div class="node-divider" id="singleNodeDivider" hidden></div>
+              <div class="node-grid" id="nodeGrid"><div class="loading-state">正在加载节点…</div></div>
+            </div>
+            <aside class="sort-panel" id="sortPanel" aria-label="节点排序" hidden></aside>
+          </div>
         </div>
       </section>
 
