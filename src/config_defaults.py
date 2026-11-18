@@ -261,11 +261,11 @@ def build_global_config_schema() -> dict:
             "双协议回落模式",
             "checkbox",
             help_=(
-                "同一 VPS（server 地址相同）上同时有 UDP 类（HY2、TUIC 等）和 TCP 类（AnyTLS、VLESS 等）节点时，"
-                "合成一个按 VPS 命名的 fallback 组：优先协议不可用时自动改用另一个，恢复后自动切回。"
-                "Auto - UrlTest 在这些 VPS 组之间测速；Proxy 和应用分组只列合并后的 VPS 组和未配对节点；需要强制某个协议时，在分组里选「单协议节点」子分组再挑具体节点。"
-                "server 地址不同（例如一个写域名、一个写 IP）的节点不会配对。"
-                "回落组的名字会随节点名变化，关闭本模式后也会消失，自定义规则请指向 Proxy 等固定组，不要直接指向回落组。"
+                "把同一台 VPS 上的 UDP 类（HY2、TUIC 等）和 TCP 类（AnyTLS、VLESS 等）节点合成一个 fallback 组："
+                "主用协议不可用时自动改用备用协议，恢复后自动切回。"
+                "合并在“节点管理”页的 VPS 回落组卡片里完成：系统按 server 地址给出合并建议，你确认后可以改名、调整主备顺序、拆分或手动合并。"
+                "Auto - UrlTest 在这些 VPS 组之间测速；Proxy 和应用分组只列 VPS 组和未合并的节点；需要强制某个协议时，在分组里选「单协议节点」子分组再挑具体节点。"
+                "关闭本模式后回落组不会生成，自定义规则请指向 Proxy 等固定组，不要直接指向回落组。"
             ),
         ),
         "dual_protocol_priority": _global_schema_field(
@@ -274,7 +274,7 @@ def build_global_config_schema() -> dict:
             "select",
             options=[["udp", "UDP 优先（HY2 等）"], ["tcp", "TCP 优先（AnyTLS 等）"]],
             visible={"key": "dual_protocol_fallback", "equals": True},
-            help_="两种协议都可用时使用优先协议；它的健康检查失败时，同组改用另一种协议。",
+            help_="新合并的 VPS 组里哪种协议排第一作为主用；已在节点页确认过的组以卡片顺序为准，尚未确认的按此整体排序。",
         ),
         "tcp_concurrent": _global_schema_field("tcp_concurrent", "TCP 并发", "checkbox", visible=core),
         "unified_delay": _global_schema_field("unified_delay", "统一延迟", "checkbox", visible=core),

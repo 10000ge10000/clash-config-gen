@@ -2289,3 +2289,67 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
   await expect(page.locator('#globalSchemaPanel details[data-group="dns"]')).toBeVisible();
   tracker.assertClean();
 });
+
+test('V2 VPS 回落组卡片：合并建议、确认、改名、设主用、拆分都写入草稿', async ({ page }) => {
+  test.setTimeout(120_000);
+  const tracker = trackPageFailures(page);
+  await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
+  await signInViaForm(page, adminUsername, adminPassword);
+  const username = `vps-${Date.now()}`;
+  await createPlainUser(page, username, temporaryUserPassword);
+  await page.locator('#userAvatar').click();
+  await page.locator('#userDropdown').getByRole('button', { name: /退出/ }).click();
+  await signInViaForm(page, username, temporaryUserPassword);
+
+  const yaml = [
+    'proxies:',
+    '  - {name: VpsA-HY2, type: hysteria2, server: 1.1.1.1, port: 443, password: p}',
+    '  - {name: VpsA-AnyTLS, type: anytls, server: 1.1.1.1, port: 8443, password: p}',
+    '  - {name: Solo, type: ss, server: 2.2.2.2, port: 8388, cipher: aes-128-gcm, password: p}',
+  ].join('\n') + '\n';
+  const importResponse = await importMethod(page, 'yaml', yaml);
+  expect(importResponse.status()).toBe(200);
+  await waitForSaved(page);
+  await page.locator('#step-tab-2').click();
+
+  const panel = page.locator('#vpsPanel');
+  const groups = () => state(page, () => window.v2State.config.global_config.dual_protocol_groups);
+  // 未开启时只给建议，不改草稿。
+  await expect(panel.locator('.vps-banner')).toContainText('VpsA');
+  expect(await groups()).toBeUndefined();
+  await panel.getByRole('button', { name: '开启并合并' }).click();
+  await waitForSaved(page);
+  expect(await state(page, () => window.v2State.config.global_config.dual_protocol_fallback)).toBe(true);
+  expect(await groups()).toEqual([{ name: 'VpsA', members: ['VpsA-HY2', 'VpsA-AnyTLS'] }]);
+  const card = panel.locator('.vps-card');
+  await expect(card).toHaveCount(1);
+  await expect(card.locator('.vps-member').first()).toContainText('主用');
+  await expect(card.locator('.vps-member').first()).toContainText('VpsA-HY2');
+  await expect(panel.locator('.vps-banner')).toHaveCount(0);
+
+  // 设主用：AnyTLS 排到第一位。
+  await card.locator('.vps-member').nth(1).getByRole('button', { name: '设为主用' }).click();
+  await waitForSaved(page);
+  expect((await groups())[0].members).toEqual(['VpsA-AnyTLS', 'VpsA-HY2']);
+
+  // 改名：与节点重名被拒绝，正常名字写入草稿。
+  const nameInput = card.locator('.vps-name-input');
+  await nameInput.fill('Solo');
+  await nameInput.press('Enter');
+  await expect(page.locator('.toast').last()).toContainText('不能与节点重名');
+  await expect(nameInput).toHaveValue('VpsA');
+  await nameInput.fill('香港');
+  await nameInput.press('Enter');
+  await waitForSaved(page);
+  expect((await groups())[0].name).toBe('香港');
+
+  await page.screenshot({ path: test.info().outputPath('vps-panel.png'), fullPage: false, clip: await panel.boundingBox() });
+
+  // 拆分：分组清空，服务端重新给出合并建议。
+  await card.getByRole('button', { name: '拆分' }).click();
+  await waitForSaved(page);
+  expect(await groups()).toEqual([]);
+  await expect(panel.locator('.vps-banner')).toContainText('VpsA');
+  await expect(panel.getByRole('button', { name: '全部合并' })).toBeVisible();
+  tracker.assertClean();
+});

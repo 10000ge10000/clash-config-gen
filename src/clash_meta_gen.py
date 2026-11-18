@@ -202,20 +202,32 @@ def _server_key(proxy):
     return str(proxy.get("server") or "").strip().strip("[]").lower()
 
 
-def plan_dual_protocol_groups(all_proxies, priority="udp"):
-    """双协议回落：同一 server 地址上同时有 UDP 类与 TCP 类节点时，合成一个 fallback 组。
+MAX_VPS_GROUP_BASE_LENGTH = 112
 
-    返回 (vps_groups, auto_members, choice_members, single_group)：
-    - vps_groups：[(组名, 按优先协议排好序的节点名)]；
-    - auto_members：Auto - UrlTest 的成员，即各 VPS 组加上未配对的节点；
-    - choice_members：Proxy 与各应用分组的成员，在 auto_members 后追加一个「单协议节点」子分组入口；
-    - single_group：(子分组名, 已配对的原始节点名)，没有配对时为 None。
-      需要强制某个协议时，先在分组里选子分组，再在子分组里选具体节点，分组本身不再平铺重复节点。
+
+def _single_protocol_group_name(taken):
+    name = SINGLE_PROTOCOL_GROUP_NAME
+    index = 2
+    while name in taken:
+        name = f"{SINGLE_PROTOCOL_GROUP_NAME} {index}"
+        index += 1
+    return name
+
+
+def suggest_dual_protocol_groups(all_proxies, priority="udp", existing_groups=None):
+    """合并建议：同一 server 地址上同时有 UDP 类与 TCP 类节点时，建议合成一个 VPS 回落组。
+
+    existing_groups 是用户已确认的 [(组名, 成员)]：其中的节点不再参与建议，组名也不会被复用。
+    返回 [(组名, 按优先协议排好序的节点名)]。
     """
     priority = priority if priority in DUAL_PROTOCOL_PRIORITIES else "udp"
+    existing_groups = existing_groups or []
+    assigned = {member for _name, members in existing_groups for member in members}
     by_server = {}
     order = []
     for proxy in all_proxies:
+        if str(proxy.get("name")) in assigned:
+            continue
         server = _server_key(proxy)
         if not server:
             continue
@@ -223,25 +235,22 @@ def plan_dual_protocol_groups(all_proxies, priority="udp"):
             by_server[server] = []
             order.append(server)
         by_server[server].append(proxy)
-    paired = {
-        server: members for server, members in by_server.items()
-        if {_proxy_transport(proxy) for proxy in members} == {"udp", "tcp"}
-    }
-    taken = {str(proxy.get("name")) for proxy in all_proxies} | RESERVED_GROUP_NAMES
-    single_name = SINGLE_PROTOCOL_GROUP_NAME
-    index = 2
-    while single_name in taken:
-        single_name = f"{SINGLE_PROTOCOL_GROUP_NAME} {index}"
-        index += 1
-    taken.add(single_name)
-    group_name_of = {}
-    vps_groups = []
+    taken = (
+        {str(proxy.get("name")) for proxy in all_proxies}
+        | RESERVED_GROUP_NAMES
+        | {name for name, _members in existing_groups}
+    )
+    # 先占用「单协议节点」子分组将要使用的名字（与 plan_dual_protocol_groups 的取名规则一致），
+    # 保证老账号按建议生成的组名与引入卡片前逐字相同。
+    taken.add(_single_protocol_group_name(taken))
+    suggestions = []
     for server in order:
-        if server not in paired:
+        members = by_server[server]
+        if {_proxy_transport(proxy) for proxy in members} != {"udp", "tcp"}:
             continue
-        members = paired[server]
         names = [str(proxy["name"]) for proxy in members]
-        base = _vps_group_base_name(names, server)
+        # 组名上限 128 字符，给“ 双协议 N”后缀留出余量。
+        base = _vps_group_base_name(names, server)[:MAX_VPS_GROUP_BASE_LENGTH]
         name = base
         if name in taken:
             name = f"{base} 双协议"
@@ -250,24 +259,74 @@ def plan_dual_protocol_groups(all_proxies, priority="udp"):
             name = f"{base} 双协议 {index}"
             index += 1
         taken.add(name)
-        group_name_of[server] = name
         ordered = [p for p in members if _proxy_transport(p) == priority] + [
             p for p in members if _proxy_transport(p) != priority
         ]
-        vps_groups.append((name, [str(p["name"]) for p in ordered]))
+        suggestions.append((name, [str(p["name"]) for p in ordered]))
+    return suggestions
+
+
+def sanitize_dual_protocol_groups(all_proxies, groups):
+    """把用户确认的 VPS 组收敛成可生成的 [(组名, 成员)]。
+
+    成员只保留现有节点、每个节点只属于第一个包含它的组；组名为空或有效成员不足 2 个的组跳过
+    （前端会提示“成员不足，不会生成”）。重名等冲突由校验阶段报错，这里不抛异常。
+    """
+    node_names = {str(proxy.get("name")) for proxy in all_proxies}
+    used = set()
+    result = []
+    for group in groups or []:
+        if not isinstance(group, dict):
+            continue
+        name = str(group.get("name") or "").strip()
+        members = []
+        for member in group.get("members") or []:
+            member = str(member)
+            if member in node_names and member not in used and member not in members:
+                members.append(member)
+        if not name or len(members) < 2:
+            continue
+        used.update(members)
+        result.append((name, members))
+    return result
+
+
+def plan_dual_protocol_groups(all_proxies, priority="udp", explicit_groups=None):
+    """双协议回落的分组规划。
+
+    explicit_groups 为用户在节点页确认的 VPS 组（[{name, members}]）；为 None 表示老账号还没确认过，
+    沿用按 server 自动合并的建议，输出与确认前一致。
+
+    返回 (vps_groups, auto_members, choice_members, single_group)：
+    - vps_groups：[(组名, 成员，第一个为主用)]；
+    - auto_members：Auto - UrlTest 的成员，即各 VPS 组加上未合并的节点；
+    - choice_members：Proxy 与各应用分组的成员，在 auto_members 后追加一个「单协议节点」子分组入口；
+    - single_group：(子分组名, 已合并的原始节点名)，没有合并时为 None。
+      需要强制某个协议时，先在分组里选子分组，再在子分组里选具体节点，分组本身不再平铺重复节点。
+    """
+    if explicit_groups is None:
+        vps_groups = suggest_dual_protocol_groups(all_proxies, priority)
+    else:
+        vps_groups = sanitize_dual_protocol_groups(all_proxies, explicit_groups)
+    group_of = {member: name for name, members in vps_groups for member in members}
 
     auto_members = []
     paired_nodes = []
     for proxy in all_proxies:
-        server = _server_key(proxy)
-        if server in group_name_of:
-            if group_name_of[server] not in auto_members:
-                auto_members.append(group_name_of[server])
-            paired_nodes.append(str(proxy["name"]))
+        proxy_name = str(proxy["name"])
+        if proxy_name in group_of:
+            if group_of[proxy_name] not in auto_members:
+                auto_members.append(group_of[proxy_name])
+            paired_nodes.append(proxy_name)
         else:
-            auto_members.append(str(proxy["name"]))
+            auto_members.append(proxy_name)
     if not paired_nodes:
         return vps_groups, auto_members, list(auto_members), None
+    taken = {str(proxy.get("name")) for proxy in all_proxies} | RESERVED_GROUP_NAMES
+    if explicit_groups is not None:
+        # 用户确认的组名可能恰好是「单协议节点」，子分组需要避开；自动建议已预先避开。
+        taken |= set(group_of.values())
+    single_name = _single_protocol_group_name(taken)
     return vps_groups, auto_members, auto_members + [single_name], (single_name, paired_nodes)
 
 
@@ -302,8 +361,12 @@ def generate_proxy_groups(
     url_test_interval=DEFAULT_URL_TEST_INTERVAL,
     url_test_tolerance=DEFAULT_URL_TEST_TOLERANCE,
     dual_protocol_priority=None,
+    dual_protocol_groups=None,
 ):
-    """dual_protocol_priority 为 "udp"/"tcp" 时启用双协议回落模式，None 时保持原有平铺结构。"""
+    """dual_protocol_priority 为 "udp"/"tcp" 时启用双协议回落模式，None 时保持原有平铺结构。
+
+    dual_protocol_groups 为用户确认的 VPS 组；None 表示按 server 自动合并。
+    """
     groups = []
     vps_groups = []
     auto_proxies = all_proxies
@@ -311,7 +374,7 @@ def generate_proxy_groups(
     single_group = None
     if dual_protocol_priority:
         vps_groups, auto_members, choice_members, single_group = plan_dual_protocol_groups(
-            all_proxies, dual_protocol_priority
+            all_proxies, dual_protocol_priority, dual_protocol_groups
         )
         auto_proxies = [{"name": name} for name in auto_members]
         # Proxy 与各应用/流媒体分组都列合并后的成员（VPS 回落组 + 未配对节点），

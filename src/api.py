@@ -31,7 +31,7 @@ from auth_service import (
     _set_auth_cookie,
     _try_login,
 )
-from config_builder import DEFAULT_RULE_TYPE, DUSTINWIN_PROVIDERS_MAP, is_no_base_rule_type
+from config_builder import DEFAULT_RULE_TYPE, DUSTINWIN_PROVIDERS_MAP, dual_protocol_suggestions, is_no_base_rule_type
 from config_builder import (
     build_rule_catalog,
     build_subscription_headers,
@@ -1004,6 +1004,13 @@ def _publish_summary(saved_config: dict, subscription: dict | None = None) -> di
     }
 
 
+def _safe_dual_protocol_suggestions(draft: dict) -> list[dict]:
+    try:
+        return dual_protocol_suggestions(draft.get("proxies") or [], draft.get("global_config") or {})
+    except Exception:
+        return []
+
+
 def _bootstrap(
     user: dict,
     draft: dict,
@@ -1045,6 +1052,7 @@ def _bootstrap(
             "openclash_router": OPENCLASH_ROUTER_SAFE_PRESET,
         },
         "node_form_schema": NODE_FORM_SCHEMA,
+        "dual_protocol_suggestions": _safe_dual_protocol_suggestions(draft),
         "global_config_schema": GLOBAL_CONFIG_SCHEMA,
         "all_targets": targets,
         "counts": stats,

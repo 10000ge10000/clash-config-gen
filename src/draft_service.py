@@ -16,6 +16,7 @@ from config_builder import DEFAULT_RULE_TYPE, DUSTINWIN_PROVIDERS_MAP, LEGACY_RU
 from config_builder import builtin_ruleset_names, rename_legacy_rule_target, rename_legacy_target
 from config_builder import build_config, build_yaml, validate_config
 from config_defaults import apply_v2_global_defaults, build_default_global_config
+from clash_meta_gen import RESERVED_GROUP_NAMES
 from mihomo_validator import validate_with_mihomo
 from normalizer import normalize_proxies
 
@@ -48,6 +49,77 @@ def _draft_source(body: dict) -> dict:
     else:
         source = copy.deepcopy(body)
     return source
+
+
+MAX_DUAL_PROTOCOL_GROUPS = 200
+
+
+def _normalize_dual_protocol_groups(raw_groups, proxies: list[dict]) -> list[dict] | None:
+    """用户确认的 VPS 组：结构校验 + 清理已删除的成员。None 表示尚未确认（按 server 自动合并）。
+
+    成员不足 2 个的组保留在草稿里（节点页显示为“成员不足”），生成时跳过；重名等冲突在校验阶段报错。
+    """
+    if raw_groups is None:
+        return None
+    if not isinstance(raw_groups, list):
+        raise HTTPException(status_code=400, detail="dual_protocol_groups 必须是数组")
+    if len(raw_groups) > MAX_DUAL_PROTOCOL_GROUPS:
+        raise HTTPException(status_code=413, detail=f"VPS 组数量超过上限 {MAX_DUAL_PROTOCOL_GROUPS}")
+    node_names = {str(proxy.get("name") or "") for proxy in proxies}
+    groups = []
+    for index, group in enumerate(raw_groups, start=1):
+        if not isinstance(group, dict):
+            raise HTTPException(status_code=400, detail=f"第 {index} 个 VPS 组必须是对象")
+        name = group.get("name")
+        members = group.get("members")
+        if not isinstance(name, str) or not isinstance(members, list) or not all(isinstance(m, str) for m in members):
+            raise HTTPException(status_code=400, detail=f"第 {index} 个 VPS 组需要字符串 name 与字符串数组 members")
+        name = name.strip()
+        if len(name) > 128:
+            raise HTTPException(status_code=400, detail=f"第 {index} 个 VPS 组名长度不能超过 128 字符")
+        clean_members = []
+        for member in members:
+            member = member.strip()
+            if member in node_names and member not in clean_members:
+                clean_members.append(member)
+        groups.append({"name": name, "members": clean_members})
+    return groups
+
+
+def _dual_protocol_group_errors(draft: dict) -> tuple[list[str], list[str]]:
+    """VPS 组的命名冲突与成员问题；只在开启双协议回落且用户已确认分组时检查。"""
+    global_config = draft.get("global_config") or {}
+    groups = global_config.get("dual_protocol_groups")
+    if not global_config.get("dual_protocol_fallback") or not isinstance(groups, list):
+        return [], []
+    errors: list[str] = []
+    warnings: list[str] = []
+    node_names = {str(proxy.get("name") or "") for proxy in draft.get("proxies") or []}
+    seen_names: set[str] = set()
+    owner: dict[str, str] = {}
+    for index, group in enumerate(groups, start=1):
+        name = str(group.get("name") or "").strip()
+        label = name or f"第 {index} 个 VPS 组"
+        members = list(group.get("members") or [])
+        if len(members) < 2:
+            # 生成时会跳过的组不进入 YAML，名称问题不阻止发布。
+            warnings.append(f"VPS 组 '{label}' 成员不足 2 个，生成订阅时会跳过")
+            continue
+        if not name:
+            errors.append(f"第 {index} 个 VPS 组没有名称")
+        elif name in node_names:
+            errors.append(f"VPS 组名 '{name}' 与节点重名，请改名")
+        elif name in RESERVED_GROUP_NAMES:
+            errors.append(f"VPS 组名 '{name}' 与内置策略组重名，请改名")
+        elif name in seen_names:
+            errors.append(f"VPS 组名 '{name}' 重复")
+        seen_names.add(name)
+        for member in members:
+            if member in owner:
+                errors.append(f"节点 '{member}' 同时属于 VPS 组 '{owner[member]}' 和 '{label}'")
+            else:
+                owner[member] = label
+    return errors, warnings
 
 
 def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict, dict]:
@@ -91,6 +163,11 @@ def _normalize_draft(body: dict, saved_config: dict | None = None) -> tuple[dict
     global_config["dual_protocol_priority"] = priority.strip().lower() if isinstance(priority, str) else "udp"
     if global_config["dual_protocol_priority"] not in ("udp", "tcp"):
         raise HTTPException(status_code=400, detail="dual_protocol_priority 只能是 udp 或 tcp")
+    global_config["dual_protocol_groups"] = _normalize_dual_protocol_groups(
+        global_config.get("dual_protocol_groups"), normalized_proxies
+    )
+    if global_config["dual_protocol_groups"] is None:
+        global_config.pop("dual_protocol_groups")
     for override_key in ("dustinwin_provider_targets",):
         overrides = global_config.get(override_key)
         if overrides is None:
@@ -370,6 +447,9 @@ def _run_validation(draft: dict, published_yaml: str = "", normalization_meta: d
     node_names = [str(proxy.get("name") or "") for proxy in draft.get("proxies") or []]
     duplicates = sorted({name for name in node_names if name and node_names.count(name) > 1})
     errors.extend(f"节点名称重复：{name}" for name in duplicates)
+    group_errors, group_warnings = _dual_protocol_group_errors(draft)
+    errors.extend(group_errors)
+    warnings.extend(group_warnings)
 
     built_config = None
     draft_yaml = ""

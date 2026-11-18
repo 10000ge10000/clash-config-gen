@@ -16,6 +16,7 @@ from clash_meta_gen import (
     build_single_protocol_group,
     generate_proxy_groups,
     plan_dual_protocol_groups,
+    suggest_dual_protocol_groups,
 )
 from normalizer import (
     normalize_proxies_for_mihomo,
@@ -321,6 +322,7 @@ def build_config(
     url_test_interval = int_config(global_config.get("url_test_interval"), DEFAULT_URL_TEST_INTERVAL)
     url_test_tolerance = int_config(global_config.get("url_test_tolerance"), DEFAULT_URL_TEST_TOLERANCE, minimum=0)
     dual_protocol_priority = dual_protocol_priority_of(global_config)
+    dual_protocol_groups = dual_protocol_groups_of(global_config)
     if generation_profile == "minimal":
         final_proxy_groups = generate_minimal_proxy_groups(
             proxies,
@@ -328,6 +330,7 @@ def build_config(
             url_test_interval=url_test_interval,
             url_test_tolerance=url_test_tolerance,
             dual_protocol_priority=dual_protocol_priority,
+            dual_protocol_groups=dual_protocol_groups,
         )
     else:
         final_proxy_groups = generate_proxy_groups(
@@ -336,6 +339,7 @@ def build_config(
             url_test_interval=url_test_interval,
             url_test_tolerance=url_test_tolerance,
             dual_protocol_priority=dual_protocol_priority,
+            dual_protocol_groups=dual_protocol_groups,
         )
 
     final_config: dict[str, Any] = {
@@ -559,12 +563,34 @@ def dual_protocol_priority_of(global_config: dict[str, Any]) -> str | None:
     return priority if priority in DUAL_PROTOCOL_PRIORITIES else "udp"
 
 
+def dual_protocol_groups_of(global_config: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """用户在节点页确认的 VPS 组；None 表示尚未确认，生成时按 server 自动合并。"""
+    groups = global_config.get("dual_protocol_groups")
+    return groups if isinstance(groups, list) else None
+
+
+def dual_protocol_suggestions(proxies: list[dict[str, Any]], global_config: dict[str, Any]) -> list[dict[str, Any]]:
+    """节点页的合并建议：只针对还没有加入任何 VPS 组的节点，组名避开已有组与节点名。"""
+    proxies = [proxy for proxy in proxies or [] if isinstance(proxy, dict) and proxy.get("name")]
+    priority = str(global_config.get("dual_protocol_priority") or "udp").strip().lower()
+    existing = []
+    for group in dual_protocol_groups_of(global_config) or []:
+        if isinstance(group, dict):
+            members = [str(member) for member in group.get("members") or []]
+            existing.append((str(group.get("name") or "").strip(), members))
+    return [
+        {"name": name, "members": members}
+        for name, members in suggest_dual_protocol_groups(proxies, priority, existing)
+    ]
+
+
 def generate_minimal_proxy_groups(
     proxies: list[dict[str, Any]],
     url_test_url: str = DEFAULT_URL_TEST_URL,
     url_test_interval: int = DEFAULT_URL_TEST_INTERVAL,
     url_test_tolerance: int = DEFAULT_URL_TEST_TOLERANCE,
     dual_protocol_priority: str | None = None,
+    dual_protocol_groups: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     proxies = [proxy for proxy in proxies if isinstance(proxy, dict) and proxy.get("name")]
     auto_members = choice_members = [proxy["name"] for proxy in proxies]
@@ -572,7 +598,7 @@ def generate_minimal_proxy_groups(
     single_group = None
     if dual_protocol_priority:
         vps_groups, auto_members, choice_members, single_group = plan_dual_protocol_groups(
-            proxies, dual_protocol_priority
+            proxies, dual_protocol_priority, dual_protocol_groups
         )
     return [
         {

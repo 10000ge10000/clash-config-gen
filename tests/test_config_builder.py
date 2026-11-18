@@ -1309,6 +1309,101 @@ class DualProtocolFallbackTest(unittest.TestCase):
         self.assertEqual("单协议节点", groups["Proxy"]["proxies"][-1])
         self.assertEqual(["Ali-1/HK-AnyTLS", "Ali-1/HK-HY2"], groups["Ali-1/HK"]["proxies"])
 
+    def test_explicit_groups_follow_card_order_and_allow_manual_merge(self):
+        groups_cfg = [
+            # 手动合并：server 不同也可以；顺序以卡片为准，与全局优先级无关。
+            {"name": "香港", "members": ["Ali-1/HK-AnyTLS", "Ali-1/HK-HY2", "Hw/SG"]},
+            # 成员不足 2 个（另一个节点已被删除）时跳过。
+            {"name": "孤儿", "members": ["Dedi-TUIC", "已删除"]},
+        ]
+        config = self.build(dual_protocol_fallback=True, dual_protocol_priority="udp", dual_protocol_groups=groups_cfg)
+        groups = self.groups(config)
+        self.assertEqual(["Ali-1/HK-AnyTLS", "Ali-1/HK-HY2", "Hw/SG"], groups["香港"]["proxies"])
+        self.assertTrue(groups["香港"]["hidden"])
+        self.assertNotIn("孤儿", groups)
+        # 未确认的 Dedi 不会被自动合并：用户确认过分组后只用确认的结果。
+        self.assertNotIn("Dedi", groups)
+        self.assertEqual(
+            ["香港", "Dedi-TUIC", "Dedi-VLESS", "Solo-HY2-a", "Solo-HY2-b"],
+            groups["Auto - UrlTest"]["proxies"],
+        )
+        self.assertEqual(["Ali-1/HK-HY2", "Hw/SG", "Ali-1/HK-AnyTLS"], groups["单协议节点"]["proxies"])
+        self.assertEqual([], validate_config(config)[0])
+
+    def test_unconfirmed_groups_keep_legacy_output(self):
+        legacy = self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp")
+        from config_builder import dual_protocol_suggestions
+
+        suggestions = dual_protocol_suggestions(self.PROXIES, {"dual_protocol_priority": "tcp"})
+        confirmed = self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp", dual_protocol_groups=suggestions)
+        self.assertEqual(legacy["proxy-groups"], confirmed["proxy-groups"])
+
+    def test_suggestions_skip_nodes_already_grouped_and_taken_names(self):
+        from config_builder import dual_protocol_suggestions
+
+        suggestions = dual_protocol_suggestions(
+            self.PROXIES,
+            {"dual_protocol_priority": "udp", "dual_protocol_groups": [{"name": "Dedi", "members": ["Dedi-TUIC"]}]},
+        )
+        # Dedi-TUIC 已在组里，Dedi-VLESS 落单不再配对；Ali-1/HK 照常建议。
+        self.assertEqual([{"name": "Ali-1/HK", "members": ["Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"]}], suggestions)
+
+    def test_legacy_names_unchanged_when_node_named_like_single_group(self):
+        proxies = [
+            {"name": "单协议节点", "type": "anytls", "server": "9.9.9.9", "port": 443, "password": "p"},
+            {"name": "单协议节点 2-HY2", "type": "hysteria2", "server": "1.1.1.1", "port": 443, "password": "p"},
+            {"name": "单协议节点 2-AnyTLS", "type": "anytls", "server": "1.1.1.1", "port": 443, "password": "p"},
+        ]
+        names = [group["name"] for group in build_config(proxies, {"dual_protocol_fallback": True})["proxy-groups"]]
+        self.assertIn("单协议节点 2", names)
+        self.assertIn("单协议节点 2 双协议", names)
+
+    def test_suggested_group_name_stays_within_limit(self):
+        from config_builder import dual_protocol_suggestions
+
+        base = "X" * 126
+        proxies = [
+            {"name": base, "type": "anytls", "server": "9.9.9.9", "port": 443, "password": "p"},
+            {"name": base + "-HY2", "type": "hysteria2", "server": "1.1.1.1", "port": 443, "password": "p"},
+            {"name": base + "-TLS", "type": "anytls", "server": "1.1.1.1", "port": 443, "password": "p"},
+        ]
+        suggestions = dual_protocol_suggestions(proxies, {})
+        self.assertLessEqual(len(suggestions[0]["name"]), 128)
+
+    def test_draft_normalizes_and_validates_explicit_groups(self):
+        from fastapi import HTTPException
+
+        from draft_service import _dual_protocol_group_errors, _normalize_draft
+
+        body = {
+            "proxies": list(self.PROXIES),
+            "global_config": {
+                "dual_protocol_fallback": True,
+                "dual_protocol_groups": [
+                    {"name": " 香港 ", "members": ["Ali-1/HK-HY2", "已删除", "Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"]},
+                    {"name": "Hw/SG", "members": ["Dedi-TUIC", "Dedi-VLESS"]},
+                    {"name": "香港", "members": ["Ali-1/HK-HY2", "Solo-HY2-a"]},
+                    {"name": "Proxy", "members": ["Solo-HY2-b"]},
+                ],
+            },
+        }
+        draft, _meta = _normalize_draft(body)
+        groups = draft["global_config"]["dual_protocol_groups"]
+        self.assertEqual({"name": "香港", "members": ["Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"]}, groups[0])
+        errors, warnings = _dual_protocol_group_errors(draft)
+        self.assertIn("VPS 组名 'Hw/SG' 与节点重名，请改名", errors)
+        self.assertIn("VPS 组名 '香港' 重复", errors)
+        self.assertTrue(any("Ali-1/HK-HY2" in error and "同时属于" in error for error in errors))
+        self.assertTrue(any("成员不足" in warning for warning in warnings))
+        # 成员不足的组（生成时跳过）只给警告，不报名称类错误。
+        self.assertFalse(any("'Proxy'" in error for error in errors))
+        self.assertTrue(any("'Proxy'" in warning and "成员不足" in warning for warning in warnings))
+        # 未确认（字段缺失）时草稿里不写入该字段，生成走自动合并。
+        draft, _meta = _normalize_draft({"proxies": list(self.PROXIES), "global_config": {"dual_protocol_fallback": True}})
+        self.assertNotIn("dual_protocol_groups", draft["global_config"])
+        with self.assertRaises(HTTPException):
+            _normalize_draft({"proxies": [], "global_config": {"dual_protocol_groups": [{"name": 1, "members": []}]}})
+
     def test_draft_validates_dual_protocol_settings(self):
         from fastapi import HTTPException
 
