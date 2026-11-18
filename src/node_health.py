@@ -108,10 +108,31 @@ def _resolve_all(hosts: list[str], resolve) -> dict:
     return results
 
 
-def plan_health_check(proxies: list, groups: list | None = None, resolve=socket.getaddrinfo) -> tuple[dict, list, dict]:
+_IPV6_STATE = {"checked": 0.0, "available": False}
+
+
+def ipv6_available() -> bool:
+    """服务器（容器）有没有 IPv6 出口。没有路由时 connect 会立即失败；结果缓存 10 分钟。"""
+    now = time.monotonic()
+    if _IPV6_STATE["checked"] and now - _IPV6_STATE["checked"] < 600:
+        return _IPV6_STATE["available"]
+    available = False
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as sock:
+            sock.connect(("2001:4860:4860::8888", 53))  # UDP connect 只查路由，不发包
+            available = _is_public_address(sock.getsockname()[0])
+    except OSError:
+        available = False
+    _IPV6_STATE.update(checked=now, available=available)
+    return available
+
+
+def plan_health_check(proxies: list, groups: list | None = None, resolve=socket.getaddrinfo,
+                      ipv6: bool | None = None) -> tuple[dict, list, dict]:
     """返回 (mihomo 配置, 要检测的节点名, 不交给 mihomo 的节点 {名: 原因})。
 
-    原因 private / unsupported / limit 表示不检测；unresolved 表示服务器解析不了域名，按不可用处理。
+    原因 private / unsupported / limit / ipv6 表示不检测（ipv6：服务器没有 IPv6 出口，纯 IPv6 节点测不了，
+    不能误判为不可用）；unresolved 表示服务器解析不了域名，按不可用处理。
     域名在这里解析一次并用 hosts 固定给 mihomo，mihomo 不再自己解析，DNS rebinding 无法绕过内网过滤。
     """
     candidates_nodes = []
@@ -136,8 +157,14 @@ def plan_health_check(proxies: list, groups: list | None = None, resolve=socket.
         if isinstance(proxy, dict) and proxy.get("name"):
             skipped.setdefault(str(proxy["name"]), "limit")
 
+    if ipv6 is None:
+        ipv6 = ipv6_available()
     domains = sorted({host for _, _, hosts in candidates_nodes for host in hosts if _literal_ip(host) is None})
     resolved = _resolve_all(domains, resolve)
+    if not ipv6:
+        # 没有 IPv6 出口：同时有 v4 / v6 的域名只用 IPv4 测；只有 IPv6 的记为空列表，下面按 ipv6 跳过。
+        resolved = {host: (None if addresses is None else [a for a in addresses if ":" not in a])
+                    for host, addresses in resolved.items()}
     usable = []
     pinned = {}
     for name, proxy, hosts in candidates_nodes:
@@ -147,10 +174,14 @@ def plan_health_check(proxies: list, groups: list | None = None, resolve=socket.
             if ip is not None:
                 if not _is_public_address(host):
                     reason = "private"
+                elif ip.version == 6 and not ipv6 and reason != "private":
+                    reason = "ipv6"
                 continue
             addresses = resolved.get(host)
-            if not addresses:
+            if addresses is None:
                 reason = reason or "unresolved"
+            elif not addresses:
+                reason = reason if reason == "private" else "ipv6"
             elif not all(_is_public_address(address) for address in addresses):
                 reason = "private"
         if reason:
@@ -354,7 +385,8 @@ def check_user_nodes(user_id: int, proxies: list, groups: list | None, force: bo
         else:
             results = {name: "ok" if alive.get(name) else "down" for name in names}
             results.update({name: "down" if reason == "unresolved" else "skipped" for name, reason in skipped.items()})
-            payload = {"enabled": True, "checked_at": int(time.time()), "results": results}
+            reasons = {name: reason for name, reason in skipped.items() if reason != "unresolved"}
+            payload = {"enabled": True, "checked_at": int(time.time()), "results": results, "reasons": reasons}
         _CACHE[user_id] = (time.time(), fingerprint, payload)
         return payload
     finally:

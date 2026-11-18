@@ -1327,7 +1327,8 @@ class DualProtocolFallbackTest(unittest.TestCase):
             ["香港", "Dedi-TUIC", "Dedi-VLESS", "Solo-HY2-a", "Solo-HY2-b"],
             groups["Auto - UrlTest"]["proxies"],
         )
-        self.assertEqual(["Ali-1/HK-HY2", "Hw/SG", "Ali-1/HK-AnyTLS"], groups["单协议节点"]["proxies"])
+        # 单协议节点按组内主备顺序展开，而不是节点添加的先后。
+        self.assertEqual(["Ali-1/HK-AnyTLS", "Ali-1/HK-HY2", "Hw/SG"], groups["单协议节点"]["proxies"])
         self.assertEqual([], validate_config(config)[0])
 
     def test_node_list_order_drives_choice_order(self):
@@ -1349,6 +1350,29 @@ class DualProtocolFallbackTest(unittest.TestCase):
         )
         # 回落组内的主备顺序仍以卡片为准，与节点列表顺序无关。
         self.assertEqual(["Dedi-VLESS", "Dedi-TUIC"], groups["Dedi"]["proxies"])
+        # 单协议节点跟随整体顺序：先 Dedi（主用 VLESS 在前），再 Ali-1/HK。
+        self.assertEqual(["Dedi-VLESS", "Dedi-TUIC", "Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"], groups["单协议节点"]["proxies"])
+
+    def test_single_protocol_group_follows_overall_order_not_add_order(self):
+        # 后加入的 Hw-xhttp / Hw-reality 属于排在 Dedirock 前面的 Hw 组，应排在 Dedirock 前面。
+        proxies = [
+            {"name": "Hw-AnyTLS", "type": "anytls", "server": "1.1.1.1", "port": 1, "password": "p"},
+            {"name": "Dedirock-V4", "type": "hysteria2", "server": "2.2.2.2", "port": 1, "password": "p"},
+            {"name": "Dedirock-V6", "type": "hysteria2", "server": "2001:db8::1", "port": 1, "password": "p"},
+            {"name": "Hw-xhttp", "type": "anytls", "server": "1.1.1.1", "port": 2, "password": "p"},
+            {"name": "Hw-reality", "type": "anytls", "server": "1.1.1.1", "port": 3, "password": "p"},
+        ]
+        groups_cfg = [
+            {"name": "Dedirock", "members": ["Dedirock-V6", "Dedirock-V4"]},
+            {"name": "Hw", "members": ["Hw-xhttp", "Hw-reality", "Hw-AnyTLS"]},
+        ]
+        config = build_config(proxies, {"dual_protocol_fallback": True, "dual_protocol_groups": groups_cfg})
+        groups = self.groups(config)
+        self.assertEqual(["Hw", "Dedirock"], groups["Auto - UrlTest"]["proxies"])
+        self.assertEqual(
+            ["Hw-xhttp", "Hw-reality", "Hw-AnyTLS", "Dedirock-V6", "Dedirock-V4"],
+            groups["单协议节点"]["proxies"],
+        )
 
     def test_confirming_suggestions_keeps_output_identical(self):
         legacy = self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp")

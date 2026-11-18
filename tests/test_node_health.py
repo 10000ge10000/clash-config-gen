@@ -18,6 +18,11 @@ def json_dump(value):
 
 
 class PlanHealthCheckTest(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(node_health, "ipv6_available", return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_skips_private_direct_and_duplicate_nodes(self):
         proxies = [
             {"name": "A", "type": "hysteria2", "server": "8.8.8.8", "port": 443},
@@ -103,6 +108,39 @@ class PlanHealthCheckTest(unittest.TestCase):
         self.assertFalse(any("url" in group for group in config["proxy-groups"]))
 
 
+class Ipv6HandlingTest(unittest.TestCase):
+    PROXIES = [
+        {"name": "V6", "type": "hysteria2", "server": "2606:4700::1111", "port": 443},
+        {"name": "Dual", "type": "vless", "server": "dual.example", "port": 443},
+        {"name": "OnlyV6", "type": "vless", "server": "v6.example", "port": 443},
+        {"name": "Inner6", "type": "ss", "server": "fd00::1", "port": 1},
+    ]
+    RESOLVE = staticmethod(fake_resolve({"dual.example": ["1.1.1.1", "2606:4700::1001"], "v6.example": ["2606:4700::1002"]}))
+
+    def test_ipv6_nodes_are_tested_when_server_has_ipv6(self):
+        config, names, skipped = node_health.plan_health_check(self.PROXIES, [], self.RESOLVE, ipv6=True)
+        self.assertEqual(names, ["V6", "Dual", "OnlyV6"])
+        self.assertEqual(skipped, {"Inner6": "private"})
+        self.assertEqual(config["hosts"]["dual.example"], ["1.1.1.1", "2606:4700::1001"])
+        self.assertTrue(config["ipv6"])
+
+    def test_without_ipv6_pure_v6_nodes_are_skipped_not_down(self):
+        config, names, skipped = node_health.plan_health_check(self.PROXIES, [], self.RESOLVE, ipv6=False)
+        self.assertEqual(names, ["Dual"])
+        self.assertEqual(skipped, {"V6": "ipv6", "OnlyV6": "ipv6", "Inner6": "private"})
+        # 同时有 v4 / v6 的域名只用 IPv4 测。
+        self.assertEqual(config["hosts"], {"dual.example": "1.1.1.1"})
+
+    def test_reasons_are_returned_with_results(self):
+        node_health._CACHE.clear()
+        with mock.patch.object(node_health, "health_enabled", return_value=True), \
+                mock.patch.object(node_health, "ipv6_available", return_value=False):
+            result = node_health.check_user_nodes(
+                21, self.PROXIES, [], runner=lambda config, names: {"Dual": True}, resolve=self.RESOLVE)
+        self.assertEqual(result["results"], {"Dual": "ok", "V6": "skipped", "OnlyV6": "skipped", "Inner6": "skipped"})
+        self.assertEqual(result["reasons"], {"V6": "ipv6", "OnlyV6": "ipv6", "Inner6": "private"})
+
+
 class CheckUserNodesTest(unittest.TestCase):
     def setUp(self):
         node_health._CACHE.clear()
@@ -112,6 +150,9 @@ class CheckUserNodesTest(unittest.TestCase):
         resolve_patch = mock.patch.object(node_health.socket, "getaddrinfo", side_effect=OSError("offline"))
         resolve_patch.start()
         self.addCleanup(resolve_patch.stop)
+        ipv6_patch = mock.patch.object(node_health, "ipv6_available", return_value=True)
+        ipv6_patch.start()
+        self.addCleanup(ipv6_patch.stop)
 
     def proxies(self):
         return [

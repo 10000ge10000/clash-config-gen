@@ -37,3 +37,13 @@ services:
     volumes:
       - /opt/1panel/docker/compose/clash-config-gen/data:/app/data
       - /opt/clash-config-gen/ruleset:/app/ruleset
+
+networks:
+  default:
+    # 节点健康检测需要从容器直连 IPv6 节点：开启 IPv6（内部 ULA 网段，由 Docker 做 NAT66 出网）。
+    # IPv4 网段固定为原来的 172.24.0.0/16，TRUSTED_PROXY_CIDRS 里的 172.16.0.0/12 仍然覆盖网关地址。
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.24.0.0/16
+        - subnet: fd7a:c1a5:6e17:1::/64

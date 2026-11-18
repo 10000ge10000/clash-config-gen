@@ -3831,7 +3831,8 @@
   // 服务器上临时启动 mihomo 真连测试地址：绿点可用，红点闪烁不可用。只代表节点服务本身在运行，
   // 不代表用户本地网络一定能连上。节点页可见时每 60 秒检测一次，节点有变化时尽快补测。
   var HEALTH_INTERVAL = 60000;
-  var HEALTH_LABELS = { ok: "可用", down: "不可用", warn: "主用不可用，已回落到备用", idle: "检测中", skipped: "未检测（内网地址或不支持的类型）" };
+  var HEALTH_LABELS = { ok: "可用", down: "不可用", warn: "主用不可用，已回落到备用", idle: "检测中", skipped: "未检测" };
+  var HEALTH_SKIP_REASONS = { private: "未检测：内网或本机地址", unsupported: "未检测：该类型不需要检测", ipv6: "未检测：服务器暂无 IPv6 出口", limit: "未检测：超过检测数量上限" };
 
   function transportOf(type) {
     return UDP_NODE_TYPES[String(type || "").toLowerCase()] ? "UDP" : "TCP";
@@ -3853,10 +3854,11 @@
     return "idle";
   }
 
-  function setHealthClass(dot, status) {
+  function setHealthClass(dot, status, name) {
     var className = "health-dot is-" + status;
     if (dot.className !== className) dot.className = className;
-    var label = HEALTH_LABELS[status] || "";
+    var reasons = state.health.reasons || {};
+    var label = (status === "skipped" && name && HEALTH_SKIP_REASONS[reasons[name]]) || HEALTH_LABELS[status] || "";
     if (dot.title !== label) {
       dot.title = label;
       dot.setAttribute("aria-label", "健康状态：" + label);
@@ -3868,7 +3870,7 @@
     dot.setAttribute("role", "img");
     dot.dataset.healthNode = name;
     dot.hidden = state.health.enabled === false;
-    setHealthClass(dot, nodeHealth(name));
+    setHealthClass(dot, nodeHealth(name), name);
     return dot;
   }
 
@@ -3886,7 +3888,7 @@
     var off = state.health.enabled === false;
     document.querySelectorAll("[data-health-node]").forEach(function (dot) {
       dot.hidden = off;
-      setHealthClass(dot, nodeHealth(dot.dataset.healthNode));
+      setHealthClass(dot, nodeHealth(dot.dataset.healthNode), dot.dataset.healthNode);
     });
     document.querySelectorAll("[data-health-group]").forEach(function (dot) {
       dot.hidden = off;
@@ -3940,6 +3942,7 @@
         return;
       }
       health.results = isObject(data.results) ? data.results : {};
+      health.reasons = isObject(data.reasons) ? data.reasons : {};
       health.error = data.error ? String(data.error) : "";
       health.checkedAt = Date.now();
     } catch (error) {

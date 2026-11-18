@@ -301,7 +301,7 @@ def plan_dual_protocol_groups(all_proxies, priority="udp", explicit_groups=None)
     - vps_groups：[(组名, 成员，第一个为主用)]；
     - auto_members：Auto - UrlTest 的成员，即各 VPS 组加上未合并的节点，按节点列表顺序排列；
     - choice_members：Proxy 与各应用分组的成员，在 auto_members 后追加一个「单协议节点」子分组入口；
-    - single_group：(子分组名, 已合并的原始节点名)，没有合并时为 None。
+    - single_group：(子分组名, 已合并的原始节点名)，按 VPS 组在 auto_members 中的顺序展开、组内主用在前；没有合并时为 None。
       需要强制某个协议时，先在分组里选子分组，再在子分组里选具体节点，分组本身不再平铺重复节点。
     """
     if explicit_groups is None:
@@ -323,6 +323,9 @@ def plan_dual_protocol_groups(all_proxies, priority="udp", explicit_groups=None)
             auto_members.append(proxy_name)
     if not paired_nodes:
         return vps_groups, auto_members, list(auto_members), None
+    # 「单协议节点」按整体顺序排列：VPS 组按它在客户端里的位置展开，组内按主备顺序，而不是节点添加的先后。
+    members_of = dict(vps_groups)
+    paired_nodes = [member for item in auto_members for member in members_of.get(item, [])]
     taken = {str(proxy.get("name")) for proxy in all_proxies} | RESERVED_GROUP_NAMES
     if explicit_groups is not None:
         # 用户确认的组名可能恰好是「单协议节点」，子分组需要避开；自动建议已预先避开。
