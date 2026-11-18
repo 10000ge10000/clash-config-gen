@@ -120,7 +120,9 @@ def ipv6_available() -> bool:
     try:
         with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as sock:
             sock.connect(("2001:4860:4860::8888", 53))  # UDP connect 只查路由，不发包
-            available = _is_public_address(sock.getsockname()[0])
+            # Docker 开 IPv6 时容器用内部 ULA 地址经 NAT66 出网，源地址不是公网地址；有路由且不是回环、链路本地即可。
+            local = ipaddress.ip_address(sock.getsockname()[0].split("%", 1)[0])
+            available = not (local.is_loopback or local.is_link_local or local.is_unspecified)
     except OSError:
         available = False
     _IPV6_STATE.update(checked=now, available=available)

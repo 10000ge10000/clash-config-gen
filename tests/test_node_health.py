@@ -141,6 +141,27 @@ class Ipv6HandlingTest(unittest.TestCase):
         self.assertEqual(result["reasons"], {"V6": "ipv6", "OnlyV6": "ipv6", "Inner6": "private"})
 
 
+class Ipv6AvailabilityTest(unittest.TestCase):
+    def check(self, local=None, error=None):
+        sock = mock.MagicMock()
+        sock.__enter__.return_value = sock
+        if error:
+            sock.connect.side_effect = error
+        sock.getsockname.return_value = (local, 0, 0, 0)
+        node_health._IPV6_STATE.update(checked=0.0, available=False)
+        with mock.patch.object(node_health.socket, "socket", return_value=sock):
+            return node_health.ipv6_available()
+
+    def test_nat66_ula_source_counts_as_available(self):
+        self.assertTrue(self.check("fd7a:c1a5:6e17:1::2"))
+        self.assertTrue(self.check("2001:db8::5"))
+
+    def test_no_route_or_link_local_is_unavailable(self):
+        self.assertFalse(self.check(error=OSError(101, "Network is unreachable")))
+        self.assertFalse(self.check("fe80::1"))
+        self.assertFalse(self.check("::1"))
+
+
 class CheckUserNodesTest(unittest.TestCase):
     def setUp(self):
         node_health._CACHE.clear()
