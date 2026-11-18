@@ -632,6 +632,7 @@
       renderNodeForm(false);
     }
     if (keys.proxies || keys.global_config || server.dualSuggestions) renderBlock("vps");
+    if (!keys.proxies && (keys.global_config || server.dualSuggestions)) renderBlock("nodes");
     if (keys.custom_rules || server.targets) renderBlock("rules");
     if (keys.selected_rule_type || keys.global_config || server.providerDefaults || server.targets) renderBlock("ruleSource");
     if (keys.custom_rule_providers) renderBlock("rulesets");
@@ -2308,7 +2309,6 @@
     { id: "basic", label: "基础与端口", keys: ["include_inbound_ports", "include_global_compat", "include_router_options", "enable_core_options", "port", "socks_port", "mixed_port", "allow_lan", "bind_address", "mode", "log_level", "ipv6_support"] },
     { id: "controller", label: "控制器", keys: ["include_controller", "external_controller", "secret", "external_ui", "external_ui_name", "external_ui_url"] },
     { id: "speed", label: "测速与性能", keys: ["find_process_mode", "url_test_url", "url_test_interval", "url_test_tolerance", "tcp_concurrent", "unified_delay", "geodata_mode", "geodata_loader", "keep_alive_interval", "keep_alive_idle"] },
-    { id: "fallback", label: "双协议回落", keys: ["dual_protocol_fallback", "dual_protocol_priority"] },
     { id: "tun", label: "TUN 与路由", keys: ["enable_tun", "tun_stack", "tun_device", "tun_auto_route", "tun_auto_detect_interface", "tun_dns_hijack", "tun_dns_hijack_value", "tun_endpoint_independent_nat", "tun_auto_redirect", "tun_strict_route", "redir_port", "tproxy_port", "interface_name"] },
     { id: "dns", label: "DNS", keys: ["enable_dns", "dns_listen", "dns_ipv6", "enhanced_mode", "fake_ip_range", "fake_ip_range6", "fake_ip_filter_mode", "dns_respect_rules", "direct_nameserver", "proxy_server_nameserver", "default_nameserver", "nameserver", "fallback", "nameserver_policy"] },
     { id: "sniffer", label: "嗅探", keys: ["enable_sniffer", "sniff_override_dest", "sniffer_parse_pure_ip", "sniffer_force_dns_mapping"] },
@@ -2321,7 +2321,8 @@
 
   // 不作为普通字段展示：目标覆盖在分流规则中编辑；模式由生成模式开关写入；
   // optional_globals_v2 被后端强制为 true；openclash_preset 由推荐配置写入。
-  var GLOBAL_HIDDEN_KEYS = { lhie1_provider_targets: true, dustinwin_provider_targets: true, generation_profile: true, is_desktop: true, optional_globals_v2: true, openclash_preset: true };
+  // 双协议回落的开关、默认主用协议与 VPS 组都在“节点管理”的 VPS 回落组区设置。
+  var GLOBAL_HIDDEN_KEYS = { lhie1_provider_targets: true, dustinwin_provider_targets: true, generation_profile: true, is_desktop: true, optional_globals_v2: true, openclash_preset: true, dual_protocol_fallback: true, dual_protocol_priority: true, dual_protocol_groups: true };
   function isProviderTargetKey(key) {
     return GLOBAL_HIDDEN_KEYS[key] === true;
   }
@@ -3179,7 +3180,7 @@
   // 节点筛选输入的去抖定时器（退出/换号时需清除，避免把上一用户的筛选词写回）。
   var nodeSearchTimer = null;
 
-  function nodeCardInfo(proxy, index) {
+  function nodeCardInfo(proxy, index, single) {
     var node = proxy || {};
     var name = String(node.name || ("节点 " + (index + 1)));
     var type = String(node.type || "");
@@ -3192,7 +3193,8 @@
       server: server,
       port: port,
       source: source,
-      key: [name, type, server, port, source].join("\u0001"),
+      single: Boolean(single),
+      key: [name, type, server, port, source, single ? "single" : ""].join("\u0001"),
       haystack: (name + " " + type + " " + server + " " + port + " " + source).toLowerCase()
     };
   }
@@ -3202,6 +3204,7 @@
     var top = document.createElement("div");
     top.className = "node-top";
     appendText(top, info.name, "node-name");
+    if (info.single) appendText(top, "单节点", "vps-status single");
     appendText(top, info.type || "未指定协议", "badge b-" + info.type.replace(/[^a-z0-9_-]/gi, ""));
     fragment.appendChild(top);
     var serverLine = document.createElement("div");
@@ -3268,14 +3271,19 @@
     // 表单编辑中的节点禁止排序、拖拽与删除；先按稳定依据重新定位它的当前索引。
     if (state.nodeForm.open && state.nodeForm.index !== null) syncNodeFormTarget();
     var editingIndex = editingNodeIndex();
+    // 开启双协议回落后，已加入 VPS 组的节点只在上面的卡片里出现，这里只列单节点。
+    var dualView = dualProtocolView();
+    var singles = 0;
     var present = new Set(proxies);
     var previous = nodeGridView;
     var used = new Set();
     var cards = [];
     var entering = 0;
     proxies.forEach(function (proxy, index) {
-      var info = nodeCardInfo(proxy, index);
-      var matched = (!state.nodeProtocol || info.type === state.nodeProtocol) && (!query || info.haystack.indexOf(query) >= 0);
+      var grouped = Boolean(proxy && dualView.assigned[String(proxy.name)]);
+      if (!grouped) singles += 1;
+      var info = nodeCardInfo(proxy, index, dualView.enabled && !grouped);
+      var matched = !grouped && (!state.nodeProtocol || info.type === state.nodeProtocol) && (!query || info.haystack.indexOf(query) >= 0);
       if (matched) visible += 1;
       var cacheable = proxy !== null && typeof proxy === "object";
       var card = cacheable ? nodeCards.get(proxy) : null;
@@ -3304,6 +3312,7 @@
     });
     var statusText = "";
     if (!proxies.length) statusText = state.loading ? "正在加载节点…" : "暂无节点，请使用导入或手动添加";
+    else if (!visible && !singles) statusText = "所有节点都已加入 VPS 回落组";
     else if (!visible) statusText = "没有匹配当前筛选条件的节点";
     var desired = cards.slice();
     if (statusText) {
@@ -3337,14 +3346,18 @@
       }
     }
     nodeGridView = { nodes: proxies.slice(), cards: cards };
-    setText("nodeSummary", String(proxies.length) + " 个节点" + (query || state.nodeProtocol ? " · 当前显示 " + visible : ""));
+    setText("nodeSummary", String(proxies.length) + " 个节点" +
+      (dualView.enabled ? " · " + dualView.groups.length + " 个 VPS 组" : "") +
+      (query || state.nodeProtocol ? " · 当前显示 " + visible : ""));
+    renderSingleNodeDivider(singles);
     blockRendered("nodes");
   }
 
   // ============ 双协议回落：VPS 组卡片 ============
-  // 同一台 VPS 的 UDP / TCP 节点合成一个 fallback 组，排第一的成员是主用。
+  // 同一台 VPS 的 UDP / TCP 节点合成一个 fallback 组，排第一的成员是主用；卡片顺序就是 VPS 在各分组里的顺序。
   // 用户确认的分组存在 global_config.dual_protocol_groups；该字段缺失（老账号）时，
   // 生成器按 server 自动合并，这里也把服务端的合并建议当作当前分组展示，首次编辑时才写入草稿。
+  // 开关（dual_protocol_fallback）与新组默认主用协议（dual_protocol_priority）也在这里设置，不再放在全局设置。
   var UDP_NODE_TYPES = { hysteria2: true, hysteria: true, tuic: true, wireguard: true };
   // 与后端 RESERVED_GROUP_NAMES 保持一致：生成器自带的策略组名，VPS 组不能使用。
   var RESERVED_VPS_NAMES = ["Auto - UrlTest", "Proxy", "Domestic", "Others", "Microsoft", "AI Suite", "Apple",
@@ -3359,11 +3372,21 @@
     var enabled = gc.dual_protocol_fallback === true;
     var explicit = Array.isArray(gc.dual_protocol_groups) ? gc.dual_protocol_groups : null;
     var suggestions = Array.isArray(state.dualSuggestions) ? state.dualSuggestions : [];
+    var groups = explicit || (enabled ? suggestions : []);
+    // 只有开启时，组成员才会从“单节点”区隐藏。
+    var assigned = {};
+    if (enabled) {
+      groups.forEach(function (group) {
+        (group.members || []).forEach(function (member) { assigned[member] = true; });
+      });
+    }
     return {
       enabled: enabled,
       explicit: explicit,
-      groups: explicit || (enabled ? suggestions : []),
-      pending: explicit || !enabled ? suggestions : []
+      groups: groups,
+      pending: explicit || !enabled ? suggestions : [],
+      assigned: assigned,
+      priority: gc.dual_protocol_priority === "tcp" ? "tcp" : "udp"
     };
   }
 
@@ -3375,6 +3398,11 @@
     return map;
   }
 
+  function refreshVpsViews() {
+    renderVpsPanel();
+    renderNodes();
+  }
+
   // 修改 VPS 组：先把当前展示的分组（可能来自自动建议）写成显式分组，再交给 mutator 修改。
   function editVpsGroups(mutator) {
     if (!state.config.global_config) state.config.global_config = {};
@@ -3383,8 +3411,15 @@
     if (mutator(groups, gc) === false) return;
     gc.dual_protocol_groups = groups;
     if (!markDirty()) return;
-    renderVpsPanel();
-    renderBlock("global");
+    refreshVpsViews();
+  }
+
+  // 只改开关或默认优先协议，不把建议写成显式分组。
+  function setDualSetting(key, value) {
+    if (!state.config.global_config) state.config.global_config = {};
+    state.config.global_config[key] = value;
+    if (!markDirty()) return;
+    refreshVpsViews();
   }
 
   function vpsNameProblem(name, groups, selfIndex) {
@@ -3406,90 +3441,77 @@
     return name;
   }
 
+  function vpsButton(label, action, groupName, memberName, className) {
+    var button = makeButton(label, className || "chip-btn", null);
+    button.dataset.vpsAction = action;
+    if (groupName !== undefined) button.dataset.group = groupName;
+    if (memberName !== undefined) button.dataset.member = memberName;
+    return button;
+  }
+
   function vpsMemberRow(member, groupName, memberIndex, node) {
     var row = document.createElement("div");
     row.className = "vps-member";
     row.draggable = true;
     row.dataset.group = groupName;
     row.dataset.member = member;
+    row.title = "拖动调整主备顺序";
     appendText(row, "⋮⋮", "vps-grip").setAttribute("aria-hidden", "true");
     appendText(row, memberIndex === 0 ? "主用" : "备用", memberIndex === 0 ? "vps-tag vps-tag-primary" : "vps-tag");
     var label = document.createElement("span");
     label.className = "vps-member-label";
     appendText(label, member, "vps-member-name").title = member;
     var type = String(node && node.type || "").toLowerCase();
-    appendText(label, (type || "未知协议") + " · " + (UDP_NODE_TYPES[type] ? "UDP" : "TCP"), "vps-member-meta");
+    var server = String(node && (node.server || node.ip) || "");
+    var port = node && node.port !== undefined && node.port !== null ? ":" + node.port : "";
+    appendText(label, (type || "未知协议") + " · " + (UDP_NODE_TYPES[type] ? "UDP" : "TCP") + (server ? " · " + server + port : ""), "vps-member-meta");
     row.appendChild(label);
     var actions = document.createElement("span");
     actions.className = "vps-member-actions";
-    if (memberIndex > 0) {
-      var up = makeButton("设为主用", "chip-btn", null);
-      up.dataset.vpsAction = "primary";
-      up.dataset.group = groupName;
-      up.dataset.member = member;
-      actions.appendChild(up);
-    }
-    var remove = makeButton("移出", "chip-btn", null);
-    remove.dataset.vpsAction = "remove";
-    remove.dataset.group = groupName;
-    remove.dataset.member = member;
+    if (memberIndex > 0) actions.appendChild(vpsButton("设主用", "primary", groupName, member));
+    actions.appendChild(vpsButton("编辑", "edit", groupName, member));
+    var remove = vpsButton("移出", "remove", groupName, member);
     remove.setAttribute("aria-label", "把 " + member + " 移出该 VPS 组");
     actions.appendChild(remove);
     row.appendChild(actions);
     return row;
   }
 
-  function vpsGroupCard(group, nodes, freeNodes, editable) {
+  function vpsGroupCard(group, nodes, freeNodes) {
     var groupName = String(group.name || "");
     var card = document.createElement("div");
     card.className = "vps-card";
+    card.dataset.card = groupName;
     var members = (group.members || []).filter(function (member) { return nodes[member]; });
     var head = document.createElement("div");
     head.className = "vps-card-head";
-    if (editable) {
-      var nameInput = document.createElement("input");
-      nameInput.className = "vps-name-input";
-      nameInput.value = group.name || "";
-      nameInput.dataset.vpsName = groupName;
-      nameInput.setAttribute("aria-label", "VPS 组名");
-      nameInput.maxLength = 128;
-      head.appendChild(nameInput);
-    } else {
-      appendText(head, group.name || "", "vps-card-name");
-    }
-    appendText(head, members.length >= 2 ? "自动回落" : "成员不足，不会生成",
+    var grip = appendText(head, "⋮⋮", "vps-grip vps-card-grip");
+    grip.title = "拖动调整 VPS 顺序";
+    grip.setAttribute("aria-hidden", "true");
+    var nameInput = document.createElement("input");
+    nameInput.className = "vps-name-input";
+    nameInput.value = groupName;
+    nameInput.dataset.vpsName = groupName;
+    nameInput.setAttribute("aria-label", "VPS 组名");
+    nameInput.maxLength = 128;
+    head.appendChild(nameInput);
+    appendText(head, members.length >= 2 ? "VPS 回落组" : "成员不足，不会生成",
       members.length >= 2 ? "vps-status ok" : "vps-status warn");
-    var servers = [];
-    members.forEach(function (member) {
-      var server = String(nodes[member].server || "");
-      if (server && servers.indexOf(server) < 0) servers.push(server);
-    });
-    appendText(head, servers.join(" / "), "vps-servers");
-    if (editable) {
-      var split = makeButton("拆分", "chip-btn danger", null);
-      split.dataset.vpsAction = "split";
-      split.dataset.group = groupName;
-      split.title = "解散该 VPS 组，成员恢复为独立节点";
-      head.appendChild(split);
-    }
+    var split = vpsButton("拆分", "split", groupName, undefined, "chip-btn danger");
+    split.title = "解散该 VPS 组，成员恢复为单节点";
+    head.appendChild(split);
     card.appendChild(head);
     members.forEach(function (member, memberIndex) {
-      var row = vpsMemberRow(member, groupName, memberIndex, nodes[member]);
-      if (!editable) {
-        row.draggable = false;
-        var actions = row.querySelector(".vps-member-actions");
-        if (actions) actions.remove();
-      }
-      card.appendChild(row);
+      card.appendChild(vpsMemberRow(member, groupName, memberIndex, nodes[member]));
     });
-    if (editable && freeNodes.length) {
+    if (freeNodes.length) {
       var add = document.createElement("select");
       add.className = "vps-add-select";
       add.dataset.vpsAdd = groupName;
       add.setAttribute("aria-label", "向该 VPS 组添加节点");
       var placeholder = document.createElement("option");
       placeholder.value = "";
-      placeholder.textContent = "＋ 添加节点到该组…";
+      placeholder.textContent = "＋ 添加单节点到该组…";
       add.appendChild(placeholder);
       freeNodes.forEach(function (name) {
         var option = document.createElement("option");
@@ -3507,8 +3529,10 @@
     if (!panel) return;
     var view = dualProtocolView();
     var nodes = proxyByName();
-    var hasContent = view.enabled || view.pending.length || (view.explicit && view.explicit.length);
-    panel.hidden = !hasContent || state.loading;
+    var nodeNames = Object.keys(nodes);
+    // 重绘会移除正在拖动的元素，dragend 不再冒泡到面板：在这里复位拖动状态。
+    vpsDrag = null;
+    panel.hidden = state.loading || !nodeNames.length;
     clearElement(panel);
     if (panel.hidden) {
       blockRendered("vps");
@@ -3517,43 +3541,76 @@
     var head = document.createElement("div");
     head.className = "vps-head";
     appendText(head, "VPS 回落组", "vps-title");
-    appendText(head, "同一台 VPS 的多个协议合成一组，主用不可用时自动切到备用", "panel-hint");
+    appendText(head, view.enabled ? "已开启" : "未开启", view.enabled ? "vps-status ok" : "vps-status off");
+    appendText(head, view.enabled
+      ? "同一台 VPS 的多个协议合成一组，主用不可用时自动切到备用；拖动卡片调整顺序"
+      : "开启后可把同一台 VPS 的 UDP / TCP 节点合成自动回落组", "panel-hint");
+    var tools = document.createElement("span");
+    tools.className = "vps-tools";
     if (view.enabled) {
-      var create = makeButton("＋ 新建 VPS 组", "chip-btn", null);
-      create.dataset.vpsAction = "create";
-      head.appendChild(create);
+      var priority = document.createElement("select");
+      priority.className = "vps-priority";
+      priority.dataset.vpsPriority = "1";
+      priority.setAttribute("aria-label", "新合并 VPS 组的默认主用协议");
+      priority.title = view.explicit
+        ? "新合并的 VPS 组默认哪种协议做主用；已有卡片以卡片顺序为准"
+        : "所有 VPS 组默认哪种协议做主用；编辑卡片后以卡片顺序为准";
+      [["udp", "新组 UDP 主用"], ["tcp", "新组 TCP 主用"]].forEach(function (item) {
+        var option = document.createElement("option");
+        option.value = item[0];
+        option.textContent = item[1];
+        option.selected = item[0] === view.priority;
+        priority.appendChild(option);
+      });
+      tools.appendChild(priority);
+      tools.appendChild(vpsButton("＋ 新建 VPS 组", "create"));
+      tools.appendChild(vpsButton("关闭回落", "disable", undefined, undefined, "chip-btn danger"));
+    } else {
+      // 关闭时始终可以“只开启”：已保存的分组（或老账号的自动合并）原样恢复，不必连同新建议一起合并。
+      tools.appendChild(vpsButton("开启双协议回落", "enable"));
     }
+    head.appendChild(tools);
     panel.appendChild(head);
 
-    if (view.pending.length || (!view.enabled && view.explicit && view.explicit.length)) {
+    if (view.pending.length) {
       var banner = document.createElement("div");
       banner.className = "vps-banner";
-      var text = view.pending.length
-        ? "发现 " + view.pending.length + " 台 VPS 同时有 UDP 和 TCP 协议，可以合并成自动回落组：" +
-          view.pending.map(function (item) { return item.name; }).join("、")
-        : "双协议回落未开启，已保存的 " + view.explicit.length + " 个 VPS 组不会生成";
-      appendText(banner, text, "vps-banner-text");
-      var accept = makeButton(view.enabled ? "全部合并" : (view.pending.length ? "开启并合并" : "开启双协议回落"), "btn btn-primary", null);
-      accept.dataset.vpsAction = "accept";
-      banner.appendChild(accept);
+      appendText(banner, "发现 " + view.pending.length + " 台 VPS 同时有 UDP 和 TCP 协议，可以合并成自动回落组：" +
+        view.pending.map(function (item) { return item.name; }).join("、"), "vps-banner-text");
+      banner.appendChild(vpsButton(view.enabled ? "全部合并" : "开启并合并", "accept", undefined, undefined, "btn btn-primary"));
       panel.appendChild(banner);
+    }
+    if (!view.enabled && view.explicit && view.explicit.length) {
+      var note = document.createElement("div");
+      note.className = "vps-banner";
+      appendText(note, "双协议回落已关闭，已保存的 " + view.explicit.length + " 个 VPS 组暂不生成，重新开启后恢复", "vps-banner-text");
+      panel.appendChild(note);
     }
 
     if (view.enabled) {
-      var assigned = {};
-      view.groups.forEach(function (group) {
-        (group.members || []).forEach(function (member) { assigned[member] = true; });
-      });
-      var freeNodes = Object.keys(nodes).filter(function (name) { return !assigned[name]; });
+      var freeNodes = nodeNames.filter(function (name) { return !view.assigned[name]; });
       var list = document.createElement("div");
       list.className = "vps-list";
       view.groups.forEach(function (group) {
-        list.appendChild(vpsGroupCard(group, nodes, freeNodes, true));
+        list.appendChild(vpsGroupCard(group, nodes, freeNodes));
       });
-      if (!view.groups.length) appendText(list, "还没有 VPS 组。点“新建 VPS 组”手动把同一台 VPS 的节点放在一起。", "vps-empty");
+      if (!view.groups.length) appendText(list, "还没有 VPS 组。点“新建 VPS 组”把同一台 VPS 的节点放在一起。", "vps-empty");
       panel.appendChild(list);
     }
     blockRendered("vps");
+  }
+
+  // 单节点区的分隔标题：只在开启双协议回落时显示，和上面的 VPS 回落组区分开。
+  function renderSingleNodeDivider(singleCount) {
+    var divider = $("singleNodeDivider");
+    if (!divider) return;
+    var view = dualProtocolView();
+    divider.hidden = state.loading || !view.enabled;
+    if (divider.hidden) return;
+    clearElement(divider);
+    appendText(divider, "单节点", "node-divider-label");
+    appendText(divider, "", "node-divider-line").setAttribute("aria-hidden", "true");
+    appendText(divider, singleCount + " 个 · 未加入 VPS 回落组，可用上移 / 下移或拖动排序", "node-divider-hint");
   }
 
   // 按组名定位：界面过期（例如回包前节点被删、建议列表变化）时找不到就放弃并重绘，绝不改错组。
@@ -3566,7 +3623,7 @@
 
   function staleVpsPanel() {
     showToast("VPS 卡片已更新，请重新操作", "info");
-    renderVpsPanel();
+    refreshVpsViews();
   }
 
   function editVpsGroup(groupName, mutator) {
@@ -3581,6 +3638,16 @@
       group.members = (group.members || []).filter(function (member) { return nodes[member]; });
       return mutator(group, groups, gc);
     });
+  }
+
+  function moveInList(list, item, target) {
+    var from = list.indexOf(item);
+    if (from < 0 || list.indexOf(target) < 0 || item === target) return false;
+    list.splice(from, 1);
+    var to = list.indexOf(target);
+    // 往后拖放到目标之后，往前拖放到目标之前。
+    list.splice(from <= to ? to + 1 : to, 0, item);
+    return true;
   }
 
   function handleVpsAction(action, groupName, memberName) {
@@ -3605,29 +3672,42 @@
       showToast(accepted ? "已合并 " + accepted + " 个 VPS 组" : "已开启双协议回落", "info");
       return;
     }
+    if (action === "enable" || action === "disable") {
+      setDualSetting("dual_protocol_fallback", action === "enable");
+      showToast(action === "enable" ? "已开启双协议回落" : "已关闭双协议回落，VPS 组保留，重新开启后恢复", "info");
+      return;
+    }
     if (action === "create") {
       editVpsGroups(function (groups) {
         groups.push({ name: uniqueVpsName("新 VPS 组", groups), members: [] });
       });
       return;
     }
+    if (action === "edit") {
+      var index = (state.config.proxies || []).findIndex(function (node) { return node && String(node.name) === memberName; });
+      if (index < 0) return staleVpsPanel();
+      openNodeForm(index);
+      var form = $("nodeFormPanel");
+      if (form && form.scrollIntoView) form.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     if (action === "split") {
       if (!findVpsGroup(dualProtocolView().groups, groupName)) return staleVpsPanel();
       editVpsGroups(function (groups) {
-        var index = groups.indexOf(findVpsGroup(groups, groupName));
-        if (index < 0) return false;
-        groups.splice(index, 1);
+        var position = groups.indexOf(findVpsGroup(groups, groupName));
+        if (position < 0) return false;
+        groups.splice(position, 1);
       });
       return;
     }
     editVpsGroup(groupName, function (group) {
-      var index = group.members.indexOf(memberName);
-      if (index < 0) return false;
+      var position = group.members.indexOf(memberName);
+      if (position < 0) return false;
       if (action === "primary") {
-        group.members.splice(index, 1);
+        group.members.splice(position, 1);
         group.members.unshift(memberName);
       } else if (action === "remove") {
-        group.members.splice(index, 1);
+        group.members.splice(position, 1);
       } else {
         return false;
       }
@@ -3662,6 +3742,25 @@
     if (relinked) showToast(relinked + " 个节点的链式代理已同步改为新组名", "info");
   }
 
+  function vpsDropTarget(event) {
+    if (!vpsDrag || !event.target.closest) return null;
+    if (vpsDrag.kind === "member") {
+      var row = event.target.closest(".vps-member");
+      return row && row.dataset.group === vpsDrag.group ? row : null;
+    }
+    var card = event.target.closest(".vps-card");
+    return card && card.dataset.card !== vpsDrag.group ? card : null;
+  }
+
+  function clearVpsDrag(panel) {
+    vpsDrag = null;
+    panel.querySelectorAll(".dragging, .drop-target").forEach(function (item) {
+      item.classList.remove("dragging");
+      item.classList.remove("drop-target");
+    });
+    panel.querySelectorAll(".vps-card[draggable]").forEach(function (card) { card.removeAttribute("draggable"); });
+  }
+
   function bindVpsPanel() {
     var panel = $("vpsPanel");
     if (!panel) return;
@@ -3674,6 +3773,8 @@
       var target = event.target;
       if (target.dataset.vpsName !== undefined) {
         renameVpsGroup(target.dataset.vpsName, target);
+      } else if (target.dataset.vpsPriority !== undefined) {
+        setDualSetting("dual_protocol_priority", target.value === "tcp" ? "tcp" : "udp");
       } else if (target.dataset.vpsAdd !== undefined && target.value) {
         var member = target.value;
         editVpsGroup(target.dataset.vpsAdd, function (group, groups) {
@@ -3689,41 +3790,60 @@
     panel.addEventListener("keydown", function (event) {
       if (event.key === "Enter" && event.target.dataset.vpsName !== undefined) event.target.blur();
     });
-    // 拖动成员调整顺序，只在同一个 VPS 组内生效。
+    // 卡片只在按住拖动手柄时可拖，避免影响组名输入框里的文字选择。
+    panel.addEventListener("mousedown", function (event) {
+      var grip = event.target.closest && event.target.closest(".vps-card-grip");
+      if (grip) grip.closest(".vps-card").setAttribute("draggable", "true");
+    });
+    panel.addEventListener("mouseup", function () {
+      if (!vpsDrag) panel.querySelectorAll(".vps-card[draggable]").forEach(function (card) { card.removeAttribute("draggable"); });
+    });
     panel.addEventListener("dragstart", function (event) {
       var row = event.target.closest && event.target.closest(".vps-member");
-      if (!row) return;
-      vpsDrag = { group: row.dataset.group, member: row.dataset.member };
-      row.classList.add("dragging");
+      var card = event.target.closest && event.target.closest(".vps-card");
+      if (row) {
+        vpsDrag = { kind: "member", group: row.dataset.group, member: row.dataset.member };
+        row.classList.add("dragging");
+      } else if (card && card.getAttribute("draggable") === "true") {
+        vpsDrag = { kind: "card", group: card.dataset.card };
+        card.classList.add("dragging");
+      } else {
+        return;
+      }
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", row.dataset.member);
+        event.dataTransfer.setData("text/plain", vpsDrag.member || vpsDrag.group);
       }
     });
     panel.addEventListener("dragover", function (event) {
-      var row = event.target.closest && event.target.closest(".vps-member");
-      if (!row || !vpsDrag || row.dataset.group !== vpsDrag.group) return;
+      var target = vpsDropTarget(event);
+      if (!target) return;
       event.preventDefault();
+      panel.querySelectorAll(".drop-target").forEach(function (item) { if (item !== target) item.classList.remove("drop-target"); });
+      target.classList.add("drop-target");
     });
     panel.addEventListener("drop", function (event) {
-      var row = event.target.closest && event.target.closest(".vps-member");
+      var target = vpsDropTarget(event);
       var drag = vpsDrag;
-      vpsDrag = null;
-      if (!row || !drag || row.dataset.group !== drag.group) return;
+      clearVpsDrag(panel);
+      if (!target || !drag) return;
       event.preventDefault();
-      var target = row.dataset.member;
-      if (target === drag.member) return;
-      editVpsGroup(drag.group, function (group) {
-        var from = group.members.indexOf(drag.member);
-        if (from < 0 || group.members.indexOf(target) < 0) return false;
-        group.members.splice(from, 1);
-        group.members.splice(group.members.indexOf(target) + (from <= group.members.indexOf(target) ? 1 : 0), 0, drag.member);
+      if (drag.kind === "member") {
+        var to = target.dataset.member;
+        editVpsGroup(drag.group, function (group) {
+          return moveInList(group.members, drag.member, to);
+        });
+        return;
+      }
+      var toGroup = target.dataset.card;
+      editVpsGroups(function (groups) {
+        var item = findVpsGroup(groups, drag.group);
+        var goal = findVpsGroup(groups, toGroup);
+        if (!item || !goal) return false;
+        return moveInList(groups, item, goal);
       });
     });
-    panel.addEventListener("dragend", function () {
-      vpsDrag = null;
-      panel.querySelectorAll(".vps-member.dragging").forEach(function (row) { row.classList.remove("dragging"); });
-    });
+    panel.addEventListener("dragend", function () { clearVpsDrag(panel); });
   }
 
   // 拖拽排序（对齐 V1）：事件委托在 #nodeGrid 上，基于卡片 data-index 的真实索引交换，
@@ -3795,6 +3915,12 @@
 
   function changeNodeOrder(index, direction) {
     var next = index + direction;
+    // 开启双协议回落时，已入组的节点在网格里是隐藏的：跳过它们，与相邻的可见单节点交换。
+    var assigned = dualProtocolView().assigned;
+    while (next >= 0 && next < state.config.proxies.length &&
+           state.config.proxies[next] && assigned[String(state.config.proxies[next].name)]) {
+      next += direction;
+    }
     if (next < 0 || next >= state.config.proxies.length) return;
     if (rejectIfEditing(index)) return;
     var list = state.config.proxies;
@@ -4602,7 +4728,10 @@
           state.nodeQuery,
           state.nodeProtocol,
           form.open ? String(form.index) + objectId(form.ref) : "-",
-          state.loading
+          state.loading,
+          JSON.stringify(Object.keys(dualProtocolView().assigned)),
+          dualProtocolView().groups.length,
+          dualProtocolView().enabled
         ].join("|");
       },
       render: function () { renderNodes(); }
@@ -4615,8 +4744,9 @@
         var proxies = Array.isArray(state.config.proxies) ? state.config.proxies : [];
         return JSON.stringify([
           gc.dual_protocol_fallback === true,
+          gc.dual_protocol_priority,
           gc.dual_protocol_groups === undefined ? null : gc.dual_protocol_groups,
-          proxies.map(function (node) { return node ? [node.name, node.type, node.server] : null; }),
+          proxies.map(function (node) { return node ? [node.name, node.type, node.server, node.ip, node.port] : null; }),
           state.dualSuggestions,
           state.loading
         ]);

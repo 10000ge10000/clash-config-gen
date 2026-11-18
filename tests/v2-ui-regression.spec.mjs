@@ -2022,34 +2022,14 @@ test('V2 自定义规则表单：IP 规则默认 no-resolve，规则集默认优
   expect(await state(page, () => Object.keys(window.v2State.config.custom_rule_providers))).not.toContain('cn');
 });
 
-test('V2 双协议回落设置：开关显示优先协议，选项带说明并写入草稿', async ({ page }) => {
+test('V2 全局设置不再包含双协议回落（已移到节点页）', async ({ page }) => {
   await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
   await signInViaForm(page, adminUsername, adminPassword);
   await page.locator('#step-tab-3').click();
-  const group = page.locator('#globalSchemaPanel details[data-group="fallback"]');
-  await expect(group.locator('summary')).toHaveText('双协议回落');
-  await group.locator('summary').click();
-  const toggle = page.locator('#globalSchemaPanel [data-field-key="dual_protocol_fallback"]');
-  const priority = page.locator('#globalSchemaPanel [data-field-key="dual_protocol_priority"]');
-  await expect(toggle).not.toBeChecked();
-  await expect(priority).toBeHidden();
-
-  await toggle.check();
-  await expect(priority).toBeVisible();
-  await expect(priority.locator('option')).toHaveText(['UDP 优先（HY2 等）', 'TCP 优先（AnyTLS 等）']);
-  await expect(priority).toHaveValue('udp');
-  await priority.selectOption('tcp');
-  await waitForSaved(page);
-  expect(await state(page, () => {
-    const config = window.v2State.config.global_config;
-    return [config.dual_protocol_fallback, config.dual_protocol_priority];
-  })).toEqual([true, 'tcp']);
-
-  // 还原，避免影响共用管理员账号的其他用例。
-  await priority.selectOption('udp');
-  await toggle.uncheck();
-  await waitForSaved(page);
-  await expect(priority).toBeHidden();
+  await expect(page.locator('#globalSchemaPanel details[data-group="speed"]')).toHaveCount(1);
+  await expect(page.locator('#globalSchemaPanel details[data-group="fallback"]')).toHaveCount(0);
+  await expect(page.locator('#globalSchemaPanel [data-field-key="dual_protocol_fallback"]')).toHaveCount(0);
+  await expect(page.locator('#globalSchemaPanel [data-field-key="dual_protocol_priority"]')).toHaveCount(0);
 });
 
 test('V2 节点改名同步链式代理：上游改名后下游 dialer-proxy 跟着改', async ({ page }) => {
@@ -2290,7 +2270,7 @@ test('V2 分流规则回归：列表顺序与生成 YAML 一致，兜底固定�
   tracker.assertClean();
 });
 
-test('V2 VPS 回落组卡片：合并建议、确认、改名、设主用、拆分都写入草稿', async ({ page }) => {
+test('V2 VPS 回落组卡片：开关、合并建议、改名、主备与卡片排序、单节点分区', async ({ page }) => {
   test.setTimeout(120_000);
   const tracker = trackPageFailures(page);
   await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' });
@@ -2306,6 +2286,8 @@ test('V2 VPS 回落组卡片：合并建议、确认、改名、设主用、拆�
     '  - {name: VpsA-HY2, type: hysteria2, server: 1.1.1.1, port: 443, password: p}',
     '  - {name: VpsA-AnyTLS, type: anytls, server: 1.1.1.1, port: 8443, password: p}',
     '  - {name: Solo, type: ss, server: 2.2.2.2, port: 8388, cipher: aes-128-gcm, password: p}',
+    '  - {name: VpsB-TUIC, type: tuic, server: 3.3.3.3, port: 443, uuid: 00000000-0000-0000-0000-000000000001, password: p}',
+    '  - {name: VpsB-VLESS, type: vless, server: 3.3.3.3, port: 443, uuid: 00000000-0000-0000-0000-000000000001}',
   ].join('\n') + '\n';
   const importResponse = await importMethod(page, 'yaml', yaml);
   expect(importResponse.status()).toBe(200);
@@ -2313,27 +2295,40 @@ test('V2 VPS 回落组卡片：合并建议、确认、改名、设主用、拆�
   await page.locator('#step-tab-2').click();
 
   const panel = page.locator('#vpsPanel');
-  const groups = () => state(page, () => window.v2State.config.global_config.dual_protocol_groups);
-  // 未开启时只给建议，不改草稿。
+  const gc = () => state(page, () => window.v2State.config.global_config);
+  const gridNames = () => page.locator('#nodeGrid .node-card:not([hidden]) .node-name').allTextContents();
+  // 未开启：只给建议，不改草稿；单节点区没有分隔标题和标记。
+  await expect(panel.locator('.vps-head')).toContainText('未开启');
   await expect(panel.locator('.vps-banner')).toContainText('VpsA');
-  expect(await groups()).toBeUndefined();
+  expect((await gc()).dual_protocol_groups).toBeUndefined();
+  await expect(page.locator('#singleNodeDivider')).toBeHidden();
   await panel.getByRole('button', { name: '开启并合并' }).click();
   await waitForSaved(page);
-  expect(await state(page, () => window.v2State.config.global_config.dual_protocol_fallback)).toBe(true);
-  expect(await groups()).toEqual([{ name: 'VpsA', members: ['VpsA-HY2', 'VpsA-AnyTLS'] }]);
-  const card = panel.locator('.vps-card');
-  await expect(card).toHaveCount(1);
-  await expect(card.locator('.vps-member').first()).toContainText('主用');
-  await expect(card.locator('.vps-member').first()).toContainText('VpsA-HY2');
+  expect((await gc()).dual_protocol_fallback).toBe(true);
+  expect((await gc()).dual_protocol_groups).toEqual([
+    { name: 'VpsA', members: ['VpsA-HY2', 'VpsA-AnyTLS'] },
+    { name: 'VpsB', members: ['VpsB-TUIC', 'VpsB-VLESS'] },
+  ]);
+  const cards = panel.locator('.vps-card');
+  await expect(cards).toHaveCount(2);
   await expect(panel.locator('.vps-banner')).toHaveCount(0);
+  // 单节点区：只列未入组的节点，带“单节点”标记和分隔标题。
+  await expect(page.locator('#singleNodeDivider')).toContainText('单节点');
+  await expect(page.locator('#singleNodeDivider')).toContainText('1 个');
+  expect(await gridNames()).toEqual(['Solo']);
+  await expect(page.locator('#nodeGrid .node-card:not([hidden]) .vps-status.single')).toHaveText('单节点');
 
-  // 设主用：AnyTLS 排到第一位。
-  await card.locator('.vps-member').nth(1).getByRole('button', { name: '设为主用' }).click();
+  // 默认主用协议在 VPS 区设置。
+  await panel.locator('.vps-priority').selectOption('tcp');
   await waitForSaved(page);
-  expect((await groups())[0].members).toEqual(['VpsA-AnyTLS', 'VpsA-HY2']);
+  expect((await gc()).dual_protocol_priority).toBe('tcp');
 
-  // 改名：与节点重名被拒绝，正常名字写入草稿。
-  const nameInput = card.locator('.vps-name-input');
+  // 设主用、改名（与节点重名被拒）。
+  const cardA = cards.first();
+  await cardA.locator('.vps-member').nth(1).getByRole('button', { name: '设主用' }).click();
+  await waitForSaved(page);
+  expect((await gc()).dual_protocol_groups[0].members).toEqual(['VpsA-AnyTLS', 'VpsA-HY2']);
+  const nameInput = cardA.locator('.vps-name-input');
   await nameInput.fill('Solo');
   await nameInput.press('Enter');
   await expect(page.locator('.toast').last()).toContainText('不能与节点重名');
@@ -2341,15 +2336,53 @@ test('V2 VPS 回落组卡片：合并建议、确认、改名、设主用、拆�
   await nameInput.fill('香港');
   await nameInput.press('Enter');
   await waitForSaved(page);
-  expect((await groups())[0].name).toBe('香港');
+  expect((await gc()).dual_protocol_groups[0].name).toBe('香港');
 
-  await page.screenshot({ path: test.info().outputPath('vps-panel.png'), fullPage: false, clip: await panel.boundingBox() });
-
-  // 拆分：分组清空，服务端重新给出合并建议。
-  await card.getByRole('button', { name: '拆分' }).click();
+  // 拖动卡片：把 VpsB 拖到 香港 前面。
+  await cards.nth(1).locator('.vps-card-grip').hover();
+  await page.mouse.down();
+  await cardA.locator('.vps-card-head').hover({ position: { x: 20, y: 10 } });
+  await cardA.locator('.vps-card-head').hover({ position: { x: 30, y: 12 } });
+  await page.mouse.up();
   await waitForSaved(page);
-  expect(await groups()).toEqual([]);
-  await expect(panel.locator('.vps-banner')).toContainText('VpsA');
+  expect((await gc()).dual_protocol_groups.map((group) => group.name)).toEqual(['VpsB', '香港']);
+
+  // 成员行“编辑”打开对应节点的表单。
+  await panel.locator('.vps-member', { hasText: 'VpsB-TUIC' }).getByRole('button', { name: '编辑' }).click();
+  await expect(page.locator('#nodeFormTitle')).toHaveText(/编辑节点 · tuic/);
+  await page.locator('#cancelNodeBtn').click();
+
+  await page.screenshot({ path: test.info().outputPath('vps-panel.png'), fullPage: false, clip: await page.locator('#step2 .panel').first().boundingBox() });
+
+  // 关闭回落：分组保留，所有节点回到单节点区（不再显示标记）。
+  await panel.getByRole('button', { name: '关闭回落' }).click();
+  await waitForSaved(page);
+  expect((await gc()).dual_protocol_fallback).toBe(false);
+  expect((await gc()).dual_protocol_groups).toHaveLength(2);
+  await expect(panel.locator('.vps-banner')).toContainText('暂不生成');
+  await expect(page.locator('#singleNodeDivider')).toBeHidden();
+  expect((await gridNames()).length).toBe(5);
+  await expect(page.locator('#nodeGrid .vps-status.single')).toHaveCount(0);
+  await panel.getByRole('button', { name: '开启双协议回落' }).click();
+  await waitForSaved(page);
+  expect((await gc()).dual_protocol_groups.map((group) => group.name)).toEqual(['VpsB', '香港']);
+
+  // 单节点的上移/下移跳过隐藏的已入组节点。再加一个单节点，让 Solo2 与 Solo 之间隔着入组节点。
+  await page.locator('#step-tab-1').click();
+  const added = await importMethod(page, 'yaml', 'proxies:\n  - {name: Solo2, type: ss, server: 4.4.4.4, port: 8388, cipher: aes-128-gcm, password: p}\n');
+  expect(added.status()).toBe(200);
+  await waitForSaved(page);
+  await page.locator('#step-tab-2').click();
+  expect(await gridNames()).toEqual(['Solo', 'Solo2']);
+  await page.locator('#nodeGrid .node-card', { hasText: 'Solo2' }).getByRole('button', { name: '上移' }).click();
+  await waitForSaved(page);
+  expect(await gridNames()).toEqual(['Solo2', 'Solo']);
+
+  // 拆分：分组移除，服务端重新给出合并建议。
+  await panel.locator('.vps-card').first().getByRole('button', { name: '拆分' }).click();
+  await waitForSaved(page);
+  expect((await gc()).dual_protocol_groups.map((group) => group.name)).toEqual(['香港']);
+  await expect(panel.locator('.vps-banner')).toContainText('VpsB');
   await expect(panel.getByRole('button', { name: '全部合并' })).toBeVisible();
   tracker.assertClean();
 });

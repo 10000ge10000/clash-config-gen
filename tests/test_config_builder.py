@@ -1327,16 +1327,36 @@ class DualProtocolFallbackTest(unittest.TestCase):
             ["香港", "Dedi-TUIC", "Dedi-VLESS", "Solo-HY2-a", "Solo-HY2-b"],
             groups["Auto - UrlTest"]["proxies"],
         )
-        self.assertEqual(["Ali-1/HK-HY2", "Hw/SG", "Ali-1/HK-AnyTLS"], groups["单协议节点"]["proxies"])
+        self.assertEqual(["Ali-1/HK-AnyTLS", "Ali-1/HK-HY2", "Hw/SG"], groups["单协议节点"]["proxies"])
         self.assertEqual([], validate_config(config)[0])
 
-    def test_unconfirmed_groups_keep_legacy_output(self):
-        legacy = self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp")
+    def test_explicit_group_card_order_drives_choice_order(self):
+        groups_cfg = [
+            {"name": "Dedi", "members": ["Dedi-VLESS", "Dedi-TUIC"]},
+            {"name": "Ali-1/HK", "members": ["Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"]},
+        ]
+        groups = self.groups(self.build(dual_protocol_fallback=True, dual_protocol_groups=groups_cfg))
+        # VPS 组按卡片顺序排在前面，单节点按节点列表顺序排在后面。
+        self.assertEqual(["Dedi", "Ali-1/HK", "Hw/SG", "Solo-HY2-a", "Solo-HY2-b"], groups["Auto - UrlTest"]["proxies"])
+        self.assertEqual(
+            ["Auto - UrlTest", "DIRECT", "Dedi", "Ali-1/HK", "Hw/SG", "Solo-HY2-a", "Solo-HY2-b", "单协议节点"],
+            groups["Proxy"]["proxies"],
+        )
+        self.assertEqual(["Dedi-VLESS", "Dedi-TUIC", "Ali-1/HK-HY2", "Ali-1/HK-AnyTLS"], groups["单协议节点"]["proxies"])
+
+    def test_confirming_suggestions_keeps_groups_and_moves_vps_first(self):
+        legacy = self.groups(self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp"))
         from config_builder import dual_protocol_suggestions
 
         suggestions = dual_protocol_suggestions(self.PROXIES, {"dual_protocol_priority": "tcp"})
-        confirmed = self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp", dual_protocol_groups=suggestions)
-        self.assertEqual(legacy["proxy-groups"], confirmed["proxy-groups"])
+        confirmed = self.groups(
+            self.build(dual_protocol_fallback=True, dual_protocol_priority="tcp", dual_protocol_groups=suggestions)
+        )
+        # 回落组本身完全一致；确认后 VPS 组统一排在单节点前面。
+        for name in ("Ali-1/HK", "Dedi"):
+            self.assertEqual(legacy[name], confirmed[name])
+        self.assertEqual(sorted(legacy["Auto - UrlTest"]["proxies"]), sorted(confirmed["Auto - UrlTest"]["proxies"]))
+        self.assertEqual(["Ali-1/HK", "Dedi", "Hw/SG"], confirmed["Auto - UrlTest"]["proxies"][:3])
 
     def test_suggestions_skip_nodes_already_grouped_and_taken_names(self):
         from config_builder import dual_protocol_suggestions
@@ -1418,10 +1438,10 @@ class DualProtocolFallbackTest(unittest.TestCase):
                 _normalize_draft({"proxies": [], "global_config": bad})
             self.assertEqual(400, context.exception.status_code)
 
+        # 开关与默认主用协议改在节点页的 VPS 回落组区设置，全局设置不再展示。
         schema = build_global_config_schema()
-        self.assertEqual("checkbox", schema["dual_protocol_fallback"]["type"])
-        self.assertEqual({"key": "dual_protocol_fallback", "equals": True}, schema["dual_protocol_priority"]["visible"])
-        self.assertEqual(["udp", "tcp"], [option[0] for option in schema["dual_protocol_priority"]["options"]])
+        self.assertNotIn("dual_protocol_fallback", schema)
+        self.assertNotIn("dual_protocol_priority", schema)
 
 
 class DialerProxyValidationTest(unittest.TestCase):

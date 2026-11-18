@@ -256,26 +256,6 @@ def build_global_config_schema() -> dict:
         "url_test_url": _global_schema_field("url_test_url", "测速 URL", "text"),
         "url_test_interval": _global_schema_field("url_test_interval", "测速间隔", "number"),
         "url_test_tolerance": _global_schema_field("url_test_tolerance", "测速容差", "number"),
-        "dual_protocol_fallback": _global_schema_field(
-            "dual_protocol_fallback",
-            "双协议回落模式",
-            "checkbox",
-            help_=(
-                "把同一台 VPS 上的 UDP 类（HY2、TUIC 等）和 TCP 类（AnyTLS、VLESS 等）节点合成一个 fallback 组："
-                "主用协议不可用时自动改用备用协议，恢复后自动切回。"
-                "合并在“节点管理”页的 VPS 回落组卡片里完成：系统按 server 地址给出合并建议，你确认后可以改名、调整主备顺序、拆分或手动合并。"
-                "Auto - UrlTest 在这些 VPS 组之间测速；Proxy 和应用分组只列 VPS 组和未合并的节点；需要强制某个协议时，在分组里选「单协议节点」子分组再挑具体节点。"
-                "关闭本模式后回落组不会生成，自定义规则请指向 Proxy 等固定组，不要直接指向回落组。"
-            ),
-        ),
-        "dual_protocol_priority": _global_schema_field(
-            "dual_protocol_priority",
-            "优先协议",
-            "select",
-            options=[["udp", "UDP 优先（HY2 等）"], ["tcp", "TCP 优先（AnyTLS 等）"]],
-            visible={"key": "dual_protocol_fallback", "equals": True},
-            help_="新合并的 VPS 组里哪种协议排第一作为主用；已在节点页确认过的组以卡片顺序为准，尚未确认的按此整体排序。",
-        ),
         "tcp_concurrent": _global_schema_field("tcp_concurrent", "TCP 并发", "checkbox", visible=core),
         "unified_delay": _global_schema_field("unified_delay", "统一延迟", "checkbox", visible=core),
         "enable_tun": _global_schema_field("enable_tun", "启用 TUN", "checkbox", visible=desktop),
