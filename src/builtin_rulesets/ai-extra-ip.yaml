@@ -1,0 +1,10 @@
+# AI 补充 IP 段（内置规则集 ai-extra-ip，behavior: ipcidr，默认目标 AI Suite，规则带 no-resolve）
+#
+# 用途：域名规则没命中时（客户端直连 IP、出现新域名）的兜底，保证 Anthropic 自有网段走 AI 出口。
+# 只收录登记在 Anthropic, PBC 名下的网段；不收录 34.8.0.0/16 这类云厂商通用网段，
+# 否则会把大量无关流量拉进 AI 出口。
+#
+# 依据：ARIN RDAP 2026-11-21 查询；claude.ai、api.anthropic.com 等解析到 160.79.104.10 / 2607:6bc0::10。
+payload:
+  - '160.79.104.0/21'                    # AP-2440，Anthropic, PBC
+  - '2607:6bc0::/32'                     # ANTHROPIC-V6，Anthropic, PBC

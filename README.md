@@ -320,9 +320,18 @@ DRY_RUN=1 /opt/clash-config-gen/deploy/oracle-1/auto-update-mihomo.sh
 | `telegramip.mrs` | `Telegram` |
 | `ads.mrs` | `AdBlock` |
 | `game-download.yaml`（本项目维护） | `DIRECT` |
+| `ai-extra.yaml`、`ai-extra-ip.yaml`（本项目维护） | `AI Suite` |
 | `gfw.mrs`、`proxy.mrs`、`tld-proxy.mrs` | `Proxy` |
 
 Google 使用独立的 `Google` 策略组；YouTube 规则优先匹配 `Youtube` 策略组，不会被通用 Google 规则覆盖。
+
+### AI 补充名单（内置 `ai-extra`、`ai-extra-ip`）
+
+DustinWin 的 `ai.mrs` 只覆盖 AI 服务本身的域名。Claude 网页版和客户端还会连接支付（Stripe）、反欺诈（Sift）、监控（Datadog、Sentry）、功能开关（Statsig）、推送和身份核验（Persona）等第三方服务，这些请求如果走了别的出口，账号上就会同时出现两个地区的 IP。`ai-extra` 把这些域名统一指向 `AI Suite`，排在 `ai` 之后、`ads`、`google`、`proxy` 等大名单之前，所以原先被广告名单拦截的 Sift、Statsig 也会改走 AI 出口。Sentry、Datadog 这类通用监控平台只收录 Anthropic 用到的精确主机，其他网站的上报不受影响。
+
+`ai-extra-ip` 是 Anthropic 自有网段（`160.79.104.0/21`、`2607:6bc0::/32`，ARIN 登记在 Anthropic, PBC 名下）的兜底，带 `no-resolve`，放在 IP 规则区域。云厂商的通用网段（例如网上流传的 `34.8.0.0/16`，属于 Google Cloud）不收录，否则会把大量无关流量拉进 AI 出口。
+
+名单文件在 [`src/builtin_rulesets/`](src/builtin_rulesets/)，每条注明依据，随镜像发布，客户端每天检查一次更新。
 
 ### 游戏下载直连（内置 `game-download`）
 

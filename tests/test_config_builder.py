@@ -1033,6 +1033,74 @@ def _domain_payload_matches(payload: list[str], host: str) -> bool:
     return False
 
 
+class AiExtraRulesetTest(unittest.TestCase):
+    """内置 ai-extra / ai-extra-ip：Claude 用到的第三方域名与 Anthropic 自有网段走 AI Suite。"""
+
+    @classmethod
+    def setUpClass(cls):
+        from config_builder import BUILTIN_RULESET_DIR
+
+        def load(key):
+            path = BUILTIN_RULESET_DIR / DUSTINWIN_PROVIDERS_MAP[key]["file"]
+            return yaml.safe_load(path.read_text(encoding="utf-8"))["payload"]
+
+        cls.domains = load("ai-extra")
+        cls.cidrs = load("ai-extra-ip")
+
+    @staticmethod
+    def matches(entry, host):
+        if entry.startswith("+."):
+            return host == entry[2:] or host.endswith("." + entry[2:])
+        return host == entry
+
+    def test_payloads_are_clean(self):
+        import ipaddress
+
+        self.assertEqual(len(self.domains), len(set(self.domains)))
+        for entry in self.domains:
+            self.assertEqual(entry, entry.strip().lower(), entry)
+            self.assertNotIn(",", entry)
+            self.assertFalse(entry.startswith("*."), entry)
+        for cidr in self.cidrs:
+            ipaddress.ip_network(cidr)  # 必须是合法网段
+        # 云厂商通用网段不能进 AI 出口。
+        self.assertNotIn("34.8.0.0/16", self.cidrs)
+
+    def test_covers_claude_third_party_hosts(self):
+        for host in ("r.stripe.com", "js.stripe.com", "m.stripe.network", "siftscience.com", "cdn.sift.com",
+                     "hexagon-analytics.com", "us5.datadoghq.com", "browser-intake-us5-datadoghq.com", "us.sentry.io",
+                     "statsigapi.net", "featureassets.org", "fcmtoken.googleapis.com", "withpersona.com"):
+            self.assertTrue(any(self.matches(entry, host) for entry in self.domains), host)
+        # 通用监控平台只放 Anthropic 用到的精确主机，其他网站的上报不受影响。
+        for host in ("o123.ingest.sentry.io", "sentry.io", "datadoghq.com", "app.datadoghq.com", "googleapis.com"):
+            self.assertFalse(any(self.matches(entry, host) for entry in self.domains), host)
+
+    def test_anthropic_ranges_are_covered(self):
+        import ipaddress
+
+        networks = [ipaddress.ip_network(cidr) for cidr in self.cidrs]
+        for address in ("160.79.104.10", "2607:6bc0::10"):
+            self.assertTrue(any(ipaddress.ip_address(address) in net for net in networks), address)
+
+    def test_rules_are_placed_and_targeted(self):
+        rules, providers = build_rules("dustinwin规则", [], {})
+        names = [rule.split(",")[1] for rule in rules if rule.startswith("RULE-SET,")]
+        domain_index = names.index("ai-extra")
+        self.assertIn("RULE-SET,ai-extra,AI Suite", rules)
+        self.assertGreater(domain_index, names.index("ai"))
+        # 必须早于会抢走这些域名的名单：ads 拦截 Sift / Statsig，google、proxy 会把其余带到别的出口。
+        for broad in ("ads", "googlefcm", "google-cn", "google", "paypal", "tld-proxy", "gfw", "proxy", "cn"):
+            self.assertLess(domain_index, names.index(broad), broad)
+        # IP 兜底带 no-resolve，放在 IP 段区域、cnip 之前。
+        self.assertIn("RULE-SET,ai-extra-ip,AI Suite,no-resolve", rules)
+        ip_index = names.index("ai-extra-ip")
+        self.assertGreater(ip_index, names.index("privateip"))
+        self.assertLess(ip_index, names.index("cnip"))
+        self.assertEqual(("domain", "yaml"), (providers["ai-extra"]["behavior"], providers["ai-extra"]["format"]))
+        self.assertEqual(("ipcidr", "yaml"), (providers["ai-extra-ip"]["behavior"], providers["ai-extra-ip"]["format"]))
+        self.assertEqual("./ruleset/dustinwin/ai-extra-ip.yaml", providers["ai-extra-ip"]["path"])
+
+
 class GameDownloadRulesetTest(unittest.TestCase):
     """内置 game-download：游戏下载 CDN 一律直连。"""
 

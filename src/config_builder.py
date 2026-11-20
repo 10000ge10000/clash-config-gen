@@ -168,9 +168,11 @@ BUNDLED_RULESET_BASE_URL = "https://raw.githubusercontent.com/10000ge10000/clash
 BUNDLED_RULESET_INTERVAL = 86400
 
 
-def _bundled_provider(file_name: str, behavior: str, target: str) -> dict[str, Any]:
+def _bundled_provider(file_name: str, behavior: str, target: str, no_resolve: bool = False) -> dict[str, Any]:
     """本项目维护的规则集：文件随仓库发布，不从上游下载。"""
+    extra = {"no_resolve": True} if no_resolve else {}
     return {
+        **extra,
         "file": file_name,
         "behavior": behavior,
         "format": "yaml",
@@ -194,6 +196,8 @@ def _bundled_provider(file_name: str, behavior: str, target: str) -> dict[str, A
 DUSTINWIN_PROVIDERS_MAP = {
     "private": {"file": "private.mrs", "behavior": "domain", "format": "mrs", "target": "DIRECT"},
     "ai": {"file": "ai.mrs", "behavior": "domain", "format": "mrs", "target": "AI Suite"},
+    # Claude 用到的支付、反欺诈、监控等第三方域名：必须早于 ads（会拦掉 Sift、Statsig）和 google、proxy。
+    "ai-extra": _bundled_provider("ai-extra.yaml", "domain", "AI Suite"),
     "youtube": {"file": "youtube.mrs", "behavior": "domain", "format": "mrs", "target": "Youtube"},
     "ads": {"file": "ads.mrs", "behavior": "domain", "format": "mrs", "target": "AdBlock"},
     "applications": {"file": "applications.list", "behavior": "classical", "format": "text", "target": "DIRECT"},
@@ -233,6 +237,8 @@ DUSTINWIN_PROVIDERS_MAP = {
     "proxy": {"file": "proxy.mrs", "behavior": "domain", "format": "mrs", "target": "Proxy"},
     "cn": {"file": "cn.mrs", "behavior": "domain", "format": "mrs", "target": "Domestic"},
     "privateip": {"file": "privateip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "DIRECT", "no_resolve": True},
+    # Anthropic 自有网段兜底；与域名名单分开，IP 规则带 no-resolve，不会让每个连接都去解析 DNS。
+    "ai-extra-ip": _bundled_provider("ai-extra-ip.yaml", "ipcidr", "AI Suite", no_resolve=True),
     "telegramip": {"file": "telegramip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Telegram", "no_resolve": True},
     "netflixip": {"file": "netflixip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Netflix", "no_resolve": True},
     "mediaip": {"file": "mediaip.mrs", "behavior": "ipcidr", "format": "mrs", "target": "Global TV", "no_resolve": True},
@@ -247,7 +253,7 @@ DUSTINWIN_RULE_LABELS = {
     "apple-cn": "苹果国内域名", "google": "Google 服务", "google-cn": "Google 国内域名", "games-cn": "游戏国内域名",
     "games": "游戏平台", "netflix": "Netflix", "disney": "Disney+", "max": "HBO Max", "primevideo": "Prime Video",
     "appletv": "Apple TV", "youtube": "YouTube", "tiktok": "TikTok", "bilibili": "哔哩哔哩", "spotify": "Spotify",
-    "media": "其他流媒体", "ai": "AI 服务", "networktest": "测速站点", "tld-proxy": "境外顶级域名",
+    "media": "其他流媒体", "ai": "AI 服务", "ai-extra": "AI 补充（支付、风控、监控）", "ai-extra-ip": "AI 补充 IP 段", "networktest": "测速站点", "tld-proxy": "境外顶级域名",
     "gfw": "GFW 名单", "proxy": "代理域名", "cn": "国内域名", "privateip": "私有网络 IP", "cnip": "国内 IP",
     "telegramip": "Telegram IP", "netflixip": "Netflix IP", "mediaip": "流媒体 IP",
     "googlefcm": "Google 推送", "telegram": "Telegram", "discord": "Discord", "paypal": "PayPal",

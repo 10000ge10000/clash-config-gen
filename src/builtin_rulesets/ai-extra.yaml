@@ -1,0 +1,34 @@
+# AI 补充名单（内置规则集 ai-extra，behavior: domain，默认目标 AI Suite）
+#
+# 用途：DustinWin ai.mrs 之外，Claude 网页版 / 客户端还会连接的支付、反欺诈、监控、推送、KYC 等第三方域名。
+# 让这些请求和 Claude 主域名走同一个出口，避免账号上同时出现两个地区的 IP。
+#
+# 维护规则：
+# - 排在 ai 之后、ads / google / proxy 等大名单之前，所以这里的条目会覆盖广告拦截（例如 Sift、Statsig）。
+# - 只写服务专用域名；sentry.io、datadoghq.com 这类通用监控平台只写 Anthropic 用到的精确主机，
+#   其他网站的 Sentry / Datadog 上报仍按原规则处理。
+# - 每条注明依据；改动后文件随镜像发布，客户端按 interval（86400 秒）拉取新版本。
+#
+# 依据缩写：
+#   [X]      https://x.com/qwerty__cs/status/2123266200885235842 （2026-11-19 的 Claude 分流清单）
+#   [NC]     https://ip.net.coffee/claude/site.html （Net.Coffee Claude Code 域名分流规则）
+#   [DNS]    2026-11-21 在部署服务器上解析可用
+payload:
+  # ---------- 支付（claude.ai 订阅付款走 Stripe）----------
+  - '+.stripe.com'                       # Stripe 支付与 r.stripe.com 风控上报 [X]
+  - '+.stripe.network'                   # Stripe 支付页 m.stripe.network [DNS]
+  # ---------- 反欺诈（原先被广告名单拦截，加载失败本身也可能被判为异常）----------
+  - '+.siftscience.com'                  # Sift 反欺诈 [X]
+  - '+.sift.com'                         # Sift 脚本 cdn.sift.com [NC]
+  - '+.hexagon-analytics.com'            # Sift 数据上报 [NC]
+  # ---------- 监控（只写精确主机）----------
+  - 'us5.datadoghq.com'                  # Datadog US5 站点 [X]
+  - 'browser-intake-us5-datadoghq.com'   # Datadog RUM 前端上报，不是 datadoghq.com 的子域 [NC]
+  - 'us.sentry.io'                       # Sentry US 区域 [X]
+  # ---------- 功能开关（Claude Code 使用 Statsig）----------
+  - '+.statsigapi.net'                   # Statsig API [NC]
+  - '+.featureassets.org'                # Statsig 备用域名 [DNS]
+  - '+.prodregistryv2.org'               # Statsig 备用域名 [DNS]
+  # ---------- 推送与身份核验 ----------
+  - 'fcmtoken.googleapis.com'            # Claude 客户端推送 token 注册 [X]
+  - '+.withpersona.com'                  # Persona 证件 / 自拍 KYC [NC]
