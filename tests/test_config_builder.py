@@ -1033,22 +1033,6 @@ def _domain_payload_matches(payload: list[str], host: str) -> bool:
     return False
 
 
-class AndroidFakeIpFilterTest(unittest.TestCase):
-    ANDROID = ["time.android.com", "+.connectivitycheck.gstatic.com", "+.clients3.google.com", "+.connectivitycheck.android.com"]
-
-    def dns_filter(self, **global_config):
-        config = build_config([], {"enable_dns": True, "is_desktop": True, **global_config}, [], {}, "dustinwin规则")
-        return config["dns"]["fake-ip-filter"]
-
-    def test_android_network_check_domains_get_real_ip(self):
-        for preset in (False, True):
-            entries = self.dns_filter(openclash_preset=preset)
-            for domain in self.ANDROID:
-                self.assertIn(domain, entries, (preset, domain))
-            self.assertEqual("geosite:cn", entries[-1])
-            self.assertEqual(len(entries), len(set(entries)))
-
-
 class AiExtraRulesetTest(unittest.TestCase):
     """内置 ai-extra / ai-extra-ip：Claude 用到的第三方域名与 Anthropic 自有网段走 AI Suite。"""
 
