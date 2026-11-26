@@ -95,6 +95,15 @@ def is_no_base_rule_type(value: object) -> bool:
 def _base64_utf8(value: str) -> str:
     return "base64:" + base64.b64encode(value.encode("utf-8")).decode("ascii")
 
+# Android / Google TV 的联网检测与 NTP 对时：拿到 Fake-IP 时一旦代理暂不可用或 UDP 不通，
+# 设备会判定“无网络”，时间不同步又会让 TLS 全部失败。这几个域名返回真实 IP。
+ANDROID_NETWORK_CHECK_DOMAINS = [
+    "time.android.com",
+    "+.connectivitycheck.gstatic.com",
+    "+.clients3.google.com",
+    "+.connectivitycheck.android.com",
+]
+
 FAKE_IP_FILTER_LIST = [
     "+.services.googleapis.cn",
     "+.googleapis.cn",
@@ -108,6 +117,7 @@ FAKE_IP_FILTER_LIST = [
     "*.home.arpa",
     "*.direct",
     "time.windows.com",
+    *ANDROID_NETWORK_CHECK_DOMAINS,
     "geosite:cn",
 ]
 
@@ -122,7 +132,7 @@ SOFT_ROUTER_FAKE_IP_FILTER_LIST = [
     "+.srv.nintendo.net", "xbox.*.microsoft.com", "+.xboxlive.com", "+.steamcontent.com", "+.music.163.com",
     "+.126.net", "+.qqmusic.qq.com", "+.music.migu.cn", "+.mcdn.bilivideo.cn", "+.bilivideo.cn",
     "dlg.io.mi.com", "ot.io.mi.com", "+.mi.com", "+.xiaomi.com", "+.push.xiaomi.com", "+.cmbchina.com",
-    "+.unionpay.com", "geosite:cn",
+    "+.unionpay.com", *ANDROID_NETWORK_CHECK_DOMAINS, "geosite:cn",
 ]
 
 SNIFFER_FORCE_DOMAIN = [
