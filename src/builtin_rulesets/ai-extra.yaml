@@ -5,6 +5,8 @@
 #
 # 维护规则：
 # - 排在 ai 之后、ads / google / proxy 等大名单之前，所以这里的条目会覆盖广告拦截（例如 Sift、Statsig）。
+# - 不收录 challenges.cloudflare.com：它是所有 Cloudflare 网站共用的人机验证，验证结果和出口 IP 绑定，
+#   固定到 AI 出口会让走 Proxy 的网站（例如 linux.do）验证反复失败。
 # - 只写服务专用域名；sentry.io、datadoghq.com 这类通用监控平台只写 Anthropic 用到的精确主机，
 #   其他网站的 Sentry / Datadog 上报仍按原规则处理。
 # - 每条注明依据；改动后文件随镜像发布，客户端按 interval（86400 秒）拉取新版本。
@@ -31,8 +33,6 @@ payload:
   - '+.statsig.com'                      # Statsig 主域名 api.statsig.com；SDK 先连它，失败才用下面的备用域名 [实测]
   - '+.featureassets.org'                # Statsig 备用域名 [DNS]
   - '+.prodregistryv2.org'               # Statsig 备用域名 [DNS]
-  # ---------- 人机验证 ----------
-  - 'challenges.cloudflare.com'          # Cloudflare Turnstile，claude.ai / chatgpt.com 登录风控 [实测]
   # ---------- ChatGPT ----------
   - 'o33249.ingest.us.sentry.io'         # 推测为 OpenAI 的 Sentry 组织，未找到权威来源 [实测：原被 ads 拦截]
   - 'o33249.ingest.sentry.io'            # 同上，非 US 区域入口
