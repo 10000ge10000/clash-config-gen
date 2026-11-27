@@ -13,6 +13,7 @@
 #   [X]      https://x.com/qwerty__cs/status/2123266200885235842 （2026-11-19 的 Claude 分流清单）
 #   [NC]     https://ip.net.coffee/claude/site.html （Net.Coffee Claude Code 域名分流规则）
 #   [DNS]    2026-11-21 在部署服务器上解析可用
+#   [实测]   2026-11-27 全网 13 台路由器探测
 payload:
   # ---------- 支付（claude.ai 订阅付款走 Stripe）----------
   - '+.stripe.com'                       # Stripe 支付与 r.stripe.com 风控上报 [X]
@@ -27,8 +28,15 @@ payload:
   - 'us.sentry.io'                       # Sentry US 区域 [X]
   # ---------- 功能开关（Claude Code 使用 Statsig）----------
   - '+.statsigapi.net'                   # Statsig API [NC]
+  - '+.statsig.com'                      # Statsig 主域名 api.statsig.com；SDK 先连它，失败才用下面的备用域名 [实测]
   - '+.featureassets.org'                # Statsig 备用域名 [DNS]
   - '+.prodregistryv2.org'               # Statsig 备用域名 [DNS]
+  # ---------- 人机验证 ----------
+  - 'challenges.cloudflare.com'          # Cloudflare Turnstile，claude.ai / chatgpt.com 登录风控 [实测]
+  # ---------- ChatGPT ----------
+  - 'o33249.ingest.us.sentry.io'         # 推测为 OpenAI 的 Sentry 组织，未找到权威来源 [实测：原被 ads 拦截]
+  - 'o33249.ingest.sentry.io'            # 同上，非 US 区域入口
+  - '+.livekit.cloud'                    # ChatGPT 语音（LiveKit），实际子域名未抓包确认 [实测：根域名原落入 Others]
   # ---------- 推送与身份核验 ----------
   - 'fcmtoken.googleapis.com'            # Claude 客户端推送 token 注册 [X]
   - '+.withpersona.com'                  # Persona 证件 / 自拍 KYC [NC]

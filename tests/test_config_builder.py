@@ -1069,10 +1069,13 @@ class AiExtraRulesetTest(unittest.TestCase):
     def test_covers_claude_third_party_hosts(self):
         for host in ("r.stripe.com", "js.stripe.com", "m.stripe.network", "siftscience.com", "cdn.sift.com",
                      "hexagon-analytics.com", "us5.datadoghq.com", "browser-intake-us5-datadoghq.com", "us.sentry.io",
-                     "statsigapi.net", "featureassets.org", "fcmtoken.googleapis.com", "withpersona.com"):
+                     "statsigapi.net", "api.statsig.com", "featureassets.org", "fcmtoken.googleapis.com",
+                     "withpersona.com", "challenges.cloudflare.com", "o33249.ingest.us.sentry.io",
+                     "o33249.ingest.sentry.io", "chatgpt.livekit.cloud"):
             self.assertTrue(any(self.matches(entry, host) for entry in self.domains), host)
         # 通用监控平台只放 Anthropic 用到的精确主机，其他网站的上报不受影响。
-        for host in ("o123.ingest.sentry.io", "sentry.io", "datadoghq.com", "app.datadoghq.com", "googleapis.com"):
+        for host in ("o123.ingest.sentry.io", "sentry.io", "datadoghq.com", "app.datadoghq.com", "googleapis.com",
+                     "cloudflare.com", "www.cloudflare.com"):
             self.assertFalse(any(self.matches(entry, host) for entry in self.domains), host)
 
     def test_anthropic_ranges_are_covered(self):
